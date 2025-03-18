@@ -1,10 +1,10 @@
 # Tech Tree Demo
 
-This project demonstrates a simple adaptive learning quiz using the Gemini API and LangGraph. The `demo.py` script implements a question-and-answer system that adjusts the difficulty of questions based on the user's performance.
+This project demonstrates a simple adaptive learning quiz using the Gemini API, Tavily API for internet search, and LangGraph. The `demo.py` script implements a question-and-answer system that adjusts the difficulty of questions based on the user's performance.
 
 ## What it does
 
-The `demo.py` script runs an interactive quiz in the terminal. It starts by asking the user to choose a topic. Then, it asks questions of increasing difficulty (easy, medium, hard).
+The `demo.py` script runs an interactive quiz in the terminal. It starts by asking the user to choose a topic. Then, it searches the internet for information about the topic using the Tavily API, retrieving content from Wikipedia and Google. Using this information, it asks questions of increasing difficulty (easy, medium, hard).
 
 - If the user answers a question correctly, the difficulty increases.
 - If the user answers incorrectly, the difficulty remains the same.
@@ -12,12 +12,13 @@ The `demo.py` script runs an interactive quiz in the terminal. It starts by aski
 
 At the end of the quiz, the script provides a final assessment of the user's knowledge level based on a weighted score.
 
-The topic is *not* subject to an internet search, so will need to be know to the model (Gemini 2.0 Pro).
+The questions are generated based on the latest information available online, making them accurate and up-to-date.
 
 ## Prerequisites
 
 - Python 3.12 or higher
 - A Google API key with access to the Gemini API
+- A Tavily API key for internet search functionality (get one at [tavily.com](https://tavily.com))
 
 ## Setup
 
@@ -86,10 +87,11 @@ The topic is *not* subject to an internet search, so will need to be know to the
 
 4.  **Create a `.env` file:**
 
-    Create a file named `.env` in the root directory of the project. Add the following line to the file, replacing `YOUR_API_KEY` with your actual Google API key:
+    Create a file named `.env` in the root directory of the project. Add the following lines to the file, replacing `YOUR_XXX_API_KEY` with your actual API keys:
 
     ```
-    GEMINI_API_KEY=YOUR_API_KEY
+    GEMINI_API_KEY=YOUR_GEMINI_API_KEY
+    TAVILY_API_KEY=YOUR_TAVILY_API_KEY
     ```
 
     Recommended but not required is free [LangSmith](https://www.langchain.com/langsmith) tracing. To use it, add the lines

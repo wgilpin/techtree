@@ -11,6 +11,7 @@ import google.generativeai as genai
 from google.api_core.exceptions import ResourceExhausted
 from dotenv import load_dotenv
 from langgraph.graph import END, StateGraph
+from tavily import TavilyClient
 
 # Load environment variables
 load_dotenv()
@@ -20,6 +21,9 @@ genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 model = genai.GenerativeModel(
     "gemini-2.0-pro-exp-02-05"
 )  # User specified gemini 2 flash, but using gemini-pro for now
+
+# Configure Tavily API
+tavily = TavilyClient(api_key=os.environ.get("TAVILY_API_KEY"))
 
 
 def call_with_retry(func, *args, max_retries=5, initial_delay=1, **kwargs):
@@ -55,6 +59,9 @@ class AgentState(TypedDict):
     current_question_difficulty: int  # Store difficulty of current question
     current_target_difficulty: int  # Target difficulty for the next question
     consecutive_wrong: int  # Track consecutive wrong answers
+    wikipedia_content: str  # Content from Wikipedia search
+    google_results: List[str]  # Content from Google search results
+    search_completed: bool  # Flag to indicate if search has been completed
 
 
 # --- Define Nodes (Functions) ---
@@ -70,6 +77,7 @@ def intro(_: AgentState) -> Dict:
     print("If you get a question right, you'll move to a harder question.")
     print("If you get a question wrong, you'll get another question at the same level.")
     print("If you get 2 questions wrong in a row, the quiz will end.")
+    print("For each topic, we'll search the internet to gather the latest information.")
 
     topic = input("What topic would you like to explore? ")
 
@@ -85,11 +93,62 @@ def intro(_: AgentState) -> Dict:
         "current_target_difficulty": EASY,  # Start with easy questions
         "consecutive_wrong": 0,  # Track consecutive wrong answers
         "continue_flag": True,  # Initialize continue_flag
+        "wikipedia_content": "",  # Initialize Wikipedia content
+        "google_results": [],  # Initialize Google results
+        "search_completed": False,  # Initialize search completion flag
     }
 
 
+def perform_internet_search(state: AgentState) -> Dict:
+    """Performs internet search using Tavily API and stores results in state."""
+    topic = state["topic"]
+    print(f"\nSearching the internet for information about '{topic}'...")
+
+    try:
+        # Search Wikipedia
+        print("Searching Wikipedia...")
+        wiki_search = tavily.search(
+            query=f"{topic} wikipedia",
+            search_depth="advanced",
+            include_domains=["wikipedia.org"],
+            max_results=1,
+        )
+        wikipedia_content = (
+            wiki_search.get("results", [{}])[0].get("content", "")
+            if wiki_search.get("results")
+            else ""
+        )
+
+        # Search Google (excluding Wikipedia)
+        print("Searching Google...")
+        google_search = tavily.search(
+            query=topic,
+            search_depth="advanced",
+            exclude_domains=["wikipedia.org"],
+            max_results=4,
+        )
+        google_results = [
+            result.get("content", "") for result in google_search.get("results", [])
+        ]
+
+        print("Search completed successfully.")
+        return {
+            "wikipedia_content": wikipedia_content,
+            "google_results": google_results,
+            "search_completed": True,
+        }
+    except Exception as e:
+        print(f"Error during internet search: {e}")
+        # Return empty results but mark as completed to continue the flow
+        return {
+            "wikipedia_content": f"Error searching for {topic}: {str(e)}",
+            "google_results": [],
+            "search_completed": True,
+        }
+
+
 def generate_question(state: AgentState) -> Dict:
-    """Generates a question using the Gemini API."""
+    """Generates a question using the Gemini API and search results."""
     # Get the target difficulty level
     target_difficulty = state["current_target_difficulty"]
     difficulty_name = (
@@ -97,6 +156,16 @@ def generate_question(state: AgentState) -> Dict:
         if target_difficulty == EASY
         else "medium" if target_difficulty == MEDIUM else "hard"
     )
+
+    # Prepare search content for the prompt
+    wikipedia_content = state["wikipedia_content"]
+    google_results = state["google_results"]
+
+    # Combine search results into a single context
+    search_context = f"Wikipedia information:\n{wikipedia_content}\n\n"
+    search_context += "Additional information from other sources:\n"
+    for i, result in enumerate(google_results, 1):
+        search_context += f"Source {i}:\n{result}\n\n"
 
     # Construct the prompt for Gemini
     prompt = f"""
@@ -106,6 +175,10 @@ def generate_question(state: AgentState) -> Dict:
     Questions should only require short answers, not detailed responses.
     
     The question should be at {difficulty_name} difficulty level ({target_difficulty}).
+    
+    Use the following information from internet searches to create an accurate and up-to-date question:
+    
+    {search_context}
     
     Format your response as follows:
     Difficulty: {target_difficulty}
@@ -163,6 +236,16 @@ def evaluate_answer(state: AgentState) -> Dict:
     """Gets user input for the answer and evaluates it using the Gemini API."""
     answer = input("Your answer: ")
 
+    # Prepare search content for the prompt
+    wikipedia_content = state["wikipedia_content"]
+    google_results = state["google_results"]
+
+    # Combine search results into a single context
+    search_context = f"Wikipedia information:\n{wikipedia_content}\n\n"
+    search_context += "Additional information from other sources:\n"
+    for i, result in enumerate(google_results, 1):
+        search_context += f"Source {i}:\n{result}\n\n"
+
     # Construct the prompt for Gemini to evaluate the answer
     prompt = f"""
     You are an expert tutor in {state['topic']}.
@@ -174,14 +257,18 @@ def evaluate_answer(state: AgentState) -> Dict:
 
     Answer: {answer}
 
+    Use the following information from internet searches to evaluate the answer accurately:
+    
+    {search_context}
+
     Evaluate the answer for correctness and completeness, allowing that only short answers were requested.
     Provide feedback on the answer.
     
-    Important: If the student responds with "I don't know" or similar, assume the user failed to 
+    Important: If the student responds with "I don't know" or similar, assume the user failed to
     demonstrate understanding of the topic in response to the question, and classify the answer as incorrect.
     
     Classify the answer as one of: correct=1, partially correct=0.5, or incorrect=0.
-    Make sure to include the classification explicitly as a number in your response. 
+    Make sure to include the classification explicitly as a number in your response.
     Do not include any other text, only the number.
     """
 
@@ -284,13 +371,15 @@ workflow = StateGraph(AgentState)
 
 # Add nodes
 workflow.add_node("intro", intro)
+workflow.add_node("perform_internet_search", perform_internet_search)
 workflow.add_node("generate_question", generate_question)
 workflow.add_node("present_question", present_question)
 workflow.add_node("evaluate_answer", evaluate_answer)
 workflow.add_node("end", end)
 
 # Add edges
-workflow.add_edge("intro", "generate_question")
+workflow.add_edge("intro", "perform_internet_search")
+workflow.add_edge("perform_internet_search", "generate_question")
 workflow.add_edge("generate_question", "present_question")
 workflow.add_edge("present_question", "evaluate_answer")
 workflow.add_conditional_edges(
