@@ -11,6 +11,20 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Streamlit: Run",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "streamlit",
+            "args": [
+                "run",
+                "${workspaceFolder}/streamlit_app/app.py"
+            ],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "STREAMLIT_THEME_BASE": "light"
+            },
         }
     ]
 }

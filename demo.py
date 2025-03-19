@@ -62,7 +62,9 @@ class AgentState(TypedDict):
     wikipedia_content: str  # Content from Wikipedia search
     google_results: List[str]  # Content from Google search results
     search_completed: bool  # Flag to indicate if search has been completed
-    consecutive_hard_correct_or_partial: int # Track consecutive correct/partially correct at HARD
+    consecutive_hard_correct_or_partial: (
+        int  # Track consecutive correct/partially correct at HARD
+    )
 
 
 # --- Define Nodes (Functions) ---
@@ -97,7 +99,7 @@ def intro(_: AgentState) -> Dict:
         "wikipedia_content": "",  # Initialize Wikipedia content
         "google_results": [],  # Initialize Google results
         "search_completed": False,  # Initialize search completion flag
-        "consecutive_hard_correct_or_partial": 0, # Initialize the new counter
+        "consecutive_hard_correct_or_partial": 0,  # Initialize the new counter
     }
 
 
@@ -286,7 +288,7 @@ def evaluate_answer(state: AgentState) -> Dict:
     evaluation = response.text
 
     # Extract the classification, the bit before the ':'
-    parts = evaluation.split(':')
+    parts = evaluation.split(":")
     classification: float = float(parts[0])
 
     # Provide feedback if the answer is incorrect or partially correct
@@ -298,7 +300,9 @@ def evaluate_answer(state: AgentState) -> Dict:
     # Update consecutive wrong counter and target difficulty
     current_difficulty = state["current_target_difficulty"]
     consecutive_wrong = state["consecutive_wrong"]
-    consecutive_hard_correct_or_partial = state.get("consecutive_hard_correct_or_partial", 0)
+    consecutive_hard_correct_or_partial = state.get(
+        "consecutive_hard_correct_or_partial", 0
+    )
 
     if classification == 0.0:  # Incorrect
         consecutive_wrong += 1
@@ -318,7 +322,7 @@ def evaluate_answer(state: AgentState) -> Dict:
             # Increment if at HARD and correct/partially correct
             if classification >= 0.5:
                 consecutive_hard_correct_or_partial += 1
-    
+
     # Reset the counter if the difficulty is not HARD
     if current_difficulty != HARD:
         consecutive_hard_correct_or_partial = 0
@@ -386,7 +390,7 @@ def should_continue(state: AgentState) -> str:
     # End if the user has gotten 2 consecutive wrong answers
     if state["consecutive_wrong"] >= 2:
         return END
-    
+
     # End if user has 3 consecutive correct or partially correct answers at HARD difficulty
     if state.get("consecutive_hard_correct_or_partial", 0) >= 3:
         return END

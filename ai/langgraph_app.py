@@ -5,7 +5,7 @@ import re
 import time
 import random
 from collections import Counter
-from typing import Dict, List, TypedDict, Optional, Any, Tuple
+from typing import Dict, List, TypedDict, Optional
 
 import google.generativeai as genai
 from google.api_core.exceptions import ResourceExhausted
@@ -57,7 +57,9 @@ class AgentState(TypedDict):
     wikipedia_content: str  # Content from Wikipedia search
     google_results: List[str]  # Content from Google search results
     search_completed: bool  # Flag to indicate if search has been completed
-    consecutive_hard_correct_or_partial: int  # Track consecutive correct/partially correct at HARD
+    consecutive_hard_correct_or_partial: (
+        int  # Track consecutive correct/partially correct at HARD
+    )
 
 
 # --- Define Constants ---
@@ -94,13 +96,15 @@ class TechTreeAI:
         workflow.add_edge("perform_internet_search", "generate_question")
         workflow.add_edge("generate_question", "evaluate_answer")
         workflow.add_conditional_edges(
-            "evaluate_answer", self._should_continue, {"continue": "generate_question", END: "end"}
+            "evaluate_answer",
+            self._should_continue,
+            {"continue": "generate_question", END: "end"},
         )
 
         workflow.set_entry_point("initialize")
         return workflow
 
-    def _initialize(self, state: Optional[AgentState] = None, topic: str = "") -> Dict:
+    def _initialize(self, _: Optional[AgentState] = None, topic: str = "") -> Dict:
         """Initialize the agent state with the given topic."""
         if not topic:
             raise ValueError("Topic is required")
@@ -126,7 +130,9 @@ class TechTreeAI:
     def _perform_internet_search(self, state: AgentState) -> Dict:
         """Performs internet search using Tavily API and stores results in state."""
         topic = state["topic"]
-        self.search_status = f"Searching the internet for information about '{topic}'..."
+        self.search_status = (
+            f"Searching the internet for information about '{topic}'..."
+        )
 
         try:
             # Search Wikipedia
@@ -161,7 +167,7 @@ class TechTreeAI:
                 "google_results": google_results,
                 "search_completed": True,
             }
-        except Exception as e:
+        except Exception as e: #pylint: disable=broad-except
             self.search_status = f"Error during internet search: {e}"
             # Return empty results but mark as completed to continue the flow
             return {
@@ -201,6 +207,8 @@ class TechTreeAI:
         Ask a question on the topic, avoiding questions already asked.
         Avoid questions if the answer is the name of the topic.
         Questions should only require short answers, not detailed responses.
+        Never mention the sources, or the provided information,  as the user has no 
+        access to the source documents and does not know they exist.
         
         The question should be at {difficulty_name} difficulty level ({target_difficulty}).
         
@@ -279,11 +287,13 @@ class TechTreeAI:
         {search_context}
 
         Evaluate the answer for correctness and completeness, allowing that only short answers were requested.
-        Provide feedback on the answer.
+        Provide feedback on the answer, but never mention the sources, or provided information, 
+        as the user has no access to the source documents or other information and does not know they
+        exist.
         
-        Important: If the student responds with "I don't know" or similar, assume the user failed to
-        demonstrate understanding of the topic in response to the question, and classify the answer as incorrect.
-        
+        Important: If the student responds with "I don't know" or similar, the answer is incorrect and
+        this does not need explaining: classify the answer as incorrect return the correct answer as feedback.
+                
         Classify the answer as one of: correct=1, partially correct=0.5, or incorrect=0.
         Make sure to include the classification explicitly as a number in your response.
         Respond with the classification: the feedback. For example:
@@ -296,14 +306,16 @@ class TechTreeAI:
         evaluation = response.text
 
         # Extract the classification, the bit before the ':'
-        parts = evaluation.split(':')
+        parts = evaluation.split(":")
         classification: float = float(parts[0])
         feedback = parts[1] if len(parts) > 1 else ""
 
         # Update consecutive wrong counter and target difficulty
         current_difficulty = state["current_target_difficulty"]
         consecutive_wrong = state["consecutive_wrong"]
-        consecutive_hard_correct_or_partial = state.get("consecutive_hard_correct_or_partial", 0)
+        consecutive_hard_correct_or_partial = state.get(
+            "consecutive_hard_correct_or_partial", 0
+        )
 
         if classification == 0.0:  # Incorrect
             consecutive_wrong += 1
@@ -323,7 +335,7 @@ class TechTreeAI:
                 # Increment if at HARD and correct/partially correct
                 if classification >= 0.5:
                     consecutive_hard_correct_or_partial += 1
-        
+
         # Reset the counter if the difficulty is not HARD
         if current_difficulty != HARD:
             consecutive_hard_correct_or_partial = 0
@@ -389,7 +401,7 @@ class TechTreeAI:
         # End if the user has gotten 2 consecutive wrong answers
         if state["consecutive_wrong"] >= 2:
             return END
-        
+
         # End if user has 3 consecutive correct or partially correct answers at HARD difficulty
         if state.get("consecutive_hard_correct_or_partial", 0) >= 3:
             return END
@@ -399,7 +411,6 @@ class TechTreeAI:
 
     def initialize(self, topic: str) -> Dict:
         """Initialize the agent with a topic."""
-        inputs = {"topic": topic}
         self.state = self._initialize(topic=topic)
         return {"status": "initialized", "topic": topic}
 
@@ -407,7 +418,7 @@ class TechTreeAI:
         """Perform internet search for the topic."""
         if not self.state:
             raise ValueError("Agent not initialized")
-        
+
         result = self._perform_internet_search(self.state)
         self.state.update(result)
         return {"status": "search_completed", "search_status": self.search_status}
@@ -416,46 +427,50 @@ class TechTreeAI:
         """Generate a question based on the current state."""
         if not self.state:
             raise ValueError("Agent not initialized")
-        
+
         result = self._generate_question(self.state)
         self.state.update(result)
-        
+
         difficulty = self.state["current_question_difficulty"]
-        difficulty_str = "EASY" if difficulty == EASY else "MEDIUM" if difficulty == MEDIUM else "HARD"
-        
+        difficulty_str = (
+            "EASY"
+            if difficulty == EASY
+            else "MEDIUM" if difficulty == MEDIUM else "HARD"
+        )
+
         return {
             "question": self.state["current_question"],
             "difficulty": difficulty,
-            "difficulty_str": difficulty_str
+            "difficulty_str": difficulty_str,
         }
 
     def evaluate_answer(self, answer: str) -> Dict:
         """Evaluate the user's answer."""
         if not self.state:
             raise ValueError("Agent not initialized")
-        
+
         result = self._evaluate_answer(self.state, answer)
         self.state.update(result)
-        
+
         # Check if we should continue or end
         continue_or_end = self._should_continue(self.state)
         if continue_or_end == END:
             self._end(self.state)
-        
+
         return {
             "classification": result["classification"],
             "feedback": result.get("feedback", ""),
             "is_correct": result["classification"] == 1.0,
             "is_partially_correct": result["classification"] == 0.5,
             "is_incorrect": result["classification"] == 0.0,
-            "is_complete": self.is_quiz_complete
+            "is_complete": self.is_quiz_complete,
         }
 
     def get_final_assessment(self) -> Dict:
         """Get the final assessment of the user's knowledge level."""
         if not self.is_quiz_complete:
             return {"status": "quiz_not_complete"}
-        
+
         return self.final_assessment
 
     def is_complete(self) -> bool:

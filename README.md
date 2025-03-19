@@ -1,24 +1,46 @@
 # Tech Tree Demo
 
-This project demonstrates a simple adaptive learning quiz using the Gemini API, Tavily API for internet search, and LangGraph. The `demo.py` script implements a question-and-answer system that adjusts the difficulty of questions based on the user's performance.
+This project demonstrates a simple adaptive learning quiz using the Gemini API, Tavily API for internet search, and LangGraph. The project includes both a terminal-based version (`demo.py`) and a Streamlit web application that provides a more user-friendly interface.
 
 ## What it does
 
-The `demo.py` script runs an interactive quiz in the terminal. It starts by asking the user to choose a topic. Then, it searches the internet for information about the topic using the Tavily API, retrieving content from Wikipedia and Google. Using this information, it asks questions of increasing difficulty (easy, medium, hard).
+The Tech Tree application is an adaptive learning system that:
 
-- If the user answers a question correctly, the difficulty increases.
-- If the user answers incorrectly, the difficulty remains the same.
-- If the user answers two questions incorrectly in a row, the quiz ends.
-
-At the end of the quiz, the script provides a final assessment of the user's knowledge level based on a weighted score.
+1. Asks the user to choose a topic
+2. Searches the internet for information about the topic using the Tavily API
+3. Generates questions of varying difficulty (easy, medium, hard) based on the retrieved information
+4. Adjusts the difficulty based on the user's performance:
+   - If the user answers a question correctly, the difficulty increases
+   - If the user answers incorrectly, the difficulty remains the same
+   - If the user answers two questions incorrectly in a row, the quiz ends
+5. Provides a final assessment of the user's knowledge level based on a weighted score
 
 The questions are generated based on the latest information available online, making them accurate and up-to-date.
+
+## Available Interfaces
+
+### Terminal Interface
+
+The `demo.py` script runs an interactive quiz in the terminal, with a simple text-based interface.
+
+### Streamlit Web Application
+
+The Streamlit app (`streamlit_app/app.py`) provides a more user-friendly chat-based interface with:
+- A clean, modern UI with chat bubbles
+- Real-time feedback on answers
+- Visual representation of the final assessment
+- Option to restart the quiz with a new topic
 
 ## Prerequisites
 
 - Python 3.12 or higher
 - A Google API key with access to the Gemini API
 - A Tavily API key for internet search functionality (get one at [tavily.com](https://tavily.com))
+- Required Python packages:
+  - google-generativeai
+  - python-dotenv
+  - langgraph
+  - streamlit (for the web application)
 
 ## Setup
 
@@ -69,21 +91,13 @@ The questions are generated based on the latest information available online, ma
 
     **Using `uv` (recommended):**
     ```bash
-    uv pip install -r requirements.txt
+    uv pip install -r pyproject.toml
     ```
-    If `requirements.txt` does not exist, you can install the dependencies directly:
+    Or, you can install the dependencies directly:
     ```bash
-    uv pip install google-generativeai python-dotenv langgraph
+    uv pip install google-generativeai python-dotenv langgraph streamlit
     ```
 
-    **Using `pip`:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-    If `requirements.txt` does not exist, you can install the dependencies directly:
-    ```bash
-    pip install google-generativeai python-dotenv langgraph
-    ```
 
 4.  **Create a `.env` file:**
 
@@ -102,12 +116,28 @@ The questions are generated based on the latest information available online, ma
     LANGSMITH_API_KEY=<YOUR LANGSMITH API KEY>
     ```
 
-## Running the demo
+## Running the application
 
-Once you've set up the environment and installed the dependencies, you can run the demo script with:
+Once you've set up the environment and installed the dependencies, you can run either version of the application:
+
+### Terminal Version
+
+Run the terminal-based demo script with:
 
 ```bash
 python demo.py
 ```
 
-The script will prompt you to choose a topic and then start asking questions.
+The script will prompt you to choose a topic and then start asking questions in the terminal.
+
+### Streamlit Web Application
+
+Run the Streamlit web application with:
+
+```bash
+streamlit run streamlit_app/app.py
+```
+
+This will launch a local web server and open the application in your default web browser. If the browser doesn't open automatically, you can access the application at http://localhost:8501.
+
+The Streamlit app provides a more user-friendly interface with chat bubbles, real-time feedback, and a visual representation of your final assessment.
