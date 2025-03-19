@@ -62,6 +62,7 @@ class AgentState(TypedDict):
     wikipedia_content: str  # Content from Wikipedia search
     google_results: List[str]  # Content from Google search results
     search_completed: bool  # Flag to indicate if search has been completed
+    consecutive_hard_correct_or_partial: int # Track consecutive correct/partially correct at HARD
 
 
 # --- Define Nodes (Functions) ---
@@ -96,6 +97,7 @@ def intro(_: AgentState) -> Dict:
         "wikipedia_content": "",  # Initialize Wikipedia content
         "google_results": [],  # Initialize Google results
         "search_completed": False,  # Initialize search completion flag
+        "consecutive_hard_correct_or_partial": 0, # Initialize the new counter
     }
 
 
@@ -169,9 +171,14 @@ def generate_question(state: AgentState) -> Dict:
 
     # Construct the prompt for Gemini
     prompt = f"""
-    You are an expert tutor creating questions on the topic of {state['topic']}.
+    You are an expert tutor creating questions on the topic of {state['topic']} so
+    you can assess their level of understanding of the topic to decide what help
+    they will need to master it.
+    Assume the user is UK based, and currency is in GBP.
+    
     The student is at a {state['knowledge_level']} knowledge level.
     Ask a question on the topic, avoiding questions already asked.
+    Avoid questions if the answer is the name of the topic.
     Questions should only require short answers, not detailed responses.
     
     The question should be at {difficulty_name} difficulty level ({target_difficulty}).
@@ -269,25 +276,36 @@ def evaluate_answer(state: AgentState) -> Dict:
     
     Classify the answer as one of: correct=1, partially correct=0.5, or incorrect=0.
     Make sure to include the classification explicitly as a number in your response.
-    Do not include any other text, only the number.
+    Respond with the classification: the feedback. For example:
+    1:Correct answer because that is the correct name
+    or
+    0:That is the wrong answer because swans can't live in space
     """
 
     response = call_with_retry(model.generate_content, prompt)
     evaluation = response.text
 
-    print("\nEvaluation:", evaluation)  # Print Gemini's evaluation
+    # Extract the classification, the bit before the ':'
+    parts = evaluation.split(':')
+    classification: float = float(parts[0])
 
-    # Determine the classification
-    classification: float = float(evaluation)
+    # Provide feedback if the answer is incorrect or partially correct
+    if classification == 1.0:
+        print("Correct")
+    else:
+        print(parts[1])
 
     # Update consecutive wrong counter and target difficulty
     current_difficulty = state["current_target_difficulty"]
     consecutive_wrong = state["consecutive_wrong"]
+    consecutive_hard_correct_or_partial = state.get("consecutive_hard_correct_or_partial", 0)
 
     if classification == 0.0:  # Incorrect
         consecutive_wrong += 1
         # Keep the same difficulty level for the next question
         next_difficulty = current_difficulty
+        # Reset the consecutive HARD counter
+        consecutive_hard_correct_or_partial = 0
     else:
         consecutive_wrong = 0
         # If correct or partially correct, increase difficulty if possible
@@ -297,12 +315,20 @@ def evaluate_answer(state: AgentState) -> Dict:
             next_difficulty = HARD
         else:
             next_difficulty = HARD  # Stay at HARD if already at HARD
+            # Increment if at HARD and correct/partially correct
+            if classification >= 0.5:
+                consecutive_hard_correct_or_partial += 1
+    
+    # Reset the counter if the difficulty is not HARD
+    if current_difficulty != HARD:
+        consecutive_hard_correct_or_partial = 0
 
     return {
         "answers": state["answers"] + [answer],
         "answer_evaluations": state["answer_evaluations"] + [classification],
         "consecutive_wrong": consecutive_wrong,
         "current_target_difficulty": next_difficulty,
+        "consecutive_hard_correct_or_partial": consecutive_hard_correct_or_partial,
     }
 
 
@@ -359,6 +385,10 @@ def should_continue(state: AgentState) -> str:
     """Decides whether to continue or end the conversation."""
     # End if the user has gotten 2 consecutive wrong answers
     if state["consecutive_wrong"] >= 2:
+        return END
+    
+    # End if user has 3 consecutive correct or partially correct answers at HARD difficulty
+    if state.get("consecutive_hard_correct_or_partial", 0) >= 3:
         return END
 
     # Otherwise continue
