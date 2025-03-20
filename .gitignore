@@ -10,3 +10,6 @@ wheels/
 .venv
 /.env
 /uv.lock
+
+# user data
+/syllabus_db.json

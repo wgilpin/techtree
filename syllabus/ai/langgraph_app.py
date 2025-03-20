@@ -415,6 +415,14 @@ class SyllabusAI:
         syllabus = state["generated_syllabus"] or state["existing_syllabus"]
         user_entered_topic = state["user_entered_topic"]
 
+        if isinstance(syllabus, dict):
+            # If syllabus is already a dict, use it directly
+            syllabus["user_entered_topic"] = user_entered_topic
+        else:
+            # Convert syllabus (Document object) to a dict
+            syllabus = syllabus.to_dict()
+            syllabus["user_entered_topic"] = user_entered_topic
+
         # Add the user-entered topic to the syllabus
         syllabus["user_entered_topic"] = user_entered_topic
 
@@ -423,17 +431,18 @@ class SyllabusAI:
         existing = syllabi_table.search(
             (syllabus_query.topic == syllabus["topic"])
             & (syllabus_query.level.test(
-                lambda syllabus_doc: syllabus_doc.lower() == syllabus["level"].lower()))
+                lambda syllabus_doc: syllabus and syllabus_doc.lower() == syllabus["level"].lower() if syllabus_doc else False
+            ))
         )
 
         if existing:
             # Update existing syllabus
             syllabi_table.update(
                 syllabus,
-                (syllabus.topic == syllabus["topic"])
+                (syllabus_query.topic == syllabus["topic"])
                 & (
-                    syllabus.level.test(
-                        lambda syllabus_doc: syllabus_doc.lower() == syllabus["level"].lower()
+                    syllabus_query.level.test(
+                        lambda syllabus_doc: syllabus and syllabus_doc.lower() == syllabus["level"].lower() if syllabus_doc else False
                     )
                 ),
             )
