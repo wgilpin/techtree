@@ -135,9 +135,23 @@ The script will prompt you to choose a topic and then start asking questions in 
 Run the Streamlit web application with:
 
 ```bash
-streamlit run streamlit_app/app.py
+streamlit run onboarding/streamlit_app/app.py
 ```
 
 This will launch a local web server and open the application in your default web browser. If the browser doesn't open automatically, you can access the application at http://localhost:8501.
 
 The Streamlit app provides a more user-friendly interface with chat bubbles, real-time feedback, and a visual representation of your final assessment.
+
+## Syllabus Demo
+
+The `syllabus_demo.py` script demonstrates how to use the LangGraph to generate a syllabus for a given topic. It uses the Gemini API to generate the syllabus.
+
+### Running the Syllabus Demo
+
+To run the syllabus demo, execute the following command:
+
+```bash
+python syllabus_demo.py
+```
+
+The script will prompt you to enter a topic, and then generate a syllabus for that topic.

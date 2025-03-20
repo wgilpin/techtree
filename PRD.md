@@ -82,33 +82,161 @@ In a rapidly changing technological landscape, professionals need continuous lea
 
 * User discovers via social media/workplace recommendation  
 * Starts with trending or previously bookmarked topics  
-* Receives explanations, active exercises, and adaptive feedback
 
-### **4.2 Question Refinement**
+### **4.2 Syllabus**
+* A syllabus is n eeded for each topic
+* The syllabus may be supplied by us and stored in the database
+* If no syllabus exists, one should be created for the user based on the topic
+* Syllabus might be found by searching online then using the results to construct
+a new syllabus operating down to the level of short lessons making up a module.
+* Each short lesson will start with no more than 5 minutes worth of exposition.
+* An example syllabus follows:
+```(json)
+{
+  "topic": "Introduction to Quantum Computing",
+  "level": "Beginner",
+  "duration": "4 weeks",
+  "learning_objectives": [
+    "Understand the basic principles of quantum mechanics, including superposition and entanglement.",
+    "Learn about qubits and their representation on the Bloch sphere.",
+    "Become familiar with basic quantum gates and circuits.",
+    "Understand the concept of measurement in quantum mechanics.",
+    "Explore some basic applications of quantum computing."
+  ],
+  "modules": [
+    {
+      "week": 1,
+      "title": "Introduction to Quantum Mechanics",
+      "lessons": [
+        {
+          "title": "What *is* Superposition? (The Intuition)"
+        },
+        {
+          "title": "Representing Superposition: Probability Amplitudes"
+        },
+        {
+          "title": "The Qubit: A Superposition Superhero"
+        },
+        {
+          "title": "Visualizing Superposition: The Bloch Sphere (Introduction)"
+        },
+        {
+          "title": "Superposition vs. Classical Mixtures: A Key Difference"
+        },
+        {
+          "title": "Mathematical Notation: Describing Superposition with Ket Notation"
+        },
+         {
+          "title": "Creating Superposition: The Hadamard Gate"
+        },
+        {
+            "title": "Measuring a Superposition: Collapse of the Wavefunction"
+        },
+        {
+            "title": "Why Don't We See Superposition in Everyday Life?"
+        },
+        {
+            "title": "Applications of Superposition in Quantum Computing"
+        }
+      ]
+    },
+    {
+      "week": 2,
+      "title": "Qubits and Quantum Gates",
+      "lessons": [
+        {
+          "title": "The Bloch Sphere: A Deeper Dive"
+        },
+        {
+          "title": "Single Qubit Gates: Pauli X, Y, Z"
+        },
+        {
+          "title": "Rotation Gates: Rx, Ry, Rz"
+        },
+        {
+          "title": "The Hadamard Gate: Revisited"
+        },
+        {
+            "title": "Phase Shift Gates"
+        }
+      ]
+    },
+    {
+        "week": 3,
+        "title": "Entanglement and Multi-Qubit Systems",
+        "lessons": [
+            {
+                "title": "What is Quantum Entanglement?"
+            },
+            {
+                "title": "Representing Entangled States"
+            },
+            {
+                "title": "The CNOT Gate: Creating Entanglement"
+            },
+            {
+                "title": "Other Two-Qubit Gates (SWAP, CZ)"
+            },
+            {
+                "title": "Bell States: Maximally Entangled States"
+            }
+        ]
+    },
+      {
+        "week": 4,
+        "title": "Basic Quantum Algorithms and Applications",
+        "lessons": [
+          {
+            "title": "Introduction to Quantum Algorithms"
+          },
+          {
+            "title": "Deutsch's Algorithm: A Simple Example"
+          },
+          {
+            "title": "Grover's Search Algorithm (Overview)"
+          },
+          {
+              "title": "Quantum Teleportation (Conceptual)"
+          },
+          {
+              "title": "Quantum Computing Today and Tomorrow"
+          }
 
-* Clarifying unknown topics through targeted questions  
+        ]
+      }
+  ]
+}
+```
+
+
+### **4.3 Lessons**
+
+* Each lesson will be a short (<5 min) exposition followed by active learnin g.
+* After the exposition, generate active exercises, and provide adaptive feedback
+* Modify the syllabus when indicated by adaptive learning.
+* Clarify unknown topics through targeted questions  
 * Short interactive quizzes and chat prompts to reinforce learning
 
-### **4.3 Bookmarking and Returning**
+### **4.4 Bookmarking and Returning**
 
 * Auto-bookmark progress; manual favorites for returning users
 
-### **4.4 Adaptive Difficulty**
+### **4.5 Adaptive Difficulty**
 
 * Steps difficulty up or down based on responses  
 * Polite prompting for revisiting foundational topics
 
-### **4.5 Progress Tracking / Gamification**
+### **4.6 Progress Tracking / Gamification**
 
 * Visual progress bars, badges, milestones (Bronze, Silver, Gold mastery)  
 * Leaderboards for motivation
 
-### **4.6 Enterprise Use Cases**
+### **4.7 Enterprise Use Cases**
 
 * Manager-defined syllabus, uploaded internal materials (tools, market data)  
 * Enterprise dashboards for progress tracking
 
-### **4.6 Defining New Topics**
+### **4.8 Defining New Topics**
 
 * Users create new personalized syllabus via clarifying questions
 
