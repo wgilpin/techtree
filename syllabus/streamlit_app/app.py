@@ -6,8 +6,9 @@ import sys
 
 sys.path.append(".")
 
-import streamlit as st
 import json
+from io import StringIO
+import streamlit as st
 from syllabus.ai.langgraph_app import SyllabusAI
 
 # Set page config
@@ -83,7 +84,8 @@ def run_app():
             st.session_state.messages.append(
                 {
                     "role": "assistant",
-                    "content": f"I've updated the syllabus based on your feedback. What do you think of this version?",
+                    "content": """I've updated the syllabus based on your feedback.
+                                What do you think of this version?""",
                 }
             )
 
@@ -103,11 +105,8 @@ def run_app():
         st.session_state.messages.append(
             {
                 "role": "assistant",
-                "content": f"""
-                Great! I've saved this syllabus for {st.session_state.topic} at the
-                {st.session_state.knowledge_level} level to the database. It will be
-                retrieved when someone requests a syllabus with the same topic and 
-                level in the future.""",
+                "content": f"""Great! I've saved this syllabus for {st.session_state.topic} 
+                               at the {st.session_state.knowledge_level} level.""",
             }
         )
 
@@ -208,6 +207,51 @@ def run_app():
                 for i, lesson in enumerate(module["lessons"], 1):
                     st.write(f"{i}. {lesson['title']}")
 
+    def syllabus_to_markdown(syllabus):
+        """Convert syllabus to markdown format."""
+        md = f"# Syllabus: {syllabus['topic']}\n"
+        md += f"**Level:** {syllabus['level']}\n"
+        md += f"**Duration:** {syllabus['duration']}\n\n"
+
+        md += "## Learning Objectives:\n"
+        for i, objective in enumerate(syllabus["learning_objectives"], 1):
+            md += f"{i}. {objective}\n"
+
+        md += "\n## Modules:\n"
+        for module in syllabus["modules"]:
+            md += f"### Week {module['week']}: {module['title']}\n"
+            for i, lesson in enumerate(module["lessons"], 1):
+                md += f"{i}. {lesson['title']}\n"
+            md += "\n"
+        return md
+
+    def generate_download_link(syllabus, topic, level):
+        """Generates a download link for the syllabus in markdown format."""
+        markdown_text = syllabus_to_markdown(syllabus)
+        file_name = f"{topic}_{level}_syllabus.md"
+
+        # Use StringIO to create an in-memory text stream
+        markdown_stream = StringIO(markdown_text)
+
+        st.download_button(
+            label="Download Syllabus (Markdown)",
+            data=markdown_stream.getvalue(),  # Get the string value from StringIO
+            file_name=file_name,
+            mime="text/markdown",
+        )
+
+    def generate_json_download_link(syllabus, topic, level):
+        """Generates a download link for the syllabus in JSON format."""
+        json_text = json.dumps(syllabus, indent=4)
+        file_name = f"{topic}_{level}_syllabus.json"
+
+        st.download_button(
+            label="Download Syllabus (JSON)",
+            data=json_text,
+            file_name=file_name,
+            mime="application/json",
+        )
+
     # Main UI flow
     if not st.session_state.topic:
         # Topic input
@@ -231,7 +275,7 @@ def run_app():
                 {
                     "role": "assistant",
                     "content": f"What is your knowledge level for {st.session_state.topic}?"
-                                " Please select from the options below.",
+                    " Please select from the options below.",
                 }
             )
 
@@ -254,19 +298,23 @@ def run_app():
                 st.session_state.messages.append(
                     {
                         "role": "user",
-                        "content": f"My knowledge level is {st.session_state.knowledge_level_select}",
+                        "content": 
+                            f"My knowledge level is {st.session_state.knowledge_level_select}",
                     }
                 )
                 st.session_state.messages.append(
                     {
                         "role": "assistant",
-                        "content": f"Thanks! Let me check if we already have a syllabus for {st.session_state.topic} at the {st.session_state.knowledge_level_select} level or create a new one for you.",
+                        "content": f"""Thanks! Let me check if we already have a syllabus for
+                                    {st.session_state.topic} at the
+                                    {st.session_state.knowledge_level_select} level or create
+                                    a new one for you.""",
                     }
                 )
                 st.session_state.knowledge_level_submitted = True
                 st.rerun()
 
-    # Check if knowledge level is submitted and rerun if needed
+    # Check if knowledge level is submitted and display syllabus
     elif st.session_state.knowledge_level_submitted:
         st.session_state.knowledge_level_submitted = False
         st.rerun()
@@ -274,7 +322,8 @@ def run_app():
     elif not st.session_state.syllabus_presented:
         # Display loading message
         with st.spinner(
-            f"Creating syllabus for {st.session_state.topic} at {st.session_state.knowledge_level} level..."
+            f"Creating syllabus for {st.session_state.topic} at "
+            f"{st.session_state.knowledge_level} level..."
         ):
             # Initialize AI with topic and knowledge level
             st.session_state.syllabus_ai.initialize(
@@ -290,19 +339,28 @@ def run_app():
                 st.session_state.syllabus_ai.state["existing_syllabus"] is not None
             )
 
+            if is_existing:
+                st.session_state.syllabus_accepted = True
+
             # Add message to chat
             if is_existing:
                 st.session_state.messages.append(
                     {
                         "role": "assistant",
-                        "content": f"I found an existing syllabus for {st.session_state.topic} at the {st.session_state.knowledge_level} level. Would you like to accept it or provide feedback for improvements?",
+                        "content": 
+                            f"I found an existing syllabus for {st.session_state.topic}"
+                            f"at the {st.session_state.knowledge_level} level."
+                            "Would you like to accept it or provide feedback for improvements?",
                     }
                 )
             else:
                 st.session_state.messages.append(
                     {
                         "role": "assistant",
-                        "content": f"Here's a new syllabus for {st.session_state.topic} at the {st.session_state.knowledge_level} level. Would you like to accept it or provide feedback for improvements?",
+                        "content": 
+                            f"Here's a new syllabus for {st.session_state.topic}"
+                            f" at the {st.session_state.knowledge_level} level."
+                            "Would you like to accept it or provide feedback for improvements?",
                     }
                 )
 
@@ -343,6 +401,24 @@ def run_app():
         # Display final syllabus
         st.subheader("Final Accepted Syllabus")
         display_syllabus(st.session_state.syllabus)
+
+        # Generate download link
+        generate_download_link(
+            st.session_state.syllabus,
+            st.session_state.syllabus["topic"],
+            st.session_state.syllabus["level"],
+        )
+        generate_json_download_link(
+            st.session_state.syllabus,
+            st.session_state.syllabus["topic"],
+            st.session_state.syllabus["level"],
+        )
+        # No need to display chat again
+        # display_chat()
+
+        # No need to display final syllabus again
+        # st.subheader("Final Accepted Syllabus")
+        # display_syllabus(st.session_state.syllabus)
 
         # Restart button
         if st.button("Create Another Syllabus"):
