@@ -1,10 +1,13 @@
-# pylint: disable=missing-class-docstring,missing-module-docstring
+# pylint: disable=missing-class-docstring,missing-module-docstring,broad-exception-caught,singleton-comparison
 
 import os
 import re
 import time
 import random
 import json
+import copy
+import uuid
+from datetime import datetime
 from typing import Dict, List, TypedDict, Optional
 
 import google.generativeai as genai
@@ -57,6 +60,12 @@ class SyllabusState(TypedDict):
     user_feedback: Optional[str]
     syllabus_accepted: bool
     iteration_count: int
+    user_id: Optional[str]  # New field
+    uid: Optional[str]
+    is_master: Optional[bool]
+    parent_uid: Optional[str]
+    created_at: Optional[str]
+    updated_at: Optional[str]
 
 
 class SyllabusAI:
@@ -101,8 +110,9 @@ class SyllabusAI:
         _: Optional[SyllabusState] = None,
         topic: str = "",
         knowledge_level: str = "beginner",
+        user_id: Optional[str] = None,  # New parameter
     ) -> Dict:
-        """Initialize the state with the topic and user knowledge level."""
+        """Initialize the state with the topic, user knowledge level, and user ID."""
         if not topic:
             raise ValueError("Topic is required")
 
@@ -121,22 +131,53 @@ class SyllabusAI:
             "syllabus_accepted": False,
             "iteration_count": 0,
             "user_entered_topic": topic,
+            "user_id": user_id,  # New field
         }
 
     def _search_database(self, state: SyllabusState) -> Dict:
         """Search for existing syllabi in the database."""
         topic = state["topic"]
         knowledge_level = state["user_knowledge_level"]
+        user_id = state.get("user_id")
 
-        # Search for match on both topic and knowledge level
+        # Search for match on topic, knowledge level, and user_id if provided
         syllabus_query = Query()
-        existing = syllabi_table.search(
-            ((syllabus_query.topic == topic) | (syllabus_query.user_entered_topic == topic))
-            & (syllabus_query.level.test(lambda x: x.lower() == knowledge_level.lower()))
+
+        if user_id:
+            # First try to find a user-specific version
+            user_specific = syllabi_table.search(
+                (
+                    (syllabus_query.topic == topic)
+                    | (syllabus_query.user_entered_topic == topic)
+                )
+                & (
+                    syllabus_query.level.test(
+                        lambda x: x.lower() == knowledge_level.lower()
+                    )
+                )
+                & (syllabus_query.user_id == user_id)
+            )
+
+            if user_specific:
+                return {"existing_syllabus": user_specific[0]}
+
+        # If no user-specific version or no user_id provided, look for master version
+        master_version = syllabi_table.search(
+            (
+                (syllabus_query.topic == topic)
+                | (syllabus_query.user_entered_topic == topic)
+            )
+            & (
+                syllabus_query.level.test(
+                    lambda x: x.lower() == knowledge_level.lower()
+                )
+            )
+            & (syllabus_query.is_master == True)
         )
 
-        if existing:
-            return {"existing_syllabus": existing[0]}
+        if master_version:
+            return {"existing_syllabus": master_version[0]}
+
         return {}
 
     def _should_search_internet(self, state: SyllabusState) -> str:
@@ -179,7 +220,7 @@ class SyllabusAI:
 
     def _generate_syllabus(self, state: SyllabusState) -> Dict:
         """Generate a syllabus based on search results and user knowledge level."""
-        print("DEBUG:   Generating syllabus")
+        print("DEBUG:   Generating syllabus with AI")
         topic = state["topic"]
         knowledge_level = state["user_knowledge_level"]
         search_results = state["search_results"]
@@ -193,14 +234,14 @@ class SyllabusAI:
         prompt = f"""
         You are an expert curriculum designer creating a
         comprehensive syllabus for the topic: {topic}.
-        
+
         The user's knowledge level is: {knowledge_level}
-        
+
         Use the following information from internet searches to create
         an accurate and up-to-date syllabus:
-        
+
         {search_context}
-        
+
         Create a syllabus with the following structure:
         1. Topic name
         2. Level (should match or be appropriate for the user's knowledge level: {knowledge_level})
@@ -208,13 +249,13 @@ class SyllabusAI:
         4. 3-5 Learning objectives
         5. Modules (organized by week or unit)
         6. Lessons within each module (5-10 lessons per module)
-        
+
         Tailor the syllabus to the user's knowledge level:
         - For 'beginner': Focus on foundational concepts and gentle introduction
         - For 'early learner': Include basic concepts but move more quickly to intermediate topics
         - For 'good knowledge': Focus on intermediate to advanced topics, assuming basic knowledge
         - For 'advanced': Focus on advanced topics, cutting-edge developments, and specialized areas
-        
+
         Format your response as a valid JSON object with the following structure:
         {{
           "topic": "Topic Name",
@@ -325,18 +366,18 @@ class SyllabusAI:
         # Construct the prompt for Gemini
         prompt = f"""
         You are an expert curriculum designer updating a syllabus for the topic: {topic}.
-        
+
         The user's knowledge level is: {knowledge_level}
-        
+
         Here is the current syllabus:
         {json.dumps(syllabus, indent=2)}
-        
+
         The user has provided the following feedback:
         {feedback}
-        
+
         Update the syllabus to address the user's feedback while ensuring it remains
         appropriate for their knowledge level ({knowledge_level}). Maintain the same JSON structure.
-        
+
         Format your response as a valid JSON object with the following structure:
         {{
           "topic": "Topic Name",
@@ -412,8 +453,12 @@ class SyllabusAI:
 
     def _save_syllabus(self, state: SyllabusState) -> Dict:
         """Save the syllabus to the database."""
+        import uuid
+        from datetime import datetime
+
         syllabus = state["generated_syllabus"] or state["existing_syllabus"]
         user_entered_topic = state["user_entered_topic"]
+        user_id = state.get("user_id")
 
         if isinstance(syllabus, dict):
             # If syllabus is already a dict, use it directly
@@ -426,43 +471,218 @@ class SyllabusAI:
         # Add the user-entered topic to the syllabus
         syllabus["user_entered_topic"] = user_entered_topic
 
-        # Check if syllabus already exists with same topic and level
+        # Check if syllabus already exists with same topic, level, and user_id
         syllabus_query = Query()
-        existing = syllabi_table.search(
-            (syllabus_query.topic == syllabus["topic"])
-            & (syllabus_query.level.test(
-                lambda syllabus_doc: syllabus and syllabus_doc.lower() == syllabus["level"].lower() if syllabus_doc else False
-            ))
-        )
 
-        if existing:
-            # Update existing syllabus
-            syllabi_table.update(
-                syllabus,
+        if user_id:
+            existing = syllabi_table.search(
                 (syllabus_query.topic == syllabus["topic"])
                 & (
                     syllabus_query.level.test(
-                        lambda syllabus_doc: syllabus and syllabus_doc.lower() == syllabus["level"].lower() if syllabus_doc else False
+                        lambda syllabus_doc: (
+                            syllabus
+                            and syllabus_doc.lower() == syllabus["level"].lower()
+                            if syllabus_doc
+                            else False
+                        )
                     )
-                ),
+                )
+                & (syllabus_query.user_id == user_id)
             )
         else:
+            existing = syllabi_table.search(
+                (syllabus_query.topic == syllabus["topic"])
+                & (
+                    syllabus_query.level.test(
+                        lambda syllabus_doc: (
+                            syllabus
+                            and syllabus_doc.lower() == syllabus["level"].lower()
+                            if syllabus_doc
+                            else False
+                        )
+                    )
+                )
+                & (syllabus_query.is_master == True)
+            )
+
+        now = datetime.now().isoformat()
+
+        if existing:
+            # Update existing syllabus
+            syllabus["updated_at"] = now
+
+            if "uid" not in syllabus:
+                # If somehow the existing syllabus doesn't have a UID, add one
+                syllabus["uid"] = str(uuid.uuid4())
+
+            if user_id:
+                # If this is a user-specific version, ensure it has the correct user_id
+                syllabus["user_id"] = user_id
+                syllabus["is_master"] = False
+
+                # If it doesn't have a parent_uid, try to find the master version
+                if "parent_uid" not in syllabus:
+                    master = syllabi_table.search(
+                        (syllabus_query.topic == syllabus["topic"])
+                        & (
+                            syllabus_query.level.test(
+                                lambda syllabus_doc: (
+                                    syllabus
+                                    and syllabus_doc.lower()
+                                    == syllabus["level"].lower()
+                                    if syllabus_doc
+                                    else False
+                                )
+                            )
+                        )
+                        & (syllabus_query.is_master == True)
+                    )
+
+                    if master:
+                        syllabus["parent_uid"] = master[0].get("uid")
+            else:
+                # If this is a master version, ensure it's marked as such
+                syllabus["is_master"] = True
+                syllabus["user_id"] = None
+                syllabus["parent_uid"] = None
+
+            # Update the syllabus in the database
+            if user_id:
+                syllabi_table.update(
+                    syllabus,
+                    (syllabus_query.topic == syllabus["topic"])
+                    & (
+                        syllabus_query.level.test(
+                            lambda syllabus_doc: (
+                                syllabus
+                                and syllabus_doc.lower() == syllabus["level"].lower()
+                                if syllabus_doc
+                                else False
+                            )
+                        )
+                    )
+                    & (syllabus_query.user_id == user_id),
+                )
+            else:
+                syllabi_table.update(
+                    syllabus,
+                    (syllabus_query.topic == syllabus["topic"])
+                    & (
+                        syllabus_query.level.test(
+                            lambda syllabus_doc: (
+                                syllabus
+                                and syllabus_doc.lower() == syllabus["level"].lower()
+                                if syllabus_doc
+                                else False
+                            )
+                        )
+                    )
+                    & (syllabus_query.is_master == True),
+                )
+        else:
             # Insert new syllabus
+            syllabus["uid"] = str(uuid.uuid4())
+            syllabus["created_at"] = now
+            syllabus["updated_at"] = now
+
+            if user_id:
+                # If this is a user-specific version
+                syllabus["user_id"] = user_id
+                syllabus["is_master"] = False
+
+                # Try to find a master version to set as parent
+                master = syllabi_table.search(
+                    (syllabus_query.topic == syllabus["topic"])
+                    & (
+                        syllabus_query.level.test(
+                            lambda syllabus_doc: (
+                                syllabus
+                                and syllabus_doc.lower() == syllabus["level"].lower()
+                                if syllabus_doc
+                                else False
+                            )
+                        )
+                    )
+                    & (syllabus_query.is_master == True)
+                )
+
+                if master:
+                    syllabus["parent_uid"] = master[0].get("uid")
+                else:
+                    # If no master exists, create one first
+                    master_syllabus = syllabus.copy()
+                    master_syllabus["uid"] = str(uuid.uuid4())
+                    master_syllabus["is_master"] = True
+                    master_syllabus["user_id"] = None
+                    master_syllabus["parent_uid"] = None
+
+                    syllabi_table.insert(master_syllabus)
+
+                    # Set the parent_uid for the user-specific version
+                    syllabus["parent_uid"] = master_syllabus["uid"]
+            else:
+                # If this is a master version
+                syllabus["is_master"] = True
+                syllabus["user_id"] = None
+                syllabus["parent_uid"] = None
+
             syllabi_table.insert(syllabus)
 
         return {"syllabus_saved": True}
+
+    def clone_syllabus_for_user(self, user_id: str) -> Dict:
+        """Clone the current syllabus for a specific user."""
+        if not self.state:
+            raise ValueError("Agent not initialized")
+
+        syllabus = self.state["generated_syllabus"] or self.state["existing_syllabus"]
+
+        if not syllabus:
+            raise ValueError("No syllabus to clone")
+
+        # Create a copy of the syllabus
+
+
+        user_syllabus = copy.deepcopy(syllabus)
+
+        # Update the copy with user-specific information
+        user_syllabus["uid"] = str(uuid.uuid4())
+        user_syllabus["user_id"] = user_id
+        user_syllabus["is_master"] = False
+        user_syllabus["created_at"] = datetime.now().isoformat()
+        user_syllabus["updated_at"] = datetime.now().isoformat()
+
+        # If the source is a master version, set it as the parent
+        if syllabus.get("is_master", False):
+            user_syllabus["parent_uid"] = syllabus.get("uid")
+        else:
+            # If the source is already a user version, keep its parent
+            user_syllabus["parent_uid"] = syllabus.get("parent_uid")
+
+        # Save the user-specific syllabus
+        syllabi_table.insert(user_syllabus)
+
+        # Update the state
+        self.state["generated_syllabus"] = user_syllabus
+
+        return user_syllabus
 
     def _end(self, _: SyllabusState) -> Dict:
         """End the workflow."""
         return {}
 
-    def initialize(self, topic: str, knowledge_level: str) -> Dict:
-        """Initialize the agent with a topic and knowledge level."""
-        self.state = self._initialize(topic=topic, knowledge_level=knowledge_level)
+    def initialize(
+        self, topic: str, knowledge_level: str, user_id: Optional[str] = None
+    ) -> Dict:
+        """Initialize the agent with a topic, knowledge level, and optional user ID."""
+        self.state = self._initialize(
+            topic=topic, knowledge_level=knowledge_level, user_id=user_id
+        )
         return {
             "status": "initialized",
             "topic": topic,
             "knowledge_level": knowledge_level,
+            "user_id": user_id,
         }
 
     def get_or_create_syllabus(self) -> Dict:
@@ -536,8 +756,15 @@ class SyllabusAI:
         # Delete syllabus from the database
         syllabus_query = Query()
         syllabi_table.remove(
-            ((syllabus_query.topic == topic) | (syllabus_query.user_entered_topic == topic))
-            & (syllabus_query.level.test(lambda x: x.lower() == knowledge_level.lower()))
+            (
+                (syllabus_query.topic == topic)
+                | (syllabus_query.user_entered_topic == topic)
+            )
+            & (
+                syllabus_query.level.test(
+                    lambda x: x.lower() == knowledge_level.lower()
+                )
+            )
         )
 
         return {"syllabus_deleted": True}
