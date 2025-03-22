@@ -12,4 +12,10 @@ dependencies = [
     "streamlit>=1.32.0",
     "matplotlib>=3.10.1",
     "tinydb>=4.8.2",
+    "fastapi>=0.115.11",
+    "bcrypt>=4.3.0",
+    "uvicorn>=0.34.0",
+    "python-multipart>=0.0.20",
+    "pyjwt>=2.10.1",
+    "email-validator>=2.2.0",
 ]

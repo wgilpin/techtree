@@ -13,3 +13,4 @@ wheels/
 
 # user data
 /syllabus_db.json
+/techtree-frontend/.env
