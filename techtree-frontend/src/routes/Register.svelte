@@ -59,6 +59,7 @@
         // Add a small delay to ensure the backend is ready
         await new Promise(resolve => setTimeout(resolve, 100));
 
+        console.log("Registering with:", { name, email, password }); // Added logging
         const result = await auth.register(email, password, name);
         console.log("Registration successful:", result);
 

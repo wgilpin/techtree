@@ -1,7 +1,8 @@
 import axios from "axios";
 import { user, saveUserToStorage, clearUserData } from "../stores/user";
 
-const API_URL = process.env.VITE_API_URL || "http://localhost:8000";
+// Use the proxy server URL instead of directly calling the backend
+const API_URL = "/api";
 
 const api = axios.create({
   baseURL: API_URL,
@@ -9,11 +10,12 @@ const api = axios.create({
   headers: {
     "Content-Type": "application/json"
   },
-  withCredentials: true // Enable sending cookies in cross-origin requests
+  // No need for withCredentials when using same-origin proxy
+  withCredentials: false
 });
 
 // Log the API URL for debugging
-console.log("API URL:", API_URL);
+console.log("Using proxy for API requests");
 
 // Add a request interceptor to include auth token
 api.interceptors.request.use(
@@ -112,7 +114,7 @@ export const auth = {
         headers: {
           "Content-Type": "application/json"
         },
-        withCredentials: true // Enable credentials to match backend config
+        withCredentials: false
       });
 
       // Log request configuration before sending

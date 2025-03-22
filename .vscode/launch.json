@@ -25,6 +25,14 @@
             "env": {
                 "STREAMLIT_THEME_BASE": "light"
             },
+        },
+        {
+            "name": "Python: Run backend/main.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/backend/main.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/backend"
         }
     ]
 }

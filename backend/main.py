@@ -4,8 +4,9 @@ import os
 # Add project root to sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from routers import auth_router, onboarding_router, syllabus_router, lesson_router, progress_router
 
 app = FastAPI(title="TechTree API")
@@ -13,10 +14,10 @@ app = FastAPI(title="TechTree API")
 # Add CORS middleware to allow frontend requests
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5000"],  # Explicitly allow frontend origin
-    allow_credentials=True,  # Enable credentials
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "Accept"],
+    allow_origins=["*"],  # Allow all origins since we're using a proxy
+    allow_credentials=False,  # Disable credentials for simplicity
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
     max_age=3600,  # Cache preflight requests for 1 hour
 )
 
