@@ -40,7 +40,7 @@
   });
 
   function startNewTopic() {
-    navigate("/onboard");
+    navigate("/onboard/");
   }
 
   function continueCourse(syllabusId, moduleIndex = 0, lessonIndex = 0) {
