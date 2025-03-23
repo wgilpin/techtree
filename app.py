@@ -13,7 +13,7 @@ from functools import wraps
 
 import requests
 from flask import (Flask, flash, jsonify, redirect, render_template, request,
-                   session, url_for)
+                    session, url_for)
 
 # Configure logging to use the same file as the backend
 logging.basicConfig(
@@ -24,6 +24,10 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+# Suppress Werkzeug "Detected change" INFO logs
+werkzeug_logger = logging.getLogger('werkzeug')
+werkzeug_logger.setLevel(logging.WARNING)
 
 app = Flask(__name__)
 """
