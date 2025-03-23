@@ -1,7 +1,7 @@
 import bcrypt
 import jwt
 from datetime import datetime, timedelta
-from services.db import DatabaseService
+from backend.services.sqlite_db import SQLiteDatabaseService
 from typing import Dict, Any, Optional
 
 # Settings for JWT
@@ -11,7 +11,8 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 40320  # Increased to 28 days  (28 * 60 * 24)
 
 class AuthService:
     def __init__(self, db_service=None):
-        self.db_service = db_service or DatabaseService()
+        print("Init DB in AuthService")
+        self.db_service = db_service or SQLiteDatabaseService()
 
     def _hash_password(self, password: str) -> str:
         """Hash a password for storing"""

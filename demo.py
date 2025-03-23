@@ -1,4 +1,11 @@
-# pylint: disable=missing-class-docstring,missing-module-docstring
+"""
+This module implements a question-and-answer system using LangGraph and Gemini API.
+
+The system interacts with the user, asks questions on a chosen topic,
+evaluates answers, and adjusts the difficulty based on performance. It also
+uses the Tavily API for internet searches to provide context for questions
+and answer evaluation.
+"""
 
 from collections import Counter
 import os
@@ -27,7 +34,22 @@ tavily = TavilyClient(api_key=os.environ.get("TAVILY_API_KEY"))
 
 
 def call_with_retry(func, *args, max_retries=5, initial_delay=1, **kwargs):
-    """Call a function with exponential backoff retry logic for quota errors."""
+    """
+    Call a function with exponential backoff retry logic for quota errors.
+
+    Args:
+        func: The function to call.
+        *args: Positional arguments to pass to the function.
+        max_retries: Maximum number of retries.
+        initial_delay: Initial delay between retries in seconds.
+        **kwargs: Keyword arguments to pass to the function.
+
+    Returns:
+        The result of the function call.
+
+    Raises:
+        ResourceExhausted: If the maximum number of retries is exceeded.
+    """
     retries = 0
     while True:
         try:
@@ -49,6 +71,25 @@ def call_with_retry(func, *args, max_retries=5, initial_delay=1, **kwargs):
 
 # --- Define State ---
 class AgentState(TypedDict):
+    """
+    Represents the state of the agent.
+
+    Attributes:
+        topic: The topic of the conversation.
+        knowledge_level: The user's knowledge level.
+        questions_asked: A list of questions asked so far.
+        question_difficulties: A list of difficulty levels for each question.
+        answers: A list of answers provided by the user.
+        answer_evaluations: A list of evaluations for each answer.
+        current_question: The current question being asked.
+        current_question_difficulty: The difficulty of the current question.
+        current_target_difficulty: The target difficulty for the next question.
+        consecutive_wrong: The number of consecutive wrong answers.
+        wikipedia_content: Content retrieved from Wikipedia.
+        google_results: Content retrieved from Google search.
+        search_completed: A flag indicating if the internet search is completed.
+        consecutive_hard_correct_or_partial: Number of consecutive correct/partially correct answers at HARD difficulty.
+    """
     topic: str
     knowledge_level: str
     questions_asked: List[str]
@@ -74,7 +115,9 @@ HARD = 3
 
 
 def intro(_: AgentState) -> Dict:
-    """Gets user input for topic."""
+    """
+    Gets user input for the topic and initializes the agent state.
+    """
     print("Welcome to the Tech Tree demo!")
     print("You'll be asked questions of increasing difficulty.")
     print("If you get a question right, you'll move to a harder question.")
@@ -104,7 +147,9 @@ def intro(_: AgentState) -> Dict:
 
 
 def perform_internet_search(state: AgentState) -> Dict:
-    """Performs internet search using Tavily API and stores results in state."""
+    """
+    Performs an internet search using the Tavily API and stores results in the state.
+    """
     topic = state["topic"]
     print(f"\nSearching the internet for information about '{topic}'...")
 
@@ -152,7 +197,9 @@ def perform_internet_search(state: AgentState) -> Dict:
 
 
 def generate_question(state: AgentState) -> Dict:
-    """Generates a question using the Gemini API and search results."""
+    """
+    Generates a question using the Gemini API and search results.
+    """
     # Get the target difficulty level
     target_difficulty = state["current_target_difficulty"]
     difficulty_name = (
@@ -177,22 +224,22 @@ def generate_question(state: AgentState) -> Dict:
     you can assess their level of understanding of the topic to decide what help
     they will need to master it.
     Assume the user is UK based, and currency is in GBP.
-    
+
     The student is at a {state['knowledge_level']} knowledge level.
     Ask a question on the topic, avoiding questions already asked.
     Avoid questions if the answer is the name of the topic.
     Questions should only require short answers, not detailed responses.
-    
+
     The question should be at {difficulty_name} difficulty level ({target_difficulty}).
-    
+
     Use the following information from internet searches to create an accurate and up-to-date question:
-    
+
     {search_context}
-    
+
     Format your response as follows:
     Difficulty: {target_difficulty}
     Question: [your question here]
-    
+
     Questions already asked: {', '.join(state['questions_asked']) or 'None'}
     """
 
@@ -231,7 +278,9 @@ def generate_question(state: AgentState) -> Dict:
 
 
 def present_question(state: AgentState) -> Dict:
-    """Presents the question to the user."""
+    """
+    Presents the generated question to the user.
+    """
     difficulty = state["current_question_difficulty"]
     difficulty_str = (
         "EASY" if difficulty == EASY else "MEDIUM" if difficulty == MEDIUM else "HARD"
@@ -242,7 +291,9 @@ def present_question(state: AgentState) -> Dict:
 
 
 def evaluate_answer(state: AgentState) -> Dict:
-    """Gets user input for the answer and evaluates it using the Gemini API."""
+    """
+    Gets user input for the answer and evaluates it using the Gemini API.
+    """
     answer = input("Your answer: ")
 
     # Prepare search content for the prompt
@@ -267,15 +318,15 @@ def evaluate_answer(state: AgentState) -> Dict:
     Answer: {answer}
 
     Use the following information from internet searches to evaluate the answer accurately:
-    
+
     {search_context}
 
     Evaluate the answer for correctness and completeness, allowing that only short answers were requested.
     Provide feedback on the answer.
-    
+
     Important: If the student responds with "I don't know" or similar, assume the user failed to
     demonstrate understanding of the topic in response to the question, and classify the answer as incorrect.
-    
+
     Classify the answer as one of: correct=1, partially correct=0.5, or incorrect=0.
     Make sure to include the classification explicitly as a number in your response.
     Respond with the classification: the feedback. For example:
@@ -337,7 +388,9 @@ def evaluate_answer(state: AgentState) -> Dict:
 
 
 def end(state: AgentState) -> Dict:
-    """Prints a final message and provides a final assessment of the user's knowledge level."""
+    """
+    Prints a final message and provides a final assessment of the user's knowledge level.
+    """
     print("\nThanks for playing the Tech Tree demo!")
 
     # Calculate score directly
@@ -386,7 +439,9 @@ def end(state: AgentState) -> Dict:
 
 
 def should_continue(state: AgentState) -> str:
-    """Decides whether to continue or end the conversation."""
+    """
+    Decides whether to continue or end the conversation based on user performance.
+    """
     # End if the user has gotten 2 consecutive wrong answers
     if state["consecutive_wrong"] >= 2:
         return END

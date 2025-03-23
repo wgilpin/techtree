@@ -1,0 +1,159 @@
+2025-03-23 23:04:58,881 - backend.logger - DEBUG - sys.prefix: c:\Users\wgilp\projects\techtree\.venv
+2025-03-23 23:04:58,882 - backend.logger - DEBUG - sys.real_prefix: Not present
+2025-03-23 23:05:01,582 - backend.services.onboarding_service - INFO - Initializing OnboardingService
+2025-03-23 23:05:01,643 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\backend\\ai\\syllabus\\langgraph_app.py', reloading
+2025-03-23 23:05:01,695 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\backend\\ai\\lessons\\langgraph_app.py', reloading
+2025-03-23 23:05:01,771 - werkzeug - INFO -  * Detected change in 'C:\\Program Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.12_3.12.2544.0_x64__qbz5n2kfra8p0\\Lib\\logging\\config.py', reloading
+2025-03-23 23:05:01,868 - werkzeug - INFO -  * Detected change in 'C:\\Program Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.12_3.12.2544.0_x64__qbz5n2kfra8p0\\Lib\\multiprocessing\\resource_sharer.py', reloading
+2025-03-23 23:05:02,280 - werkzeug - INFO -  * Restarting with watchdog (windowsapi)
+2025-03-23 23:05:02,689 - werkzeug - WARNING -  * Debugger is active!
+2025-03-23 23:05:02,699 - werkzeug - INFO -  * Debugger PIN: 117-821-657
+2025-03-23 23:05:05,629 - werkzeug - INFO - 127.0.0.1 - - [23/Mar/2025 23:05:05] "[32mPOST / HTTP/1.1[0m" 302 -
+2025-03-23 23:05:13,900 - werkzeug - INFO - 127.0.0.1 - - [23/Mar/2025 23:05:13] "GET /onboarding/black%20holes HTTP/1.1" 200 -
+2025-03-23 23:05:14,008 - werkzeug - INFO - 127.0.0.1 - - [23/Mar/2025 23:05:14] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-03-23 23:05:26,331 - werkzeug - INFO - 127.0.0.1 - - [23/Mar/2025 23:05:26] "GET /onboarding/black%20holes HTTP/1.1" 200 -
+2025-03-23 23:05:26,348 - werkzeug - INFO - 127.0.0.1 - - [23/Mar/2025 23:05:26] "GET /static/css/main.css HTTP/1.1" 200 -
+2025-03-23 23:05:26,406 - werkzeug - INFO - 127.0.0.1 - - [23/Mar/2025 23:05:26] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+2025-03-23 23:06:26,434 - werkzeug - INFO - 127.0.0.1 - - [23/Mar/2025 23:06:26] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-03-23 23:09:25,804 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\backend\\ai\\app.py', reloading
+2025-03-23 23:09:25,805 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\backend\\ai\\lessons\\__init__.py', reloading
+2025-03-23 23:09:25,806 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\backend\\ai\\onboarding\\__init__.py', reloading
+2025-03-23 23:09:25,807 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\backend\\ai\\syllabus\\__init__.py', reloading
+2025-03-23 23:09:25,810 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\backend\\dependencies.py', reloading
+2025-03-23 23:09:25,811 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\backend\\logger.py', reloading
+2025-03-23 23:09:25,813 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\backend\\models.py', reloading
+2025-03-23 23:09:25,814 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\backend\\routers\\__init__.py', reloading
+2025-03-23 23:09:25,815 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\backend\\routers\\auth_router.py', reloading
+2025-03-23 23:09:25,816 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\backend\\routers\\lesson_router.py', reloading
+2025-03-23 23:09:25,818 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\backend\\routers\\progress_router.py', reloading
+2025-03-23 23:09:25,819 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\backend\\routers\\syllabus_router.py', reloading
+2025-03-23 23:09:25,820 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\backend\\services\\__init__.py', reloading
+2025-03-23 23:09:25,821 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\backend\\services\\auth_service.py', reloading
+2025-03-23 23:09:25,823 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\backend\\services\\lesson_service.py', reloading
+2025-03-23 23:09:25,824 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\backend\\services\\onboarding_service.py', reloading
+2025-03-23 23:09:25,825 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\backend\\services\\sqlite_db.py', reloading
+2025-03-23 23:09:25,826 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\backend\\services\\syllabus_service.py', reloading
+2025-03-23 23:09:25,846 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\hello.py', reloading
+2025-03-23 23:09:25,848 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\kill_servers.py', reloading
+2025-03-23 23:09:25,850 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\lesson_demo.py', reloading
+2025-03-23 23:09:25,851 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\lessons\\ai\\__init__.py', reloading
+2025-03-23 23:09:25,853 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\lessons\\streamlit_app\\__init__.py', reloading
+2025-03-23 23:09:25,856 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\migrate_syllabus.py', reloading
+2025-03-23 23:09:25,857 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\migrate_to_sqlite.py', reloading
+2025-03-23 23:09:25,858 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\onboarding\\ai\\__init__.py', reloading
+2025-03-23 23:09:25,860 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\onboarding\\streamlit_app\\__init__.py', reloading
+2025-03-23 23:09:25,861 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\onboarding\\streamlit_app\\app.py', reloading
+2025-03-23 23:09:25,869 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\syllabus\\ai\\__init__.py', reloading
+2025-03-23 23:09:25,871 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\syllabus\\streamlit_app\\__init__.py', reloading
+2025-03-23 23:09:25,872 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\syllabus\\streamlit_app\\app.py', reloading
+2025-03-23 23:09:25,873 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\syllabus_demo.py', reloading
+2025-03-23 23:09:25,875 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\temp_query.py', reloading
+2025-03-23 23:09:25,884 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\update_db_schema.py', reloading
+2025-03-23 23:09:26,774 - werkzeug - INFO -  * Restarting with watchdog (windowsapi)
+2025-03-23 23:09:27,195 - werkzeug - WARNING -  * Debugger is active!
+2025-03-23 23:09:27,204 - werkzeug - INFO -  * Debugger PIN: 117-821-657
+2025-03-23 23:12:38,789 - werkzeug - INFO - 127.0.0.1 - - [23/Mar/2025 23:12:38] "[32mGET / HTTP/1.1[0m" 302 -
+2025-03-23 23:12:41,098 - werkzeug - INFO - 127.0.0.1 - - [23/Mar/2025 23:12:41] "GET /dashboard HTTP/1.1" 200 -
+2025-03-23 23:12:41,195 - werkzeug - INFO - 127.0.0.1 - - [23/Mar/2025 23:12:41] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-03-23 23:12:48,632 - werkzeug - INFO - 127.0.0.1 - - [23/Mar/2025 23:12:48] "[32mPOST / HTTP/1.1[0m" 302 -
+2025-03-23 23:12:52,202 - werkzeug - INFO - 127.0.0.1 - - [23/Mar/2025 23:12:52] "GET /onboarding/black%20holes HTTP/1.1" 200 -
+2025-03-23 23:12:52,227 - werkzeug - INFO - 127.0.0.1 - - [23/Mar/2025 23:12:52] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-03-23 23:13:05,463 - werkzeug - INFO - 127.0.0.1 - - [23/Mar/2025 23:13:05] "POST /onboarding/black%20holes HTTP/1.1" 200 -
+2025-03-23 23:13:05,483 - werkzeug - INFO - 127.0.0.1 - - [23/Mar/2025 23:13:05] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-03-23 23:13:20,872 - werkzeug - INFO - 127.0.0.1 - - [23/Mar/2025 23:13:20] "POST /onboarding/black%20holes HTTP/1.1" 200 -
+2025-03-23 23:13:20,890 - werkzeug - INFO - 127.0.0.1 - - [23/Mar/2025 23:13:20] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-03-23 23:13:48,511 - werkzeug - INFO - 127.0.0.1 - - [23/Mar/2025 23:13:48] "POST /onboarding/black%20holes HTTP/1.1" 200 -
+2025-03-23 23:13:48,530 - werkzeug - INFO - 127.0.0.1 - - [23/Mar/2025 23:13:48] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-03-23 23:14:13,744 - werkzeug - INFO - 127.0.0.1 - - [23/Mar/2025 23:14:13] "POST /onboarding/black%20holes HTTP/1.1" 200 -
+2025-03-23 23:14:13,759 - werkzeug - INFO - 127.0.0.1 - - [23/Mar/2025 23:14:13] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-03-23 23:14:37,876 - werkzeug - INFO - 127.0.0.1 - - [23/Mar/2025 23:14:37] "POST /onboarding/black%20holes HTTP/1.1" 200 -
+2025-03-23 23:14:37,900 - werkzeug - INFO - 127.0.0.1 - - [23/Mar/2025 23:14:37] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-03-23 23:15:00,289 - werkzeug - INFO - 127.0.0.1 - - [23/Mar/2025 23:15:00] "POST /onboarding/black%20holes HTTP/1.1" 200 -
+2025-03-23 23:15:00,307 - werkzeug - INFO - 127.0.0.1 - - [23/Mar/2025 23:15:00] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-03-23 23:15:53,764 - __main__ - ERROR - Onboarding error: HTTPConnectionPool(host='localhost', port=8000): Read timed out. (read timeout=30)
+2025-03-23 23:16:22,559 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\backend\\services\\onboarding_service.py', reloading
+2025-03-23 23:16:22,559 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\backend\\services\\onboarding_service.py', reloading
+2025-03-23 23:16:22,560 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\backend\\services\\onboarding_service.py', reloading
+2025-03-23 23:16:22,837 - werkzeug - INFO -  * Restarting with watchdog (windowsapi)
+2025-03-23 23:16:23,326 - werkzeug - WARNING -  * Debugger is active!
+2025-03-23 23:16:23,336 - werkzeug - INFO -  * Debugger PIN: 117-821-657
+2025-03-23 23:16:37,971 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\flask\\typing.py', reloading
+2025-03-23 23:16:37,986 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\werkzeug\\datastructures\\headers.py', reloading
+2025-03-23 23:16:38,198 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\fastapi\\middleware\\cors.py', reloading
+2025-03-23 23:16:38,200 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\starlette\\middleware\\cors.py', reloading
+2025-03-23 23:16:38,209 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\fastapi\\__init__.py', reloading
+2025-03-23 23:16:38,224 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\fastapi\\applications.py', reloading
+2025-03-23 23:16:38,244 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\starlette\\applications.py', reloading
+2025-03-23 23:16:38,257 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\fastapi\\datastructures.py', reloading
+2025-03-23 23:16:38,268 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\starlette\\routing.py', reloading
+2025-03-23 23:16:38,284 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\fastapi\\params.py', reloading
+2025-03-23 23:16:38,297 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\starlette\\responses.py', reloading
+2025-03-23 23:16:38,312 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\starlette\\middleware\\__init__.py', reloading
+2025-03-23 23:16:38,321 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\starlette\\requests.py', reloading
+2025-03-23 23:16:38,325 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\starlette\\types.py', reloading
+2025-03-23 23:16:38,338 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\fastapi\\routing.py', reloading
+2025-03-23 23:16:38,356 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\starlette\\__init__.py', reloading
+2025-03-23 23:16:38,365 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\fastapi\\utils.py', reloading
+2025-03-23 23:16:38,372 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\fastapi\\types.py', reloading
+2025-03-23 23:16:38,442 - werkzeug - INFO -  * Restarting with watchdog (windowsapi)
+2025-03-23 23:16:38,866 - werkzeug - WARNING -  * Debugger is active!
+2025-03-23 23:16:38,875 - werkzeug - INFO -  * Debugger PIN: 117-821-657
+2025-03-23 23:16:38,889 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\google\\ai\\generativelanguage_v1beta\\types\\__init__.py', reloading
+2025-03-23 23:16:38,901 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\google\\ai\\generativelanguage_v1beta\\types\\generative_service.py', reloading
+2025-03-23 23:16:38,911 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\proto\\__init__.py', reloading
+2025-03-23 23:16:38,919 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\proto\\modules.py', reloading
+2025-03-23 23:16:38,935 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\proto\\fields.py', reloading
+2025-03-23 23:16:38,945 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\proto\\message.py', reloading
+2025-03-23 23:16:38,959 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\google\\ai\\generativelanguage_v1beta\\types\\content.py', reloading
+2025-03-23 23:16:38,968 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\PIL\\__init__.py', reloading
+2025-03-23 23:16:38,980 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\PIL\\Image.py', reloading
+2025-03-23 23:16:39,011 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\PIL\\ImageFile.py', reloading
+2025-03-23 23:16:39,027 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\google\\ai\\generativelanguage_v1beta\\types\\file.py', reloading
+2025-03-23 23:16:39,040 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\langgraph\\types.py', reloading
+2025-03-23 23:16:39,055 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\langgraph\\checkpoint\\base\\__init__.py', reloading
+2025-03-23 23:16:39,065 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\langchain_core\\runnables\\__init__.py', reloading
+2025-03-23 23:16:39,072 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\langchain_core\\runnables\\utils.py', reloading
+2025-03-23 23:16:39,087 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\langgraph\\store\\base\\__init__.py', reloading
+2025-03-23 23:16:39,101 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\langgraph\\pregel\\__init__.py', reloading
+2025-03-23 23:16:39,121 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\langgraph\\pregel\\protocol.py', reloading
+2025-03-23 23:16:39,135 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\langchain_core\\runnables\\base.py', reloading
+2025-03-23 23:16:39,172 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\langgraph\\utils\\runnable.py', reloading
+2025-03-23 23:16:39,188 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\langchain_core\\load\\serializable.py', reloading
+2025-03-23 23:16:39,199 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\pydantic\\__init__.py', reloading
+2025-03-23 23:16:39,209 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\pydantic\\errors.py', reloading
+2025-03-23 23:16:39,231 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\pydantic\\main.py', reloading
+2025-03-23 23:16:39,246 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\pydantic\\networks.py', reloading
+2025-03-23 23:16:39,269 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\pydantic\\types.py', reloading
+2025-03-23 23:16:39,296 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\pydantic\\deprecated\\tools.py', reloading
+2025-03-23 23:16:39,309 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\pydantic\\_internal\\_model_construction.py', reloading
+2025-03-23 23:16:39,337 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\pydantic\\fields.py', reloading
+2025-03-23 23:16:39,352 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\pydantic_core\\__init__.py', reloading
+2025-03-23 23:16:39,387 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\pydantic\\aliases.py', reloading
+2025-03-23 23:16:39,392 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\pydantic\\_internal\\_internal_dataclass.py', reloading
+2025-03-23 23:16:39,405 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\pydantic\\_internal\\_repr.py', reloading
+2025-03-23 23:16:39,414 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\pydantic\\_migration.py', reloading
+2025-03-23 23:16:39,429 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\pydantic_core\\core_schema.py', reloading
+2025-03-23 23:16:39,479 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\pydantic\\config.py', reloading
+2025-03-23 23:16:39,487 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\annotated_types\\__init__.py', reloading
+2025-03-23 23:16:39,517 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\pydantic\\_internal\\_generate_schema.py', reloading
+2025-03-23 23:16:39,547 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\pydantic\\_internal\\_decorators.py', reloading
+2025-03-23 23:16:39,584 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\langchain_core\\runnables\\config.py', reloading
+2025-03-23 23:16:39,595 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\langchain_core\\callbacks\\base.py', reloading
+2025-03-23 23:16:39,610 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\pydantic\\_internal\\_namespace_utils.py', reloading
+2025-03-23 23:16:39,637 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\google\\api_core\\timeout.py', reloading
+2025-03-23 23:16:39,651 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\google\\api_core\\retry\\__init__.py', reloading
+2025-03-23 23:16:39,659 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\google\\api_core\\retry\\retry_unary.py', reloading
+2025-03-23 23:16:39,668 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\google\\api_core\\retry\\retry_base.py', reloading
+2025-03-23 23:16:39,675 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\google\\generativeai\\string_utils.py', reloading
+2025-03-23 23:16:39,759 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\tinydb\\__init__.py', reloading
+2025-03-23 23:16:39,767 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\tinydb\\database.py', reloading
+2025-03-23 23:16:39,777 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\tinydb\\table.py', reloading
+2025-03-23 23:16:39,781 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\tinydb\\utils.py', reloading
+2025-03-23 23:16:39,790 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\tinydb\\queries.py', reloading
+2025-03-23 23:16:39,847 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\fastapi\\param_functions.py', reloading
+2025-03-23 23:16:39,852 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\fastapi\\exceptions.py', reloading
+2025-03-23 23:16:39,853 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\starlette\\exceptions.py', reloading
+2025-03-23 23:16:39,862 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\starlette\\status.py', reloading
+2025-03-23 23:16:39,868 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\fastapi\\security\\__init__.py', reloading
+2025-03-23 23:16:39,875 - werkzeug - INFO -  * Detected change in 'C:\\Users\\wgilp\\projects\\techtree\\.venv\\Lib\\site-packages\\fastapi\\security\\oauth2.py', reloading
+2025-03-23 23:16:39,917 - werkzeug - INFO -  * Restarting with watchdog (windowsapi)

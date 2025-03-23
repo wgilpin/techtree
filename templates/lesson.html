@@ -122,7 +122,7 @@
 
                 // Disable the button and show loading state
                 this.disabled = true;
-                this.textContent = 'Evaluating...';
+                this.innerHTML = '<span class="spinner"></span> thinking...';
 
                 try {
                     // Send the answer to the server
@@ -175,4 +175,22 @@
         }
     });
 </script>
+<style>
+.spinner {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  border: 3px solid rgba(0, 0, 0, 0.3);
+  border-radius: 50%;
+  border-top-color: #000;
+  animation: spin 1s ease-in-out infinite;
+  margin-right: 0.5em;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+</style>
 {% endblock %}

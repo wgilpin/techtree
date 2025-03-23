@@ -1,10 +1,6 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-
         {
             "name": "Python Debugger: Current File",
             "type": "debugpy",
@@ -13,26 +9,37 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Streamlit: Run",
-            "type": "debugpy",
-            "request": "launch",
-            "module": "streamlit",
-            "args": [
-                "run",
-                "${workspaceFolder}/lessons/streamlit_app/app.py"
-            ],
-            "cwd": "${workspaceFolder}",
-            "env": {
-                "STREAMLIT_THEME_BASE": "light"
-            },
-        },
-        {
             "name": "Python: Run backend/main.py",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/backend/main.py",
             "console": "integratedTerminal",
-            "cwd": "${workspaceFolder}/backend"
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Python: Run Frontend",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/app.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Uvicorn: backend.main:app",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "uvicorn",
+            "args": [
+                "backend.main:app",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "8000",
+                "--reload"
+            ],
+            "jinja": true,
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
         }
     ]
 }

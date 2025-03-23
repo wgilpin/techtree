@@ -1,3 +1,7 @@
+"""
+This script kills all running Python processes.
+"""
+
 # import os module
 import os
 

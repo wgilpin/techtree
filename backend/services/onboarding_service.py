@@ -1,11 +1,16 @@
-from ai.app import TechTreeAI
-from services.db import DatabaseService
+import logging
+from backend.ai.app import TechTreeAI
+from backend.services.sqlite_db import SQLiteDatabaseService
 from typing import Dict, Any, Optional, List
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 class OnboardingService:
     def __init__(self, db_service=None):
+        logger.info("Initializing OnboardingService")
         self.tech_tree_ai = TechTreeAI()
-        self.db_service = db_service or DatabaseService()
+        self.db_service = db_service or SQLiteDatabaseService()
         self.current_session = {}
 
     def _get_or_create_session(self, user_id: Optional[str] = None) -> Dict[str, Any]:
@@ -25,30 +30,50 @@ class OnboardingService:
 
     async def start_assessment(self, topic: str, user_id: Optional[str] = None) -> Dict[str, Any]:
         """Initialize the assessment process"""
-        session = self._get_or_create_session(user_id)
-        session["topic"] = topic
-        session["questions"] = []
-        session["responses"] = []
-        session["difficulty_history"] = []
-        session["is_complete"] = False
+        logger.info(f"Starting assessment for topic: {topic}, user_id: {user_id}")
+        logs = []
+        logs.append(f"Starting assessment for topic: {topic}, user_id: {user_id}")
+        try:
+            session = self._get_or_create_session(user_id)
+            session["topic"] = topic
+            session["questions"] = []
+            session["responses"] = []
+            session["difficulty_history"] = []
+            session["is_complete"] = False
 
-        # Initialize TechTreeAI with the topic
-        self.tech_tree_ai.initialize(topic)
-        result = self.tech_tree_ai.perform_search()
+            logs.append("Initializing TechTreeAI with topic")
+            # Initialize TechTreeAI with the topic
+            self.tech_tree_ai.initialize(topic)
+            logs.append("TechTreeAI initialized successfully")
 
-        # Generate first question
-        question_result = self.tech_tree_ai.generate_question()
+            logs.append("Performing search")
+            result = self.tech_tree_ai.perform_search()
+            logs.append(f"Search result: {result}")
 
-        # Store question in session
-        session["questions"].append(question_result["question"])
-        session["difficulty_history"].append(question_result["difficulty_str"])
+            logs.append("Generating first question")
+            # Generate first question
+            question_result = self.tech_tree_ai.generate_question()
+            logs.append(f"Question result: {question_result}")
 
-        return {
-            "search_status": result["search_status"],
-            "question": question_result["question"],
-            "difficulty": question_result["difficulty_str"],
-            "is_complete": False
-        }
+            # Store question in session
+            session["questions"].append(question_result["question"])
+            session["difficulty_history"].append(question_result["difficulty_str"])
+
+            logs.append("Assessment started successfully")
+            return {
+                "search_status": result["search_status"],
+                "question": question_result["question"],
+                "difficulty": question_result["difficulty_str"],
+                "is_complete": False,
+                "logs": logs
+            }
+        except Exception as e:
+            logger.error(f"Error starting assessment: {str(e)}", exc_info=True)
+            logs.append(f"Error starting assessment: {str(e)}")
+            return {
+                "error": str(e),
+                "logs": logs
+            }
 
     async def submit_answer(self, answer: str) -> Dict[str, Any]:
         """Process user's answer and generate next question or complete assessment"""
@@ -69,11 +94,11 @@ class OnboardingService:
 
         # Check if assessment is complete
         if result["completed"]:
-            knowledge_result = self.tech_tree_ai.calculate_knowledge_level()
+            knowledge_result = self.tech_tree_ai.get_final_assessment()
 
             session["is_complete"] = True
             session["knowledge_level"] = knowledge_result["knowledge_level"]
-            session["score"] = knowledge_result["score"]
+            session["score"] = knowledge_result.get("weighted_percentage", 0)
 
             # Save assessment to database if user_id exists
             if session["user_id"]:

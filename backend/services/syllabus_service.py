@@ -1,11 +1,11 @@
-from ai.app import SyllabusAI
-from services.db import DatabaseService
+from backend.ai.app import SyllabusAI
+from backend.services.sqlite_db import SQLiteDatabaseService
 from typing import Dict, Any, Optional, List
 
 class SyllabusService:
     def __init__(self, db_service=None):
         self.syllabus_ai = SyllabusAI()
-        self.db_service = db_service or DatabaseService()
+        self.db_service = db_service or SQLiteDatabaseService()
 
     async def create_syllabus(self, topic: str, knowledge_level: str, user_id: Optional[str] = None) -> Dict[str, Any]:
         """Create a new syllabus based on topic and knowledge level"""

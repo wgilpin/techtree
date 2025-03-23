@@ -8,6 +8,7 @@ import json
 import copy
 import uuid
 from datetime import datetime
+from datetime import datetime
 from typing import Dict, List, TypedDict, Optional
 
 import google.generativeai as genai
@@ -453,8 +454,6 @@ class SyllabusAI:
 
     def _save_syllabus(self, state: SyllabusState) -> Dict:
         """Save the syllabus to the database."""
-        import uuid
-        from datetime import datetime
 
         syllabus = state["generated_syllabus"] or state["existing_syllabus"]
         user_entered_topic = state["user_entered_topic"]

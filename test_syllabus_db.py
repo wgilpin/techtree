@@ -19,7 +19,7 @@ from tinydb import TinyDB, Query
 
 sys.path.append(".")
 
-from syllabus.ai.langgraph_app import SyllabusAI, call_with_retry
+from backend.ai.syllabus.langgraph_app import SyllabusAI
 
 # Mock data for tests
 MOCK_SYLLABUS = {
@@ -99,7 +99,12 @@ MOCK_SEARCH_RESULTS = {
 @patch("syllabus.ai.langgraph_app.tavily.search")
 @patch("syllabus.ai.langgraph_app.call_with_retry")
 class TestSyllabusDB(unittest.TestCase):
-    """Test case for syllabus database functionality."""
+    """
+    Test case for syllabus database functionality.
+
+    This class contains tests for creating, retrieving, and managing syllabi
+    in the database, including master and user-specific versions.
+    """
 
     def setUp(self):
         """Set up the test environment."""
@@ -134,7 +139,9 @@ class TestSyllabusDB(unittest.TestCase):
         self.assertEqual(len(uids), len(set(uids)))
 
     def test_master_version_creation(self, mock_call_with_retry, mock_tavily_search):
-        """Test that syllabi are correctly marked as master versions when no user_id is provided."""
+        """
+        Test that syllabi are correctly marked as master versions when no user_id is provided.
+        """
         # Configure mocks
         mock_tavily_search.return_value = MOCK_SEARCH_RESULTS
         mock_call_with_retry.return_value = MockGeminiResponse(
@@ -155,7 +162,9 @@ class TestSyllabusDB(unittest.TestCase):
         self.assertIsNone(syllabus_ai.state["generated_syllabus"].get("parent_uid"))
 
     def test_user_version_creation(self, mock_call_with_retry, mock_tavily_search):
-        """Test that syllabi are correctly marked as user versions when a user_id is provided."""
+        """
+        Test that syllabi are correctly marked as user versions when a user_id is provided.
+        """
         # Configure mocks
         mock_tavily_search.return_value = MOCK_SEARCH_RESULTS
         mock_call_with_retry.return_value = MockGeminiResponse(
@@ -196,7 +205,9 @@ class TestSyllabusDB(unittest.TestCase):
         )
 
     def test_clone_from_master(self, mock_call_with_retry, mock_tavily_search):
-        """Test cloning a master syllabus for a specific user."""
+        """
+        Test cloning a master syllabus for a specific user.
+        """
         # Configure mocks
         mock_tavily_search.return_value = MOCK_SEARCH_RESULTS
         mock_call_with_retry.return_value = MockGeminiResponse(
@@ -219,7 +230,9 @@ class TestSyllabusDB(unittest.TestCase):
         self.assertEqual(user_syllabus.get("parent_uid"), master_syllabus.get("uid"))
 
     def test_retrieve_existing_syllabus(self, mock_call_with_retry, mock_tavily_search):
-        """Test retrieving an existing syllabus from the database."""
+        """
+        Test retrieving an existing syllabus from the database.
+        """
         # Configure mocks
         mock_tavily_search.return_value = MOCK_SEARCH_RESULTS
         mock_call_with_retry.return_value = MockGeminiResponse(
@@ -249,7 +262,9 @@ class TestSyllabusDB(unittest.TestCase):
     def test_retrieve_user_specific_syllabus(
         self, mock_call_with_retry, mock_tavily_search
     ):
-        """Test retrieving a user-specific syllabus."""
+        """
+        Test retrieving a user-specific syllabus.
+        """
         # Configure mocks
         mock_tavily_search.return_value = MOCK_SEARCH_RESULTS
         mock_call_with_retry.return_value = MockGeminiResponse(
@@ -312,7 +327,9 @@ class TestSyllabusDB(unittest.TestCase):
         mock_call_with_retry.assert_not_called()
 
     def test_create_advanced_syllabus(self, mock_call_with_retry, mock_tavily_search):
-        """Test creating a syllabus with a different level."""
+        """
+        Test creating a syllabus with a different level.
+        """
         # Configure mocks
         mock_tavily_search.return_value = MOCK_SEARCH_RESULTS
         mock_call_with_retry.return_value = MockGeminiResponse(
@@ -328,7 +345,9 @@ class TestSyllabusDB(unittest.TestCase):
         self.assertEqual(syllabus.get("level"), "Advanced")
 
     def tearDown(self):
-        """Clean up the database after each test."""
+        """
+        Clean up the database after each test.
+        """
         print("\nCleaning up database...")
 
         # Make sure all tables are closed

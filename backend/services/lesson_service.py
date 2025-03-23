@@ -1,12 +1,12 @@
-from ai.app import LessonAI
-from services.db import DatabaseService
-from services.syllabus_service import SyllabusService
+from backend.ai.app import LessonAI
+from backend.services.sqlite_db import SQLiteDatabaseService
+from backend.services.syllabus_service import SyllabusService
 from typing import Dict, Any, Optional, List
 
 class LessonService:
     def __init__(self, db_service=None, syllabus_service=None):
         self.lesson_ai = LessonAI()
-        self.db_service = db_service or DatabaseService()
+        self.db_service = db_service or SQLiteDatabaseService()
         self.syllabus_service = syllabus_service or SyllabusService(self.db_service)
 
     async def get_or_generate_lesson(self, syllabus_id: str, module_index: int, lesson_index: int, user_id: Optional[str] = None) -> Dict[str, Any]:

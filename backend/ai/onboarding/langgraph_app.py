@@ -7,6 +7,7 @@ import random
 from collections import Counter
 from typing import Dict, List, TypedDict, Optional
 
+import requests
 import google.generativeai as genai
 from google.api_core.exceptions import ResourceExhausted
 from dotenv import load_dotenv
@@ -15,6 +16,9 @@ from tavily import TavilyClient
 
 # Load environment variables
 load_dotenv()
+
+# Configure Tavily and Gemini API timeouts
+TAVILY_TIMEOUT = 5  # seconds
 
 # Configure Gemini API
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
@@ -33,6 +37,14 @@ def call_with_retry(func, *args, max_retries=5, initial_delay=1, **kwargs):
         try:
             return func(*args, **kwargs)
         except ResourceExhausted:
+            retries += 1
+            if retries > max_retries:
+                raise
+
+            # Calculate delay with exponential backoff and jitter
+            delay = initial_delay * (2 ** (retries - 1)) + random.uniform(0, 1)
+            time.sleep(delay)
+        except requests.exceptions.Timeout:
             retries += 1
             if retries > max_retries:
                 raise
@@ -137,11 +149,14 @@ class TechTreeAI:
         try:
             # Search Wikipedia
             self.search_status = "Searching Wikipedia..."
-            wiki_search = tavily.search(
+            print(f"DEBUG: TAVILY_API_KEY = {os.environ.get('TAVILY_API_KEY')[0:8]}...")
+            wiki_search = call_with_retry(
+                tavily.search,
                 query=f"{topic} wikipedia",
                 search_depth="advanced",
-                include_domains=["wikipedia.org"],
+                include_domains=["en.wikipedia.org"],
                 max_results=1,
+                timeout=TAVILY_TIMEOUT
             )
             wikipedia_content = (
                 wiki_search.get("results", [{}])[0].get("content", "")
@@ -151,11 +166,13 @@ class TechTreeAI:
 
             # Search Google (excluding Wikipedia)
             self.search_status = "Searching Google..."
-            google_search = tavily.search(
+            google_search = call_with_retry(
+                tavily.search,
                 query=topic,
                 search_depth="advanced",
                 exclude_domains=["wikipedia.org"],
                 max_results=4,
+                timeout=TAVILY_TIMEOUT
             )
             google_results = [
                 result.get("content", "") for result in google_search.get("results", [])
@@ -202,33 +219,38 @@ class TechTreeAI:
         you can assess their level of understanding of the topic to decide what help
         they will need to master it.
         Assume the user is UK based, and currency is in GBP.
-        
+
         The student is at a {state['knowledge_level']} knowledge level.
         Ask a question on the topic, avoiding questions already asked.
         Avoid questions if the answer is the name of the topic.
         Questions should only require short answers, not detailed responses.
-        Never mention the sources, or the provided information,  as the user has no 
+        Never mention the sources, or the provided information,  as the user has no
         access to the source documents and does not know they exist.
-        
+
         The question should be at {difficulty_name} difficulty level ({target_difficulty}).
-        
+
         Use the following information from internet searches to create an accurate and up-to-date question:
-        
+
         {search_context}
-        
+
         Format your response as follows:
         Difficulty: {target_difficulty}
         Question: [your question here]
-        
+
         Questions already asked: {', '.join(state['questions_asked']) or 'None'}
         """
 
-        response = call_with_retry(model.generate_content, prompt)
-        response_text = response.text
+        try:
+            response = call_with_retry(model.generate_content, prompt)
+            response_text = response.text
 
-        # Parse the response to extract difficulty and question
-        difficulty = MEDIUM  # Default difficulty
-        question = response_text
+            # Parse the response to extract difficulty and question
+            difficulty = MEDIUM  # Default difficulty
+            question = response_text
+        except Exception as e:
+            print(f"Error in _generate_question: {str(e)}")
+            difficulty = MEDIUM  # Default difficulty
+            question = f"Error generating question: {str(e)}"
 
         # Try to extract difficulty and question from formatted response using regex
 
@@ -283,17 +305,17 @@ class TechTreeAI:
         Answer: {answer}
 
         Use the following information from internet searches to evaluate the answer accurately:
-        
+
         {search_context}
 
         Evaluate the answer for correctness and completeness, allowing that only short answers were requested.
-        Provide feedback on the answer, but never mention the sources, or provided information, 
+        Provide feedback on the answer, but never mention the sources, or provided information,
         as the user has no access to the source documents or other information and does not know they
         exist.
-        
+
         Important: If the student responds with "I don't know" or similar, the answer is incorrect and
         this does not need explaining: classify the answer as incorrect return the correct answer as feedback.
-                
+
         Classify the answer as one of: correct=1, partially correct=0.5, or incorrect=0.
         Make sure to include the classification explicitly as a number in your response.
         Respond with the classification: the feedback. For example:
@@ -302,13 +324,18 @@ class TechTreeAI:
         0:That is the wrong answer because swans can't live in space
         """
 
-        response = call_with_retry(model.generate_content, prompt)
-        evaluation = response.text
+        try:
+            response = call_with_retry(model.generate_content, prompt)
+            evaluation = response.text
 
-        # Extract the classification, the bit before the ':'
-        parts = evaluation.split(":")
-        classification: float = float(parts[0])
-        feedback = parts[1] if len(parts) > 1 else ""
+            # Extract the classification, the bit before the ':'
+            parts = evaluation.split(":")
+            classification: float = float(parts[0])
+            feedback = parts[1] if len(parts) > 1 else ""
+        except Exception as e:
+            print(f"Error in _evaluate_answer: {str(e)}")
+            classification = 0.0  # Default to incorrect
+            feedback = f"Error evaluating answer: {str(e)}"
 
         # Update consecutive wrong counter and target difficulty
         current_difficulty = state["current_target_difficulty"]
@@ -411,17 +438,30 @@ class TechTreeAI:
 
     def initialize(self, topic: str) -> Dict:
         """Initialize the agent with a topic."""
-        self.state = self._initialize(topic=topic)
-        return {"status": "initialized", "topic": topic}
+        print(f"DEBUG: Initializing TechTreeAI with topic: {topic}")
+        try:
+            self.state = self._initialize(topic=topic)
+            print(f"DEBUG: Successfully initialized state for topic: {topic}")
+            return {"status": "initialized", "topic": topic}
+        except Exception as e:
+            print(f"DEBUG: Error initializing TechTreeAI: {str(e)}")
+            raise
 
     def perform_search(self) -> Dict:
         """Perform internet search for the topic."""
+        print(f"DEBUG: Starting search for topic: {self.state['topic'] if self.state else 'None'}")
         if not self.state:
+            print("DEBUG: Error - Agent not initialized")
             raise ValueError("Agent not initialized")
 
-        result = self._perform_internet_search(self.state)
-        self.state.update(result)
-        return {"status": "search_completed", "search_status": self.search_status}
+        try:
+            result = self._perform_internet_search(self.state)
+            print(f"DEBUG: Search completed with result: {result}")
+            self.state.update(result)
+            return {"status": "search_completed", "search_status": self.search_status}
+        except Exception as e:
+            print(f"DEBUG: Error during search: {str(e)}")
+            raise
 
     def generate_question(self) -> Dict:
         """Generate a question based on the current state."""
@@ -478,5 +518,26 @@ class TechTreeAI:
         return self.is_quiz_complete
 
     def get_search_status(self) -> str:
-        """Get the current search status."""
+        """Return the search status."""
         return self.search_status
+
+    def process_response(self, answer: str) -> Dict:
+        """Process the user's response and return the result."""
+        if not self.state:
+            raise ValueError("Agent not initialized")
+
+        result = self.evaluate_answer(answer)
+
+        # Check if we should continue or end
+        continue_or_end = self._should_continue(self.state)
+        if continue_or_end == END:
+            self._end(self.state)
+            return {
+                "completed": True,
+                "feedback": result["feedback"],
+            }
+
+        return {
+            "completed": False,
+            "feedback": result["feedback"],
+        }

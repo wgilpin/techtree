@@ -24,5 +24,6 @@ FRONTEND_PID=$!
 sleep 2
 
 # If the Flask app exits, kill the backend process
+wait -n $FRONTEND_PID
 kill $BACKEND_PID
-kill $FRONTEND_PID
+wait

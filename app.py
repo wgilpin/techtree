@@ -1,15 +1,35 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
-import requests
-import os
-import json
-from functools import wraps
-import logging
+#pylint: disable=logging-fstring-interpolation
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+"""
+Main application module for the TechTree frontend.
+
+This module contains the Flask application that serves as the frontend for the
+TechTree learning platform. It handles user authentication, routing, and
+interaction with the backend API.
+"""
+import logging
+import os
+from functools import wraps
+
+import requests
+from flask import (Flask, flash, jsonify, redirect, render_template, request,
+                   session, url_for)
+
+# Configure logging to use the same file as the backend
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('techtree.log')
+    ]
+)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+"""
+Flask application instance.
+"""
+
 app.secret_key = "your-secret-key"  # For session management
 API_URL = "http://localhost:8000"  # Your FastAPI backend
 
@@ -22,6 +42,9 @@ os.makedirs('templates/components', exist_ok=True)
 
 # Authentication decorator
 def login_required(f):
+    """
+    Decorator for routes that require a logged-in user.
+    """
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'user' not in session:
@@ -32,6 +55,13 @@ def login_required(f):
 # Routes
 @app.route("/", methods=["GET", "POST"])
 def index():
+    """
+    Handles the main index route.
+
+    If the user is logged in, redirects to the dashboard.
+    Otherwise, redirects to the login page.
+    Allows POST requests to initiate onboarding for a specific topic.
+    """
     if request.method == "POST":
         topic = request.form.get('topic')
         if topic:
@@ -43,6 +73,13 @@ def index():
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    """
+    Handles user login.
+
+    If the login is successful, stores user data in the session and redirects
+    to the dashboard.
+    If the login fails, displays an error message.
+    """
     error = None
     if request.method == "POST":
         email = request.form.get('email')
@@ -56,7 +93,7 @@ def login():
                     'username': email,
                     'password': password
                 },
-                timeout=5
+                timeout=30
             )
 
             if response.ok:
@@ -79,6 +116,13 @@ def login():
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
+    """
+    Handles user registration.
+
+    If the registration is successful, stores user data in the session and
+    redirects to the dashboard.
+    If the registration fails, displays an error message.
+    """
     error = None
     if request.method == "POST":
         email = request.form.get('email')
@@ -94,7 +138,7 @@ def register():
                     'password': password,
                     'name': name
                 },
-                timeout=5
+                timeout=30
             )
 
             if response.ok:
@@ -117,19 +161,30 @@ def register():
 
 @app.route("/logout")
 def logout():
+    """
+    Handles user logout.
+
+    Removes user data from the session and redirects to the login page.
+    """
     session.pop('user', None)
     return redirect(url_for('login'))
 
 @app.route("/dashboard")
 @login_required
 def dashboard():
+    """
+    Displays the user's dashboard.
+
+    Fetches in-progress courses from the backend API and displays them.
+    Requires the user to be logged in.
+    """
     try:
         # Get in-progress courses
         headers = {'Authorization': f"Bearer {session['user']['access_token']}"}
         response = requests.get(
             f"{API_URL}/progress/courses",
             headers=headers,
-            timeout=5
+            timeout=30
         )
 
         if response.ok:
@@ -144,8 +199,14 @@ def dashboard():
         return render_template("dashboard.html", user=session['user'], courses=[])
 
 @app.route("/onboarding/<topic>", methods=["GET", "POST"])
-@login_required
 def onboarding(topic=None):
+    """
+    Handles the onboarding process for a given topic.
+
+    If the request method is POST, processes the user's answer and either
+    continues the assessment or redirects to the syllabus page.
+    If the request method is GET, starts a new assessment for the given topic.
+    """
     if request.method == "POST":
         if not topic:
             topic = request.form.get('topic')
@@ -159,7 +220,7 @@ def onboarding(topic=None):
                 f"{API_URL}/onboarding/answer",
                 json={'answer': answer},
                 headers=headers,
-                timeout=5
+                timeout=30
             )
 
             if response.ok:
@@ -192,7 +253,7 @@ def onboarding(topic=None):
                 f"{API_URL}/onboarding/assessment",
                 json={'topic': topic},
                 headers=headers,
-                timeout=5
+                timeout=30
             )
 
             if response.ok:
@@ -217,12 +278,18 @@ def onboarding(topic=None):
 @app.route("/syllabus/<topic>/<level>")
 @login_required
 def syllabus(topic, level):
+    """
+    Displays the syllabus for a given topic and level.
+
+    Fetches the syllabus data from the backend API.
+    Requires the user to be logged in.
+    """
     try:
         headers = {'Authorization': f"Bearer {session['user']['access_token']}"}
         response = requests.get(
             f"{API_URL}/syllabus/topic/{topic}/level/{level}",
             headers=headers,
-            timeout=5
+            timeout=30
         )
 
         if response.ok:
@@ -244,13 +311,19 @@ def syllabus(topic, level):
 
 @app.route("/lesson/<syllabus_id>/<module>/<lesson>")
 @login_required
-def lesson(syllabus_id, module, lesson):
+def lesson(syllabus_id, module, lesson_arg):
+    """
+    Displays a specific lesson.
+
+    Fetches the lesson data from the backend API.
+    Requires the user to be logged in.
+    """
     try:
         headers = {'Authorization': f"Bearer {session['user']['access_token']}"}
         response = requests.get(
-            f"{API_URL}/lesson/{syllabus_id}/{module}/{lesson}",
+            f"{API_URL}/lesson/{syllabus_id}/{module}/{lesson_arg}",
             headers=headers,
-            timeout=5
+            timeout=30
         )
 
         if response.ok:
@@ -260,7 +333,7 @@ def lesson(syllabus_id, module, lesson):
                 user=session['user'],
                 syllabus_id=syllabus_id,
                 module=module,
-                lesson=lesson,
+                lesson=lesson_arg,
                 lesson_data=lesson_data
             )
         else:
@@ -274,6 +347,12 @@ def lesson(syllabus_id, module, lesson):
 @app.route("/lesson/exercise/evaluate", methods=["POST"])
 @login_required
 def evaluate_exercise():
+    """
+    Evaluates a user's answer to an exercise.
+
+    Sends the answer to the backend API for evaluation and returns the result.
+    Requires the user to be logged in.
+    """
     data = request.json
     lesson_id = data.get('lesson_id')
     exercise_index = data.get('exercise_index')
@@ -289,7 +368,7 @@ def evaluate_exercise():
                 'answer': answer
             },
             headers=headers,
-            timeout=5
+            timeout=30
         )
 
         if response.ok:

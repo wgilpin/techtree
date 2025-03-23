@@ -51,7 +51,7 @@
 
                     <form action="{{ url_for('onboarding', topic=topic) }}" method="post" class="answer-form">
                         <textarea name="answer" placeholder="Type your answer here..." rows="3" required></textarea>
-                        <button type="submit" class="primary-button">Submit Answer</button>
+                        <button type="submit" id="submit-answer-btn" class="primary-button">Submit Answer</button>
                     </form>
                 {% endif %}
             </div>
@@ -61,12 +61,50 @@
 {% endblock %}
 
 {% block extra_js %}
+<style>
+.spinner {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  border: 3px solid rgba(0, 0, 0, 0.3);
+  border-radius: 50%;
+  border-top-color: #000;
+  animation: spin 1s ease-in-out infinite;
+  margin-right: 0.5em;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+</style>
 <script>
     // Auto-focus the answer textarea if it exists
     document.addEventListener('DOMContentLoaded', function() {
         const answerTextarea = document.querySelector('textarea[name="answer"]');
         if (answerTextarea) {
             answerTextarea.focus();
+        }
+
+        // Handle submit button loading state
+        const form = document.querySelector('.answer-form');
+        const submitButton = document.getElementById('submit-answer-btn');
+
+        if (form && submitButton) {
+            form.addEventListener('submit', function() {
+                submitButton.disabled = true;
+                // Clear the button
+                submitButton.textContent = '';
+
+                // Create and add the spinner
+                const spinner = document.createElement('span');
+                spinner.className = 'spinner';
+                submitButton.appendChild(spinner);
+
+                // Add the text
+                submitButton.appendChild(document.createTextNode(' thinking...'));
+            });
         }
     });
 </script>
