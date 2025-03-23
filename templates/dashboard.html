@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - TechTree{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <h1>Welcome, {{ user.name }}!</h1>
+
+    <div class="dashboard-section">
+        <div class="section-header">
+            <h2>Your Learning Journey</h2>
+            <button class="primary-button" onclick="showTopicInput()">Start New Topic</button>
+        </div>
+
+        {% if courses and courses|length > 0 %}
+            <div class="courses-grid">
+                {% for course in courses %}
+                    <div class="course-card">
+                        <div class="course-header">
+                            <h3>{{ course.topic }}</h3>
+                            <span class="level-badge">{{ course.level }}</span>
+                        </div>
+                        <div class="course-progress">
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: {{ course.progress_percentage }}%;"></div>
+                            </div>
+                            <div class="progress-text">
+                                {{ course.progress_percentage|int }}% Complete
+                            </div>
+                        </div>
+                        <div class="course-stats">
+                            <div class="stat">
+                                <span class="stat-value">{{ course.completed_lessons }}</span>
+                                <span class="stat-label">Completed</span>
+                            </div>
+                            <div class="stat">
+                                <span class="stat-value">{{ course.total_lessons }}</span>
+                                <span class="stat-label">Total Lessons</span>
+                            </div>
+                        </div>
+                        <a href="{{ url_for('syllabus', topic=course.topic, level=course.level) }}" class="course-button">Continue Learning</a>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <div class="empty-icon">📚</div>
+                <h3>No courses in progress</h3>
+                <p>Start your learning journey by selecting a topic below.</p>
+
+                <div class="topic-suggestions">
+                    <a href="{{ url_for('onboarding', topic='Python Programming') }}" class="topic-button">Python Programming</a>
+                    <a href="{{ url_for('onboarding', topic='Machine Learning') }}" class="topic-button">Machine Learning</a>
+                    <a href="{{ url_for('onboarding', topic='Web Development') }}" class="topic-button">Web Development</a>
+                    <a href="{{ url_for('onboarding', topic='Quantum Computing') }}" class="topic-button">Quantum Computing</a>
+                </div>
+<div class="custom-topic">
+    <form action="{{ url_for('index') }}" method="post">
+        <input type="text" name="topic" placeholder="Or enter your own topic..." required>
+        <button type="submit" class="primary-button">Start</button>
+    </form>
+</div>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+
+    <div class="dashboard-section">
+        <div class="section-header">
+            <h2>Learning Stats</h2>
+        </div>
+
+        <div class="stats-container">
+            <div class="stat-card">
+                <div class="stat-icon">🏆</div>
+                <div class="stat-value">{{ courses|length }}</div>
+                <div class="stat-label">Courses in Progress</div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-icon">✅</div>
+                <div class="stat-value">
+                    {% set total_completed = 0 %}
+                    {% for course in courses %}
+                        {% set total_completed = total_completed + course.completed_lessons %}
+                    {% endfor %}
+                    {{ total_completed }}
+                </div>
+                <div class="stat-label">Lessons Completed</div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-icon">⏱️</div>
+                <div class="stat-value">
+                    {% set avg_progress = 0 %}
+                    {% if courses|length > 0 %}
+                        {% for course in courses %}
+                            {% set avg_progress = avg_progress + course.progress_percentage %}
+                        {% endfor %}
+                        {% set avg_progress = (avg_progress / courses|length)|int %}
+                    {% endif %}
+                    {{ avg_progress }}%
+                </div>
+                <div class="stat-label">Average Progress</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    function showTopicInput() {
+        const sidebar = document.getElementById('sidebar');
+        const topicInput = document.getElementById('topic-input');
+
+        sidebar.classList.add('open');
+        topicInput.style.display = 'block';
+        topicInput.querySelector('input').focus();
+    }
+</script>
+{% endblock %}

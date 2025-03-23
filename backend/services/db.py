@@ -7,8 +7,6 @@ from pathlib import Path
 class DatabaseService:
     def __init__(self, db_path="techtree_db.json"):
         try:
-            print(f"Initializing DatabaseService with db_path: {db_path}")
-
             # Always use the root directory techtree_db.json
             root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             abs_path = os.path.join(root_dir, "techtree_db.json")
@@ -16,18 +14,13 @@ class DatabaseService:
 
             # Ensure the directory exists
             db_dir = os.path.dirname(abs_path)
-            print(f"Database directory: {db_dir}")
             Path(db_dir).mkdir(parents=True, exist_ok=True)
-            print(f"Directory created/verified")
 
             # Check if file exists
-            if os.path.exists(abs_path):
-                print(f"Database file exists at: {abs_path}")
-            else:
+            if not os.path.exists(abs_path):
                 print(f"Database file does not exist, will be created at: {abs_path}")
 
             self.db = TinyDB(abs_path)
-            print(f"TinyDB initialized")
 
             self.users = self.db.table("users")
             self.assessments = self.db.table("user_assessments")
@@ -36,7 +29,6 @@ class DatabaseService:
             self.user_progress = self.db.table("user_progress")
             self.User = Query()
 
-            print(f"All tables initialized")
         except Exception as e:
             print(f"Error initializing database: {str(e)}")
             raise

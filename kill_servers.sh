@@ -1,50 +1,37 @@
 #!/bin/bash
 
-# kill_servers.sh - Script to find and kill Python and Node.js processes
-# For use in Windows environments with bash shell (Git Bash or WSL)
+# Find and kill all processes whose name starts with "python"
+echo "Searching for python processes..."
 
-echo "Searching for Python and Node.js processes..."
+# Get list of python processes
+pythonpids=$(tasklist.exe //FI "IMAGENAME eq python*" //FO CSV | grep -i "python" | cut -d',' -f2 | tr -d '"')
 
-# Function to kill processes by name
-kill_process() {
-    process_name=$1
-    echo "Looking for $process_name processes..."
+# Check if any processes were found
+if [ -z "$pythonpids" ]; then
+  echo "No python processes found."
+else
+  # Kill each process individually with proper formatting
+  for pid in $pythonpids; do
+    echo "Killing process with PID: $pid"
+    taskkill.exe //F //PID "$pid"
+  done
+fi
 
-    # Use tasklist to find processes and filter by name
-    processes=$(tasklist //FI "IMAGENAME eq $process_name" 2>/dev/null | grep $process_name)
+# Find and kill all processes whose name is "node.exe"
+echo "Searching for node processes..."
 
-    if [ -z "$processes" ]; then
-        echo "No $process_name processes found."
-        return 0
-    fi
+# Get list of node processes
+nodepids=$(tasklist.exe //FI "IMAGENAME eq node.exe" //FO CSV | grep -i "node" | cut -d',' -f2 | tr -d '"')
 
-    echo "Found $process_name processes:"
-    echo "$processes"
-    echo ""
+# Check if any processes were found
+if [ -z "$nodepids" ]; then
+  echo "No node processes found."
+else
+  # Kill each process individually with proper formatting
+  for pid in $nodepids; do
+    echo "Killing process with PID: $pid"
+    taskkill.exe //F //PID "$pid"
+  done
+fi
 
-    # Extract PIDs and kill each process
-    echo "Terminating $process_name processes..."
-    pids=$(echo "$processes" | awk '{print $2}')
-
-    for pid in $pids; do
-        echo "Killing process with PID: $pid"
-        taskkill //F //PID $pid 2>/dev/null
-
-        if [ $? -eq 0 ]; then
-            echo "Successfully terminated process with PID: $pid"
-        else
-            echo "Failed to terminate process with PID: $pid"
-        fi
-    done
-
-    echo "Finished processing $process_name."
-    echo ""
-}
-
-# Kill Python processes
-kill_process "python.exe"
-
-# Kill Node.js processes
-kill_process "node.exe"
-
-echo "All operations completed."
+echo "Operation completed."

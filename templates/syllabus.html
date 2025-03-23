@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block title %}{{ topic }} Syllabus - TechTree{% endblock %}
+
+{% block content %}
+<div class="syllabus-container">
+    {% if not syllabus %}
+        <div class="loading-state">
+            <div class="loading-spinner"></div>
+            <h2>Creating your personalized syllabus...</h2>
+            <p>This may take a moment as we tailor the content to your knowledge level.</p>
+        </div>
+    {% else %}
+        <div class="syllabus-header">
+            <div class="syllabus-title">
+                <h1>{{ syllabus.content.topic }}</h1>
+                <span class="level-badge">{{ syllabus.content.level }}</span>
+            </div>
+            <div class="syllabus-meta">
+                <div class="meta-item">
+                    <span class="meta-label">Duration:</span>
+                    <span class="meta-value">{{ syllabus.content.duration }}</span>
+                </div>
+            </div>
+            <div class="syllabus-description">
+                <h2>Learning Objectives</h2>
+                <ul class="objectives-list">
+                    {% for objective in syllabus.content.learning_objectives %}
+                        <li>{{ objective }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+
+        <div class="modules-container">
+            {% for module in syllabus.content.modules %}
+                <div class="module-card">
+                    <div class="module-header">
+                        <h2>Module {{ module.week }}: {{ module.title }}</h2>
+                    </div>
+
+                    <div class="lessons-list">
+                        {% for lesson in module.lessons %}
+                            <div class="lesson-item">
+                                <div class="lesson-info">
+                                    <span class="lesson-number">Lesson {{ loop.index }}</span>
+                                    <h3 class="lesson-title">{{ lesson.title }}</h3>
+                                </div>
+                                <a href="{{ url_for('lesson', syllabus_id=syllabus.syllabus_id, module=module.week-1, lesson=loop.index0) }}" class="lesson-button">
+                                    Start Lesson
+                                </a>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // If in loading state, redirect to refresh after a few seconds
+    document.addEventListener('DOMContentLoaded', function() {
+        const loadingState = document.querySelector('.loading-state');
+        if (loadingState) {
+            setTimeout(function() {
+                window.location.reload();
+            }, 5000);
+        }
+    });
+</script>
+{% endblock %}

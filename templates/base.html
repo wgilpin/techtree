@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}TechTree{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <div class="app-container">
+        <header class="header">
+            <div class="header-content">
+                <div class="logo-container">
+                    <a href="{{ url_for('index') }}" class="logo-text">
+                        TechTree
+                    </a>
+                </div>
+                <div class="nav-container">
+                    <nav class="main-nav">
+                        {% if session.user %}
+                            <a href="{{ url_for('dashboard') }}" class="nav-link">Dashboard</a>
+                            <a href="#" class="nav-link" id="toggle-sidebar">Menu</a>
+                            <div class="user-menu">
+                                <span>{{ session.user.name }}</span>
+                                <a href="{{ url_for('logout') }}" class="nav-link">Logout</a>
+                            </div>
+                        {% else %}
+                            <a href="{{ url_for('login') }}" class="nav-link">Login</a>
+                            <a href="{{ url_for('register') }}" class="nav-link">Register</a>
+                        {% endif %}
+                    </nav>
+                </div>
+            </div>
+        </header>
+
+        <main class="content">
+            {% if session.user %}
+                <aside class="sidebar" id="sidebar">
+                    <div class="sidebar-content">
+                        <h3>Navigation</h3>
+                        <ul class="sidebar-nav">
+                            <li><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li><a href="#" onclick="showTopicInput()">Start New Topic</a></li>
+                        </ul>
+
+                        <div id="topic-input" style="display: none;">
+                            <form action="{{ url_for('index') }}" method="post">
+                                <input type="text" name="topic" placeholder="Enter a topic" required>
+                                <button type="submit">Start</button>
+                            </form>
+                        </div>
+
+                        <h3>In Progress</h3>
+                        <ul class="sidebar-courses">
+                            <!-- This would be populated dynamically -->
+                        </ul>
+                    </div>
+                </aside>
+            {% endif %}
+
+            <div class="page-content">
+                {% with messages = get_flashed_messages() %}
+                    {% if messages %}
+                        <div class="flash-messages">
+                            {% for message in messages %}
+                                <div class="flash-message">{{ message }}</div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                {% endwith %}
+
+                {% block content %}{% endblock %}
+            </div>
+        </main>
+
+        <footer class="footer">
+            <div class="footer-content">
+                <p>&copy; 2025 TechTree. All rights reserved.</p>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        // Toggle sidebar
+        document.getElementById('toggle-sidebar').addEventListener('click', function(e) {
+            e.preventDefault();
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.toggle('open');
+        });
+
+        // Show topic input
+        function showTopicInput() {
+            const topicInput = document.getElementById('topic-input');
+            topicInput.style.display = 'block';
+        }
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Assessment - {{ topic }} - TechTree{% endblock %}
+
+{% block content %}
+<div class="onboarding-container">
+    {% if not topic %}
+        <div class="topic-selection">
+            <h1>What would you like to learn about?</h1>
+            <p>Enter a topic to start your personalized learning journey.</p>
+
+            <form action="{{ url_for('onboarding', topic='') }}" method="post" class="topic-form">
+                <input type="text" name="topic" placeholder="Enter a topic (e.g., 'Quantum Physics')" required>
+                <button type="submit" class="primary-button">Start Assessment</button>
+            </form>
+
+            <div class="topic-suggestions">
+                <h3>Popular Topics</h3>
+                <div class="suggestion-buttons">
+                    <a href="{{ url_for('onboarding', topic='Python Programming') }}" class="topic-button">Python Programming</a>
+                    <a href="{{ url_for('onboarding', topic='Machine Learning') }}" class="topic-button">Machine Learning</a>
+                    <a href="{{ url_for('onboarding', topic='Web Development') }}" class="topic-button">Web Development</a>
+                    <a href="{{ url_for('onboarding', topic='Quantum Computing') }}" class="topic-button">Quantum Computing</a>
+                </div>
+            </div>
+        </div>
+    {% else %}
+        <div class="assessment-container">
+            <div class="assessment-header">
+                <h1>Knowledge Assessment: {{ topic }}</h1>
+                <p>This assessment will help us create a personalized learning path for you.</p>
+                {% if difficulty %}
+                    <div class="difficulty-indicator">
+                        <span class="difficulty-label">Difficulty:</span>
+                        <span class="difficulty-value">{{ difficulty }}</span>
+                    </div>
+                {% endif %}
+            </div>
+
+            <div class="chat-container">
+                {% if feedback %}
+                    <div class="chat-message assistant-message">
+                        <div class="message-content">{{ feedback }}</div>
+                    </div>
+                {% endif %}
+
+                {% if question %}
+                    <div class="chat-message assistant-message">
+                        <div class="message-content">{{ question }}</div>
+                    </div>
+
+                    <form action="{{ url_for('onboarding', topic=topic) }}" method="post" class="answer-form">
+                        <textarea name="answer" placeholder="Type your answer here..." rows="3" required></textarea>
+                        <button type="submit" class="primary-button">Submit Answer</button>
+                    </form>
+                {% endif %}
+            </div>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Auto-focus the answer textarea if it exists
+    document.addEventListener('DOMContentLoaded', function() {
+        const answerTextarea = document.querySelector('textarea[name="answer"]');
+        if (answerTextarea) {
+            answerTextarea.focus();
+        }
+    });
+</script>
+{% endblock %}

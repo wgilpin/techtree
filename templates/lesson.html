@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+
+{% block title %}Lesson - TechTree{% endblock %}
+
+{% block content %}
+<div class="lesson-container">
+    {% if not lesson_data %}
+        <div class="loading-state">
+            <div class="loading-spinner"></div>
+            <h2>Loading lesson content...</h2>
+            <p>This may take a moment as we prepare your personalized lesson.</p>
+        </div>
+    {% else %}
+        <div class="lesson-header">
+            <div class="lesson-navigation">
+                <a href="{{ url_for('syllabus', topic=lesson_data.topic, level=lesson_data.level) }}" class="back-link">
+                    &larr; Back to Syllabus
+                </a>
+            </div>
+
+            <div class="lesson-title">
+                <h1>{{ lesson_data.title }}</h1>
+                <div class="lesson-meta">
+                    <span class="module-info">Module {{ lesson_data.module_index + 1 }}</span>
+                    <span class="lesson-info">Lesson {{ lesson_data.lesson_index + 1 }}</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="lesson-content">
+            <div class="content-section exposition">
+                <h2>Introduction</h2>
+                <div class="exposition-content">
+                    {{ lesson_data.exposition|safe }}
+                </div>
+            </div>
+
+            {% if lesson_data.exercises %}
+                <div class="content-section exercises">
+                    <h2>Exercises</h2>
+
+                    {% for exercise in lesson_data.exercises %}
+                        <div class="exercise-item" id="exercise-{{ loop.index0 }}">
+                            <div class="exercise-question">
+                                <h3>Exercise {{ loop.index }}</h3>
+                                <div class="question-content">
+                                    {{ exercise.question|safe }}
+                                </div>
+                            </div>
+
+                            <div class="exercise-answer">
+                                <textarea
+                                    class="answer-input"
+                                    placeholder="Type your answer here..."
+                                    data-exercise-index="{{ loop.index0 }}"
+                                    rows="4"
+                                ></textarea>
+                                <button
+                                    class="submit-answer-btn"
+                                    data-exercise-index="{{ loop.index0 }}"
+                                    data-lesson-id="{{ lesson_data.lesson_id }}"
+                                >
+                                    Submit Answer
+                                </button>
+                            </div>
+
+                            <div class="exercise-feedback" id="feedback-{{ loop.index0 }}" style="display: none;">
+                                <div class="feedback-content"></div>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+
+            <div class="content-section summary">
+                <h2>Summary</h2>
+                <div class="summary-content">
+                    {{ lesson_data.summary|safe }}
+                </div>
+            </div>
+
+            <div class="lesson-navigation-bottom">
+                <a href="{{ url_for('syllabus', topic=lesson_data.topic, level=lesson_data.level) }}" class="nav-button">
+                    Back to Syllabus
+                </a>
+
+                {% if lesson_data.next_lesson %}
+                    <a href="{{ url_for('lesson', syllabus_id=syllabus_id, module=lesson_data.next_lesson.module, lesson=lesson_data.next_lesson.lesson) }}" class="nav-button primary">
+                        Next Lesson &rarr;
+                    </a>
+                {% else %}
+                    <a href="{{ url_for('dashboard') }}" class="nav-button primary">
+                        Complete Module
+                    </a>
+                {% endif %}
+            </div>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Handle exercise submission
+        const submitButtons = document.querySelectorAll('.submit-answer-btn');
+
+        submitButtons.forEach(button => {
+            button.addEventListener('click', async function() {
+                const exerciseIndex = this.getAttribute('data-exercise-index');
+                const lessonId = this.getAttribute('data-lesson-id');
+                const answerInput = document.querySelector(`.answer-input[data-exercise-index="${exerciseIndex}"]`);
+                const feedbackDiv = document.getElementById(`feedback-${exerciseIndex}`);
+                const feedbackContent = feedbackDiv.querySelector('.feedback-content');
+
+                // Get the answer
+                const answer = answerInput.value.trim();
+                if (!answer) {
+                    alert('Please enter your answer before submitting.');
+                    return;
+                }
+
+                // Disable the button and show loading state
+                this.disabled = true;
+                this.textContent = 'Evaluating...';
+
+                try {
+                    // Send the answer to the server
+                    const response = await fetch('/lesson/exercise/evaluate', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            lesson_id: lessonId,
+                            exercise_index: parseInt(exerciseIndex),
+                            answer: answer
+                        })
+                    });
+
+                    const result = await response.json();
+
+                    // Display feedback
+                    feedbackContent.innerHTML = result.feedback;
+                    feedbackDiv.style.display = 'block';
+
+                    // Update button state
+                    this.textContent = 'Submit Answer';
+                    this.disabled = false;
+
+                    // If correct, disable the input and button
+                    if (result.is_correct) {
+                        answerInput.disabled = true;
+                        this.disabled = true;
+                        this.textContent = 'Correct!';
+                    }
+                } catch (error) {
+                    console.error('Error evaluating exercise:', error);
+                    feedbackContent.innerHTML = 'An error occurred while evaluating your answer. Please try again.';
+                    feedbackDiv.style.display = 'block';
+
+                    // Reset button state
+                    this.textContent = 'Submit Answer';
+                    this.disabled = false;
+                }
+            });
+        });
+
+        // If in loading state, redirect to refresh after a few seconds
+        const loadingState = document.querySelector('.loading-state');
+        if (loadingState) {
+            setTimeout(function() {
+                window.location.reload();
+            }, 5000);
+        }
+    });
+</script>
+{% endblock %}
