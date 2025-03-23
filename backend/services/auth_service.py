@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional
 # Settings for JWT
 SECRET_KEY = "your-secret-key"  # In production, this should be an environment variable
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 40320  # Increased to 28 days  (28 * 60 * 24)
 
 class AuthService:
     def __init__(self, db_service=None):

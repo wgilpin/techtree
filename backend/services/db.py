@@ -9,9 +9,10 @@ class DatabaseService:
         try:
             print(f"Initializing DatabaseService with db_path: {db_path}")
 
-            # Get absolute path
-            abs_path = os.path.abspath(db_path)
-            print(f"Absolute path: {abs_path}")
+            # Always use the root directory techtree_db.json
+            root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            abs_path = os.path.join(root_dir, "techtree_db.json")
+            print(f"Using database at root directory: {abs_path}")
 
             # Ensure the directory exists
             db_dir = os.path.dirname(abs_path)
