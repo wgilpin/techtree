@@ -1,4 +1,4 @@
-# pylint: disable=missing-class-docstring,missing-module-docstring,broad-exception-caught,singleton-comparison
+# pylint: disable=broad-exception-caught,singleton-comparison
 
 import os
 import re
@@ -296,6 +296,7 @@ class SyllabusAI:
             # Pattern for JSON in code blocks
             r"```(?:json)?\s*({.*?})```",
             # Pattern for JSON with outer braces
+            # pylint: disable=line-too-long
             r'({[\s\S]*"topic"[\s\S]*"level"[\s\S]*"duration"[\s\S]*"learning_objectives"[\s\S]*"modules"[\s\S]*})',
             # Pattern for just the JSON object
             r"({[\s\S]*})",
@@ -414,6 +415,7 @@ class SyllabusAI:
             # Pattern for JSON in code blocks
             r"```(?:json)?\s*({.*?})```",
             # Pattern for JSON with outer braces
+            # pylint: disable=line-too-long
             r'({[\s\S]*"topic"[\s\S]*"level"[\s\S]*"duration"[\s\S]*"learning_objectives"[\s\S]*"modules"[\s\S]*})',
             # Pattern for just the JSON object
             r"({[\s\S]*})",

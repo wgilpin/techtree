@@ -1,3 +1,5 @@
+""" main backend module """
+
 from .onboarding.onboarding_graph import TechTreeAI
 from .syllabus.syllabus_graph import SyllabusAI
 from .lessons.lessons_graph import LessonAI

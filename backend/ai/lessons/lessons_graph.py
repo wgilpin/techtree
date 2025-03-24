@@ -1,4 +1,5 @@
-# pylint: disable=missing-class-docstring,missing-module-docstring
+""" Langgraph code for the lessons AI """
+# pylint: disable=broad-exception-caught,singleton-comparison
 
 import os
 import re
@@ -45,6 +46,7 @@ def call_with_retry(func, *args, max_retries=5, initial_delay=1, **kwargs):
 
 # --- Define State ---
 class LessonState(TypedDict):
+    """ Stae for the lessons LLM """
     topic: str
     knowledge_level: str
     syllabus: Optional[Dict]
@@ -174,7 +176,7 @@ class LessonAI:
             f"No syllabus found for topic '{topic}' at level '{knowledge_level}'"
         )
 
-    def _generate_lesson_content(self, state: LessonState) -> Dict:
+    def _generate_lesson_content(self, _: LessonState) -> Dict:
         """Generate lesson content based on the syllabus, module title, and lesson title."""
         # Access values from self.state instead of state parameter
         syllabus = self.state["syllabus"]
@@ -270,10 +272,12 @@ class LessonAI:
             # Pattern for JSON in code blocks
             r"```(?:json)?\s*({.*?})```",
             # Pattern for JSON with outer braces
+            #pylint: disable=line-too-long
             r'({[\s\S]*"exposition_content"[\s\S]*"thought_questions"[\s\S]*"active_exercises"[\s\S]*"knowledge_assessment"[\s\S]*"metadata"[\s\S]*})',
             # Pattern for just the JSON object
             r"({[\s\S]*})",
         ]
+
 
         json_str = None
         for pattern in json_patterns:

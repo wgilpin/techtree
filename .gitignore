@@ -16,3 +16,4 @@ wheels/
 /techtree-frontend/.env
 techtree.log
 /techtree.log
+backend/techtree.log

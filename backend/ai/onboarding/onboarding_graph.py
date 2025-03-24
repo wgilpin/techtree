@@ -1,4 +1,5 @@
-# pylint: disable=missing-class-docstring,missing-module-docstring
+# pylint: disable=broad-exception-caught,singleton-comparison
+""" Langgraph graph for onboarding - evaluating the user on a topic """
 
 import os
 import re
@@ -56,6 +57,7 @@ def call_with_retry(func, *args, max_retries=5, initial_delay=1, **kwargs):
 
 # --- Define State ---
 class AgentState(TypedDict):
+    """ langgraph state """
     topic: str
     knowledge_level: str
     questions_asked: List[str]
@@ -81,7 +83,7 @@ HARD = 3
 
 
 class TechTreeAI:
-    """Encapsulates the Tech Tree langgraph app for use with Streamlit."""
+    """Encapsulates the Tech Tree langgraph app """
 
     def __init__(self):
         """Initialize the TechTreeAI."""
