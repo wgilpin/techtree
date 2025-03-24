@@ -53,7 +53,12 @@ def login_required(f):
     def decorated_function(*args, **kwargs):
         if 'user' not in session:
             return redirect(url_for('login'))
-        return f(*args, **kwargs)
+        try:
+            return f(*args, **kwargs)
+        except TypeError as e:
+            #display the function name and all args
+            logger.error(f"Error in {f.__name__},({', '.join(map(str, args))}): {str(e)}")
+            raise e
     return decorated_function
 
 # Routes
@@ -313,9 +318,9 @@ def syllabus(topic, level):
         flash(f"Error: {str(e)}")
         return render_template("syllabus.html", user=session['user'], syllabus=None)
 
-@app.route("/lesson/<syllabus_id>/<module>/<lesson>")
+@app.route("/lesson/<syllabus_id>/<module>/<lesson_id>")
 @login_required
-def lesson(syllabus_id, module, lesson_arg):
+def lesson(syllabus_id, module, lesson_id):
     """
     Displays a specific lesson.
 
@@ -325,7 +330,7 @@ def lesson(syllabus_id, module, lesson_arg):
     try:
         headers = {'Authorization': f"Bearer {session['user']['access_token']}"}
         response = requests.get(
-            f"{API_URL}/lesson/{syllabus_id}/{module}/{lesson_arg}",
+            f"{API_URL}/lesson/{syllabus_id}/{module}/{lesson_id}",
             headers=headers,
             timeout=30
         )
@@ -337,7 +342,7 @@ def lesson(syllabus_id, module, lesson_arg):
                 user=session['user'],
                 syllabus_id=syllabus_id,
                 module=module,
-                lesson=lesson_arg,
+                lesson_id=lesson_id,
                 lesson_data=lesson_data
             )
         else:

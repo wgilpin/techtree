@@ -9,23 +9,12 @@ class SyllabusService:
 
     async def create_syllabus(self, topic: str, knowledge_level: str, user_id: Optional[str] = None) -> Dict[str, Any]:
         """Create a new syllabus based on topic and knowledge level"""
-        # First, check if we already have this syllabus in the database
-        existing_syllabus = self.db_service.get_syllabus(topic, knowledge_level, user_id)
-
-        if existing_syllabus:
-            return {
-                "syllabus_id": existing_syllabus["syllabus_id"],
-                "topic": existing_syllabus["topic"],
-                "level": existing_syllabus["level"],
-                "content": existing_syllabus["content"],
-                "is_new": False
-            }
 
         # Initialize syllabus creation with the AI
         self.syllabus_ai.initialize(topic, knowledge_level)
 
         # Generate syllabus
-        syllabus_result = self.syllabus_ai.generate_syllabus()
+        syllabus_result = self.syllabus_ai.get_or_create_syllabus()
 
         # Save to database
         syllabus_id = self.db_service.save_syllabus(

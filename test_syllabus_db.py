@@ -19,7 +19,7 @@ from tinydb import TinyDB, Query
 
 sys.path.append(".")
 
-from backend.ai.syllabus.langgraph_app import SyllabusAI
+from backend.ai.syllabus.syllabus_graph import SyllabusAI
 
 # Mock data for tests
 MOCK_SYLLABUS = {
@@ -96,8 +96,8 @@ MOCK_SEARCH_RESULTS = {
 }
 
 
-@patch("syllabus.ai.langgraph_app.tavily.search")
-@patch("syllabus.ai.langgraph_app.call_with_retry")
+@patch("syllabus.ai.syllabus_graph.tavily.search")
+@patch("syllabus.ai.syllabus_graph.call_with_retry")
 class TestSyllabusDB(unittest.TestCase):
     """
     Test case for syllabus database functionality.
@@ -119,7 +119,7 @@ class TestSyllabusDB(unittest.TestCase):
 
         # Patch the syllabi_table in the SyllabusAI class
         self.patcher = patch(
-            "syllabus.ai.langgraph_app.syllabi_table", self.syllabi_table
+            "syllabus.ai.syllabus_graph.syllabi_table", self.syllabi_table
         )
         self.patcher.start()
 

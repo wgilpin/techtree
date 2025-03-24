@@ -114,8 +114,10 @@ class AuthService:
             user = self.db_service.get_user_by_id(user_id)
             if not user:
                 raise ValueError("User not found")
+            # add the user name to the payload
+            payload["name"] = user["name"]
 
             return payload
         except Exception as e:
             print(f"Error decoding token: {str(e)}")
-            raise ValueError(f"Invalid token: {str(e)}")
+            raise ValueError(f"Invalid token: {str(e)}") from e

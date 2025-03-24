@@ -1,5 +1,5 @@
-from .onboarding.langgraph_app import TechTreeAI
-from .syllabus.langgraph_app import SyllabusAI
-from .lessons.langgraph_app import LessonAI
+from .onboarding.onboarding_graph import TechTreeAI
+from .syllabus.syllabus_graph import SyllabusAI
+from .lessons.lessons_graph import LessonAI
 
 __all__ = ["TechTreeAI", "SyllabusAI", "LessonAI"]

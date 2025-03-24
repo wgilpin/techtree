@@ -84,7 +84,7 @@ class SQLiteDatabaseService:
             self.conn.close()
             print("Database connection closed")
 
-    def _execute_query(self, query, params=None, fetch_one=False, commit=False):
+    def execute_query(self, query, params=None, fetch_one=False, commit=False):
         """
         Executes a SQL query with error handling and optional commit.
 
@@ -130,7 +130,7 @@ class SQLiteDatabaseService:
         Returns:
             list: The query results.
         """
-        return self._execute_query(query, params, fetch_one=False)
+        return self.execute_query(query, params, fetch_one=False)
 
     def _transaction(self, func, *args, **kwargs):
         """
@@ -162,14 +162,14 @@ class SQLiteDatabaseService:
         # Get list of tables
         tables_query = """SELECT name FROM sqlite_master
             WHERE type='table' AND name NOT LIKE 'sqlite_%'"""
-        tables = self._execute_query(tables_query)
+        tables = self.execute_query(tables_query)
 
         for table in tables:
             table_name = table[0]
             data[table_name] = []
 
             # Get all rows from the table
-            rows = self._execute_query(f"SELECT * FROM {table_name}")
+            rows = self.execute_query(f"SELECT * FROM {table_name}")
 
             for row in rows:
                 data[table_name].append(dict(row))
@@ -202,7 +202,7 @@ class SQLiteDatabaseService:
             """
             params = (user_id, email, name, password_hash, now, now)
 
-            self._execute_query(query, params, commit=True)
+            self.execute_query(query, params, commit=True)
             print(f"User inserted into database with ID: {user_id}")
             return user_id
 
@@ -223,7 +223,7 @@ class SQLiteDatabaseService:
         try:
             print(f"Looking up user by email: {email}")
             query = "SELECT * FROM users WHERE email = ?"
-            user = self._execute_query(query, (email,), fetch_one=True)
+            user = self.execute_query(query, (email,), fetch_one=True)
 
             if user:
                 user_dict = dict(user)
@@ -250,7 +250,7 @@ class SQLiteDatabaseService:
         try:
             print(f"Looking up user by ID: {user_id}")
             query = "SELECT * FROM users WHERE user_id = ?"
-            user = self._execute_query(query, (user_id,), fetch_one=True)
+            user = self.execute_query(query, (user_id,), fetch_one=True)
 
             if user:
                 user_dict = dict(user)
@@ -305,7 +305,7 @@ class SQLiteDatabaseService:
             now,
         )
 
-        self._execute_query(query, params, commit=True)
+        self.execute_query(query, params, commit=True)
         return assessment_id
 
     def get_user_assessments(self, user_id):
@@ -319,7 +319,7 @@ class SQLiteDatabaseService:
             list: A list of assessment data
         """
         query = "SELECT * FROM user_assessments WHERE user_id = ?"
-        assessments = self._execute_query(query, (user_id,))
+        assessments = self.execute_query(query, (user_id,))
 
         result = []
         for assessment in assessments:
@@ -351,7 +351,7 @@ class SQLiteDatabaseService:
             dict: The assessment data if found, otherwise None
         """
         query = "SELECT * FROM user_assessments WHERE assessment_id = ?"
-        assessment = self._execute_query(query, (assessment_id,), fetch_one=True)
+        assessment = self.execute_query(query, (assessment_id,), fetch_one=True)
 
         if assessment:
             assessment_dict = dict(assessment)
@@ -396,7 +396,7 @@ class SQLiteDatabaseService:
                 VALUES (?, ?, ?, ?, ?, ?)
             """
             syllabus_params = (syllabus_id, user_id, topic, level, now, now)
-            self._execute_query(syllabus_query, syllabus_params)
+            self.execute_query(syllabus_query, syllabus_params)
 
             # Insert modules and lessons
             if "modules" in content:
@@ -415,14 +415,14 @@ class SQLiteDatabaseService:
                         now,
                         now,
                     )
-                    self._execute_query(module_query, module_params)
+                    self.execute_query(module_query, module_params)
 
                     # Get the module_id
                     module_id_query = """
                         SELECT module_id FROM modules
                         WHERE syllabus_id = ? AND module_index = ?
                     """
-                    module_id_result = self._execute_query(
+                    module_id_result = self.execute_query(
                         module_id_query, (syllabus_id, module_index), fetch_one=True
                     )
                     module_id = module_id_result["module_id"]
@@ -445,7 +445,7 @@ class SQLiteDatabaseService:
                                 now,
                                 now,
                             )
-                            self._execute_query(lesson_query, lesson_params)
+                            self.execute_query(lesson_query, lesson_params)
 
             return syllabus_id
 
@@ -469,7 +469,7 @@ class SQLiteDatabaseService:
                 SELECT * FROM syllabi
                 WHERE topic = ? AND level = ? AND user_id = ?
             """
-            syllabus = self._execute_query(
+            syllabus = self.execute_query(
                 query, (topic, level, user_id), fetch_one=True
             )
 
@@ -479,14 +479,14 @@ class SQLiteDatabaseService:
                     SELECT * FROM syllabi
                     WHERE topic = ? AND level = ? AND user_id IS NULL
                 """
-                syllabus = self._execute_query(query, (topic, level), fetch_one=True)
+                syllabus = self.execute_query(query, (topic, level), fetch_one=True)
         else:
             # Look for a general syllabus
             query = """
                 SELECT * FROM syllabi
                 WHERE topic = ? AND level = ? AND user_id IS NULL
             """
-            syllabus = self._execute_query(query, (topic, level), fetch_one=True)
+            syllabus = self.execute_query(query, (topic, level), fetch_one=True)
 
         if syllabus:
             return self._build_syllabus_dict(dict(syllabus))
@@ -504,7 +504,7 @@ class SQLiteDatabaseService:
             dict: The syllabus data if found, otherwise None
         """
         query = "SELECT * FROM syllabi WHERE syllabus_id = ?"
-        syllabus = self._execute_query(query, (syllabus_id,), fetch_one=True)
+        syllabus = self.execute_query(query, (syllabus_id,), fetch_one=True)
 
         if syllabus:
             return self._build_syllabus_dict(dict(syllabus))
@@ -529,7 +529,7 @@ class SQLiteDatabaseService:
             WHERE syllabus_id = ?
             ORDER BY module_index
         """
-        modules = self._execute_query(modules_query, (syllabus_id,))
+        modules = self.execute_query(modules_query, (syllabus_id,))
 
         modules_list = []
         for module in modules:
@@ -542,7 +542,7 @@ class SQLiteDatabaseService:
                 WHERE module_id = ?
                 ORDER BY lesson_index
             """
-            lessons = self._execute_query(lessons_query, (module_id,))
+            lessons = self.execute_query(lessons_query, (module_id,))
 
             lessons_list = []
             for lesson in lessons:
@@ -565,9 +565,19 @@ class SQLiteDatabaseService:
 
         # Build the content structure
         content = {
+            "topic": syllabus_dict['topic'],
+            "level": syllabus_dict['level'],
             "title": f"{syllabus_dict['topic']} - {syllabus_dict['level']}",
             "description": f"Syllabus for {syllabus_dict['topic']}"
                            f" at {syllabus_dict['level']} level",
+            "duration": "4 weeks",  # Default duration
+            "learning_objectives": [
+                f"Understand the core concepts of {syllabus_dict['topic']}",
+                f"Apply {syllabus_dict['topic']} knowledge to solve real-world problems",
+                f"Develop critical thinking skills related to {syllabus_dict['topic']}",
+                f"Build practical experience with {syllabus_dict['topic']} tools and techniques",
+                f"Evaluate and analyze {syllabus_dict['topic']} applications in various contexts"
+            ],
             "modules": modules_list,
         }
 
@@ -597,7 +607,7 @@ class SQLiteDatabaseService:
                 SELECT module_id FROM modules
                 WHERE syllabus_id = ? AND module_index = ?
             """
-            module = self._execute_query(
+            module = self.execute_query(
                 module_query, (syllabus_id, module_index), fetch_one=True
             )
 
@@ -613,7 +623,7 @@ class SQLiteDatabaseService:
                 SELECT lesson_id FROM lessons
                 WHERE module_id = ? AND lesson_index = ?
             """
-            lesson = self._execute_query(
+            lesson = self.execute_query(
                 lesson_query, (module_id, lesson_index), fetch_one=True
             )
 
@@ -626,7 +636,7 @@ class SQLiteDatabaseService:
 
             # Check if content already exists
             content_query = "SELECT content_id FROM lesson_content WHERE lesson_id = ?"
-            existing_content = self._execute_query(
+            existing_content = self.execute_query(
                 content_query, (lesson_id,), fetch_one=True
             )
 
@@ -641,7 +651,7 @@ class SQLiteDatabaseService:
                     SET content = ?, updated_at = ?
                     WHERE lesson_id = ?
                 """
-                self._execute_query(
+                self.execute_query(
                     update_query, (content_json, now, lesson_id), commit=True
                 )
                 content_id = existing_content["content_id"]
@@ -652,7 +662,7 @@ class SQLiteDatabaseService:
                     (content_id, lesson_id, content, created_at, updated_at)
                     VALUES (?, ?, ?, ?, ?)
                 """
-                self._execute_query(
+                self.execute_query(
                     insert_query,
                     (content_id, lesson_id, content_json, now, now),
                     commit=True,
@@ -679,7 +689,7 @@ class SQLiteDatabaseService:
             SELECT module_id FROM modules
             WHERE syllabus_id = ? AND module_index = ?
         """
-        module = self._execute_query(
+        module = self.execute_query(
             module_query, (syllabus_id, module_index), fetch_one=True
         )
 
@@ -693,7 +703,7 @@ class SQLiteDatabaseService:
             SELECT * FROM lessons
             WHERE module_id = ? AND lesson_index = ?
         """
-        lesson = self._execute_query(
+        lesson = self.execute_query(
             lesson_query, (module_id, lesson_index), fetch_one=True
         )
 
@@ -704,7 +714,7 @@ class SQLiteDatabaseService:
 
         # Get the content
         content_query = "SELECT * FROM lesson_content WHERE lesson_id = ?"
-        content = self._execute_query(content_query, (lesson_id,), fetch_one=True)
+        content = self.execute_query(content_query, (lesson_id,), fetch_one=True)
 
         if content:
             content_dict = dict(content)
@@ -734,7 +744,7 @@ class SQLiteDatabaseService:
         """
         # First, check if this is a content_id
         content_query = "SELECT * FROM lesson_content WHERE content_id = ?"
-        content = self._execute_query(content_query, (lesson_id,), fetch_one=True)
+        content = self.execute_query(content_query, (lesson_id,), fetch_one=True)
 
         if content:
             content_dict = dict(content)
@@ -742,7 +752,7 @@ class SQLiteDatabaseService:
 
             # Get the lesson
             lesson_query = "SELECT * FROM lessons WHERE lesson_id = ?"
-            lesson = self._execute_query(lesson_query, (lesson_id,), fetch_one=True)
+            lesson = self.execute_query(lesson_query, (lesson_id,), fetch_one=True)
 
             if lesson:
                 lesson_dict = dict(lesson)
@@ -750,7 +760,7 @@ class SQLiteDatabaseService:
 
                 # Get the module
                 module_query = "SELECT * FROM modules WHERE module_id = ?"
-                module = self._execute_query(module_query, (module_id,), fetch_one=True)
+                module = self.execute_query(module_query, (module_id,), fetch_one=True)
 
                 if module:
                     module_dict = dict(module)
@@ -794,7 +804,7 @@ class SQLiteDatabaseService:
             WHERE user_id = ? AND syllabus_id = ? AND module_index = ? AND lesson_index = ?
         """
         params = (user_id, syllabus_id, module_index, lesson_index)
-        existing = self._execute_query(query, params, fetch_one=True)
+        existing = self.execute_query(query, params, fetch_one=True)
 
         if existing:
             # Update existing entry
@@ -805,7 +815,7 @@ class SQLiteDatabaseService:
                 WHERE progress_id = ?
             """
             update_params = (status, score, now, progress_id)
-            self._execute_query(update_query, update_params, commit=True)
+            self.execute_query(update_query, update_params, commit=True)
             return progress_id
         else:
             # Create new entry
@@ -826,7 +836,7 @@ class SQLiteDatabaseService:
                 now,
                 now,
             )
-            self._execute_query(insert_query, insert_params, commit=True)
+            self.execute_query(insert_query, insert_params, commit=True)
             return progress_id
 
     def get_user_syllabus_progress(self, user_id, syllabus_id):
@@ -844,7 +854,7 @@ class SQLiteDatabaseService:
             SELECT * FROM user_progress
             WHERE user_id = ? AND syllabus_id = ?
         """
-        progress_entries = self._execute_query(query, (user_id, syllabus_id))
+        progress_entries = self.execute_query(query, (user_id, syllabus_id))
 
         result = []
         for entry in progress_entries:
@@ -868,7 +878,7 @@ class SQLiteDatabaseService:
             FROM user_progress
             WHERE user_id = ?
         """
-        syllabi = self._execute_query(progress_query, (user_id,))
+        syllabi = self.execute_query(progress_query, (user_id,))
 
         in_progress_courses = []
 

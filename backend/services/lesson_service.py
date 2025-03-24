@@ -32,15 +32,18 @@ class LessonService:
         # Initialize and generate lesson content with the AI
         self.lesson_ai.initialize(
             topic=syllabus["topic"],
-            skill_level=syllabus["level"],
+            knowledge_level=syllabus["level"],
             module_title=module["title"],
             lesson_title=lesson_details["title"],
-            lesson_summary=lesson_details.get("summary", ""),
-            previous_lessons=[] # In a future implementation, we could pass previous lessons
+            # lesson_summary=lesson_details.get("summary", ""),
+            # previous_lessons=[] # In a future implementation, we could pass previous lessons
         )
 
         # Generate the full lesson content
-        lesson_content = self.lesson_ai.generate_lesson()
+        lesson_content = self.lesson_ai.get_lesson_content(
+            module_title=module["title"],
+            lesson_title=lesson_details["title"],
+        )
 
         # Save the lesson content to the database
         lesson_id = self.db_service.save_lesson_content(

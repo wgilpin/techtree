@@ -8,15 +8,16 @@ import json
 import copy
 import uuid
 from datetime import datetime
-from datetime import datetime
 from typing import Dict, List, TypedDict, Optional
 
 import google.generativeai as genai
 from google.api_core.exceptions import ResourceExhausted
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph
+from requests import RequestException
 from tavily import TavilyClient
-from tinydb import TinyDB, Query
+# from tinydb import TinyDB, Query
+from backend.services.sqlite_db import SQLiteDatabaseService
 
 # Load environment variables
 load_dotenv()
@@ -29,8 +30,9 @@ model = genai.GenerativeModel("gemini-2.0-pro-exp-02-05")
 tavily = TavilyClient(api_key=os.environ.get("TAVILY_API_KEY"))
 
 # Initialize the database
-db = TinyDB("syllabus_db.json")
-syllabi_table = db.table("syllabi")
+# db = TinyDB("syllabus_db.json")
+# syllabi_table = db.table("syllabi")
+db = SQLiteDatabaseService()
 
 
 def call_with_retry(func, *args, max_retries=5, initial_delay=1, **kwargs):
@@ -141,43 +143,38 @@ class SyllabusAI:
         knowledge_level = state["user_knowledge_level"]
         user_id = state.get("user_id")
 
-        # Search for match on topic, knowledge level, and user_id if provided
-        syllabus_query = Query()
-
+        # Use SQLite to search for syllabi
+        # First try to find a user-specific version if user_id is provided
         if user_id:
-            # First try to find a user-specific version
-            user_specific = syllabi_table.search(
-                (
-                    (syllabus_query.topic == topic)
-                    | (syllabus_query.user_entered_topic == topic)
-                )
-                & (
-                    syllabus_query.level.test(
-                        lambda x: x.lower() == knowledge_level.lower()
-                    )
-                )
-                & (syllabus_query.user_id == user_id)
-            )
+            # SQL query to find user-specific syllabus
+            query = """
+                SELECT * FROM syllabi
+                WHERE (topic = ? OR user_entered_topic = ?)
+                AND LOWER(level) = LOWER(?)
+                AND user_id = ?
+            """
+            params = (topic, topic, knowledge_level, user_id)
+
+            user_specific = db.execute_read_query(query, params)
 
             if user_specific:
-                return {"existing_syllabus": user_specific[0]}
+                # Convert SQLite row to dict
+                return {"existing_syllabus": dict(user_specific[0])}
 
         # If no user-specific version or no user_id provided, look for master version
-        master_version = syllabi_table.search(
-            (
-                (syllabus_query.topic == topic)
-                | (syllabus_query.user_entered_topic == topic)
-            )
-            & (
-                syllabus_query.level.test(
-                    lambda x: x.lower() == knowledge_level.lower()
-                )
-            )
-            & (syllabus_query.is_master == True)
-        )
+        query = """
+            SELECT * FROM syllabi
+            WHERE (topic = ? OR user_entered_topic = ?)
+            AND LOWER(level) = LOWER(?)
+            AND user_id IS NULL
+        """
+        params = (topic, topic, knowledge_level)
+
+        master_version = db.execute_read_query(query, params)
 
         if master_version:
-            return {"existing_syllabus": master_version[0]}
+            # Convert SQLite row to dict
+            return {"existing_syllabus": dict(master_version[0])}
 
         return {}
 
@@ -199,9 +196,12 @@ class SyllabusAI:
             wiki_search = tavily.search(
                 query=f"{topic} syllabus curriculum",
                 search_depth="advanced",
-                include_domains=["wikipedia.org", "edu"],
+                include_domains=["en.wikipedia.org","edu"],
                 max_results=2,
             )
+        except RequestException as e:
+            print("Tavily error at wiki", e)
+        try:
             # Search other sources
             general_search = tavily.search(
                 query=f"{topic} course syllabus curriculum for {knowledge_level}",
@@ -256,6 +256,11 @@ class SyllabusAI:
         - For 'early learner': Include basic concepts but move more quickly to intermediate topics
         - For 'good knowledge': Focus on intermediate to advanced topics, assuming basic knowledge
         - For 'advanced': Focus on advanced topics, cutting-edge developments, and specialized areas
+
+        For theoretical topics (like astronomy, physics, ethics, etc.),
+            focus learning objectives on understanding, analysis, and theoretical applications
+            rather than suggesting direct practical manipulation of objects or phenomena
+            that cannot be directly accessed or manipulated
 
         Format your response as a valid JSON object with the following structure:
         {{
@@ -464,45 +469,33 @@ class SyllabusAI:
             syllabus["user_entered_topic"] = user_entered_topic
         else:
             # Convert syllabus (Document object) to a dict
-            syllabus = syllabus.to_dict()
+            syllabus = dict(syllabus)
             syllabus["user_entered_topic"] = user_entered_topic
 
         # Add the user-entered topic to the syllabus
         syllabus["user_entered_topic"] = user_entered_topic
 
         # Check if syllabus already exists with same topic, level, and user_id
-        syllabus_query = Query()
-
         if user_id:
-            existing = syllabi_table.search(
-                (syllabus_query.topic == syllabus["topic"])
-                & (
-                    syllabus_query.level.test(
-                        lambda syllabus_doc: (
-                            syllabus
-                            and syllabus_doc.lower() == syllabus["level"].lower()
-                            if syllabus_doc
-                            else False
-                        )
-                    )
-                )
-                & (syllabus_query.user_id == user_id)
-            )
+            # Check for user-specific syllabus
+            query = """
+                SELECT * FROM syllabi
+                WHERE topic = ?
+                AND LOWER(level) = LOWER(?)
+                AND user_id = ?
+            """
+            params = (syllabus["topic"], syllabus["level"], user_id)
+            existing = db.execute_read_query(query, params)
         else:
-            existing = syllabi_table.search(
-                (syllabus_query.topic == syllabus["topic"])
-                & (
-                    syllabus_query.level.test(
-                        lambda syllabus_doc: (
-                            syllabus
-                            and syllabus_doc.lower() == syllabus["level"].lower()
-                            if syllabus_doc
-                            else False
-                        )
-                    )
-                )
-                & (syllabus_query.is_master == True)
-            )
+            # Check for master syllabus
+            query = """
+                SELECT * FROM syllabi
+                WHERE topic = ?
+                AND LOWER(level) = LOWER(?)
+                AND user_id IS NULL
+            """
+            params = (syllabus["topic"], syllabus["level"])
+            existing = db.execute_read_query(query, params)
 
         now = datetime.now().isoformat()
 
@@ -521,24 +514,17 @@ class SyllabusAI:
 
                 # If it doesn't have a parent_uid, try to find the master version
                 if "parent_uid" not in syllabus:
-                    master = syllabi_table.search(
-                        (syllabus_query.topic == syllabus["topic"])
-                        & (
-                            syllabus_query.level.test(
-                                lambda syllabus_doc: (
-                                    syllabus
-                                    and syllabus_doc.lower()
-                                    == syllabus["level"].lower()
-                                    if syllabus_doc
-                                    else False
-                                )
-                            )
-                        )
-                        & (syllabus_query.is_master == True)
-                    )
+                    master_query = """
+                        SELECT * FROM syllabi
+                        WHERE topic = ?
+                        AND LOWER(level) = LOWER(?)
+                        AND user_id IS NULL
+                    """
+                    master_params = (syllabus["topic"], syllabus["level"])
+                    master = db.execute_read_query(master_query, master_params)
 
                     if master:
-                        syllabus["parent_uid"] = master[0].get("uid")
+                        syllabus["parent_uid"] = dict(master[0]).get("uid")
             else:
                 # If this is a master version, ensure it's marked as such
                 syllabus["is_master"] = True
@@ -547,37 +533,60 @@ class SyllabusAI:
 
             # Update the syllabus in the database
             if user_id:
-                syllabi_table.update(
-                    syllabus,
-                    (syllabus_query.topic == syllabus["topic"])
-                    & (
-                        syllabus_query.level.test(
-                            lambda syllabus_doc: (
-                                syllabus
-                                and syllabus_doc.lower() == syllabus["level"].lower()
-                                if syllabus_doc
-                                else False
-                            )
-                        )
-                    )
-                    & (syllabus_query.user_id == user_id),
+                update_query = """
+                    UPDATE syllabi
+                    SET updated_at = ?,
+                        uid = ?,
+                        user_id = ?,
+                        is_master = ?,
+                        parent_uid = ?,
+                        user_entered_topic = ?,
+                        content = ?
+                    WHERE topic = ?
+                    AND LOWER(level) = LOWER(?)
+                    AND user_id = ?
+                """
+                # Convert content to JSON string if it's a dict
+                content_json = json.dumps(syllabus.get("content", {}))
+                update_params = (
+                    now,
+                    syllabus["uid"],
+                    user_id,
+                    0,  # False for is_master
+                    syllabus.get("parent_uid"),
+                    user_entered_topic,
+                    content_json,
+                    syllabus["topic"],
+                    syllabus["level"],
+                    user_id
                 )
+                db.execute_query(update_query, update_params, commit=True)
             else:
-                syllabi_table.update(
-                    syllabus,
-                    (syllabus_query.topic == syllabus["topic"])
-                    & (
-                        syllabus_query.level.test(
-                            lambda syllabus_doc: (
-                                syllabus
-                                and syllabus_doc.lower() == syllabus["level"].lower()
-                                if syllabus_doc
-                                else False
-                            )
-                        )
-                    )
-                    & (syllabus_query.is_master == True),
+                update_query = """
+                    UPDATE syllabi
+                    SET updated_at = ?,
+                        uid = ?,
+                        user_id = NULL,
+                        is_master = ?,
+                        parent_uid = NULL,
+                        user_entered_topic = ?,
+                        content = ?
+                    WHERE topic = ?
+                    AND LOWER(level) = LOWER(?)
+                    AND user_id IS NULL
+                """
+                # Convert content to JSON string if it's a dict
+                content_json = json.dumps(syllabus.get("content", {}))
+                update_params = (
+                    now,
+                    syllabus["uid"],
+                    1,  # True for is_master
+                    user_entered_topic,
+                    content_json,
+                    syllabus["topic"],
+                    syllabus["level"]
                 )
+                db.execute_query(update_query, update_params, commit=True)
         else:
             # Insert new syllabus
             syllabus["uid"] = str(uuid.uuid4())
@@ -590,23 +599,17 @@ class SyllabusAI:
                 syllabus["is_master"] = False
 
                 # Try to find a master version to set as parent
-                master = syllabi_table.search(
-                    (syllabus_query.topic == syllabus["topic"])
-                    & (
-                        syllabus_query.level.test(
-                            lambda syllabus_doc: (
-                                syllabus
-                                and syllabus_doc.lower() == syllabus["level"].lower()
-                                if syllabus_doc
-                                else False
-                            )
-                        )
-                    )
-                    & (syllabus_query.is_master == True)
-                )
+                master_query = """
+                    SELECT * FROM syllabi
+                    WHERE topic = ?
+                    AND LOWER(level) = LOWER(?)
+                    AND user_id IS NULL
+                """
+                master_params = (syllabus["topic"], syllabus["level"])
+                master = db.execute_read_query(master_query, master_params)
 
                 if master:
-                    syllabus["parent_uid"] = master[0].get("uid")
+                    syllabus["parent_uid"] = dict(master[0]).get("uid")
                 else:
                     # If no master exists, create one first
                     master_syllabus = syllabus.copy()
@@ -615,7 +618,26 @@ class SyllabusAI:
                     master_syllabus["user_id"] = None
                     master_syllabus["parent_uid"] = None
 
-                    syllabi_table.insert(master_syllabus)
+                    # Insert master syllabus
+                    insert_master_query = """
+                        INSERT INTO syllabi (
+                            uid, topic, level, user_id, is_master, parent_uid,
+                            created_at, updated_at, user_entered_topic, content
+                        ) VALUES (?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?)
+                    """
+                    # Convert content to JSON string if it's a dict
+                    content_json = json.dumps(master_syllabus.get("content", {}))
+                    insert_master_params = (
+                        master_syllabus["uid"],
+                        master_syllabus["topic"],
+                        master_syllabus["level"],
+                        1,  # True for is_master
+                        now,
+                        now,
+                        user_entered_topic,
+                        content_json
+                    )
+                    db.execute_query(insert_master_query, insert_master_params, commit=True)
 
                     # Set the parent_uid for the user-specific version
                     syllabus["parent_uid"] = master_syllabus["uid"]
@@ -625,7 +647,28 @@ class SyllabusAI:
                 syllabus["user_id"] = None
                 syllabus["parent_uid"] = None
 
-            syllabi_table.insert(syllabus)
+            # Insert syllabus
+            insert_query = """
+                INSERT INTO syllabi (
+                    uid, topic, level, user_id, is_master, parent_uid,
+                    created_at, updated_at, user_entered_topic, content
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            # Convert content to JSON string if it's a dict
+            content_json = json.dumps(syllabus.get("content", {}))
+            insert_params = (
+                syllabus["uid"],
+                syllabus["topic"],
+                syllabus["level"],
+                syllabus["user_id"],
+                1 if syllabus["is_master"] else 0,
+                syllabus.get("parent_uid"),
+                now,
+                now,
+                user_entered_topic,
+                content_json
+            )
+            db.execute_query(insert_query, insert_params, commit=True)
 
         return {"syllabus_saved": True}
 
@@ -658,8 +701,28 @@ class SyllabusAI:
             # If the source is already a user version, keep its parent
             user_syllabus["parent_uid"] = syllabus.get("parent_uid")
 
-        # Save the user-specific syllabus
-        syllabi_table.insert(user_syllabus)
+        # Save the user-specific syllabus to SQLite
+        insert_query = """
+            INSERT INTO syllabi (
+                uid, topic, level, user_id, is_master, parent_uid,
+                created_at, updated_at, user_entered_topic, content
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        # Convert content to JSON string if it's a dict
+        content_json = json.dumps(user_syllabus.get("content", {}))
+        insert_params = (
+            user_syllabus["uid"],
+            user_syllabus["topic"],
+            user_syllabus["level"],
+            user_syllabus["user_id"],
+            0,  # False for is_master
+            user_syllabus.get("parent_uid"),
+            user_syllabus["created_at"],
+            user_syllabus["updated_at"],
+            user_syllabus.get("user_entered_topic", user_syllabus["topic"]),
+            content_json
+        )
+        db.execute_query(insert_query, insert_params, commit=True)
 
         # Update the state
         self.state["generated_syllabus"] = user_syllabus
@@ -752,18 +815,13 @@ class SyllabusAI:
         topic = self.state["topic"]
         knowledge_level = self.state["user_knowledge_level"]
 
-        # Delete syllabus from the database
-        syllabus_query = Query()
-        syllabi_table.remove(
-            (
-                (syllabus_query.topic == topic)
-                | (syllabus_query.user_entered_topic == topic)
-            )
-            & (
-                syllabus_query.level.test(
-                    lambda x: x.lower() == knowledge_level.lower()
-                )
-            )
-        )
+        # Delete syllabus from the SQLite database
+        delete_query = """
+            DELETE FROM syllabi
+            WHERE (topic = ? OR user_entered_topic = ?)
+            AND LOWER(level) = LOWER(?)
+        """
+        params = (topic, topic, knowledge_level)
+        db.execute_query(delete_query, params, commit=True)
 
         return {"syllabus_deleted": True}

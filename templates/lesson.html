@@ -85,7 +85,7 @@
                 </a>
 
                 {% if lesson_data.next_lesson %}
-                    <a href="{{ url_for('lesson', syllabus_id=syllabus_id, module=lesson_data.next_lesson.module, lesson=lesson_data.next_lesson.lesson) }}" class="nav-button primary">
+                    <a href="{{ url_for('lesson', syllabus_id=syllabus_id, module=lesson_data.next_lesson.module, lesson_id=lesson_data.next_lesson.lesson) }}" class="nav-button primary">
                         Next Lesson &rarr;
                     </a>
                 {% else %}

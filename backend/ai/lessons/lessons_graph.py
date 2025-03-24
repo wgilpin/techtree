@@ -7,13 +7,14 @@ import random
 import json
 from typing import Dict, List, TypedDict, Optional
 from datetime import datetime
-import uuid
 
 import google.generativeai as genai
 from google.api_core.exceptions import ResourceExhausted
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph
-from tinydb import TinyDB, Query
+
+# from tinydb import TinyDB, Query
+from backend.services.sqlite_db import SQLiteDatabaseService
 
 # Load environment variables
 load_dotenv()
@@ -23,9 +24,7 @@ genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 model = genai.GenerativeModel("gemini-2.0-pro-exp-02-05")
 
 # Initialize the database
-db = TinyDB("syllabus_db.json")
-syllabi_table = db.table("syllabi")
-user_progress_table = db.table("user_progress")
+db = SQLiteDatabaseService()
 
 
 def call_with_retry(func, *args, max_retries=5, initial_delay=1, **kwargs):
@@ -54,7 +53,7 @@ class LessonState(TypedDict):
     generated_content: Optional[Dict]
     user_responses: List[Dict]
     user_performance: Optional[Dict]
-    user_email: Optional[str]
+    user_id: Optional[str]
     lesson_uid: Optional[str]
     created_at: Optional[str]
     updated_at: Optional[str]
@@ -98,17 +97,20 @@ class LessonAI:
         state: Optional[LessonState] = None,
         topic: str = "",
         knowledge_level: str = "beginner",
-        user_email: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> Dict:
         """Initialize the state with the topic, user knowledge level, and user email."""
         # Debug print to see what's being passed
-        print(f"_initialize called with state: {state}, topic: {topic}, knowledge_level: {knowledge_level}, user_email: {user_email}")
+        print(
+            f"_initialize called with state: {state}, topic: {topic},"
+            f"knowledge_level: {knowledge_level}, user_id: {user_id}"
+        )
 
         # Check if topic is in state (which might be the case when called through the graph)
         if state and isinstance(state, dict) and "topic" in state and not topic:
             topic = state["topic"]
             knowledge_level = state.get("knowledge_level", knowledge_level)
-            user_email = state.get("user_email", user_email)
+            user_id = state.get("user_id", user_id)
             print(f"Using topic from state: {topic}")
 
         if not topic:
@@ -128,56 +130,49 @@ class LessonAI:
             "generated_content": None,
             "user_responses": [],
             "user_performance": {},
-            "user_email": user_email,
+            "user_id": user_id,
         }
 
     def _retrieve_syllabus(self, state: LessonState) -> Dict:
         """Retrieve the syllabus for the specified topic and knowledge level."""
         topic = state["topic"]
         knowledge_level = state["knowledge_level"]
-        user_email = state.get("user_email")
+        user_id = state.get("user_id")
 
         # Preserve module_title and lesson_title if they're in the inputs
         module_title = state.get("module_title")
         lesson_title = state.get("lesson_title")
 
         # Debug print
-        print(f"_retrieve_syllabus: module_title={module_title}, lesson_title={lesson_title}")
+        print(
+            f"_retrieve_syllabus: module_title={module_title}, lesson_title={lesson_title}"
+        )
 
-        # Search for match on topic and knowledge level
-        syllabus_query = Query()
-
-        if user_email:
+        # Search for match on topic and knowledge level using SQLite
+        if user_id:
             # First try to find a user-specific version
-            user_specific = syllabi_table.search(
-                ((syllabus_query.topic == topic) | (syllabus_query.user_entered_topic == topic))
-                & (syllabus_query.level.test(lambda x: x.lower() == knowledge_level.lower()))
-                & (syllabus_query.user_id == user_email)
-            )
-
+            user_specific = db.get_syllabus(topic, knowledge_level, user_id)
             if user_specific:
                 return {
-                    "syllabus": user_specific[0],
+                    "syllabus": user_specific,
                     "module_title": module_title,
-                    "lesson_title": lesson_title
+                    "lesson_title": lesson_title,
                 }
 
-        # If no user-specific version or no user_email provided, look for master version
-        master_version = syllabi_table.search(
-            ((syllabus_query.topic == topic) | (syllabus_query.user_entered_topic == topic))
-            & (syllabus_query.level.test(lambda x: x.lower() == knowledge_level.lower()))
-            & (syllabus_query.is_master == True)
-        )
+        # If no user-specific version or no user_id provided, look for master version
+        master_version = db.get_syllabus(topic, knowledge_level)
 
         if master_version:
             return {
-                "syllabus": master_version[0],
+                "syllabus": master_version,
                 "module_title": module_title,
-                "lesson_title": lesson_title
+                "lesson_title": lesson_title,
             }
 
         # If no syllabus found, return an error
-        raise ValueError(f"No syllabus found for topic '{topic}' at level '{knowledge_level}'")
+        raise ValueError(
+            f"No syllabus found for topic '{topic}' at level '{knowledge_level}'"
+        )
 
     def _generate_lesson_content(self, state: LessonState) -> Dict:
         """Generate lesson content based on the syllabus, module title, and lesson title."""
@@ -186,10 +181,12 @@ class LessonAI:
         lesson_title = self.state.get("lesson_title")
         module_title = self.state.get("module_title")
         knowledge_level = self.state["knowledge_level"]
-        user_email = self.state.get("user_email")
+        user_id = self.state.get("user_id")
 
         # Debug print
-        print(f"_generate_lesson_content: module_title={module_title}, lesson_title={lesson_title}")
+        print(
+            f"_generate_lesson_content: module_title={module_title}, lesson_title={lesson_title}"
+        )
 
         # Check if module_title and lesson_title are provided
         if not module_title or not lesson_title:
@@ -207,15 +204,23 @@ class LessonAI:
                     break
 
         if not lesson_found:
-            raise ValueError(f"Lesson '{lesson_title}' not found in module '{module_title}'")
+            raise ValueError(
+                f"Lesson '{lesson_title}' not found in module '{module_title}'"
+            )
 
         # Check if we already have generated content for this lesson
         lesson_uid = f"{syllabus['uid']}_{module_title}_{lesson_title}"
-        lesson_query = Query()
-        existing_content = db.table("lesson_content").search(lesson_query.lesson_uid == lesson_uid)
+
+        # Use get_lesson_content to check for existing content
+        existing_content = db.get_lesson_by_id(
+            lesson_uid
+        )  # Changed to get_lesson_by_id
 
         if existing_content:
-            return {"generated_content": existing_content[0]["content"], "lesson_uid": lesson_uid}
+            return {
+                "generated_content": existing_content["content"],
+                "lesson_uid": lesson_uid,
+            }
 
         # Read the system prompt
         with open("lessons/system_prompt.txt", "r", encoding="utf-8") as f:
@@ -223,10 +228,24 @@ class LessonAI:
 
         # Get user's previous performance if available
         previous_performance = {}
-        if user_email:
-            user_progress = user_progress_table.search(lesson_query.user_email == user_email)
+        if user_id:
+            # Query user_progress table for the user's performance
+            progress_query = """
+                SELECT * FROM user_progress
+                WHERE user_id = ?
+            """
+            progress_params = (user_id,)
+            user_progress = db.execute_query(progress_query, progress_params)
+
             if user_progress:
-                previous_performance = user_progress[0].get("performance", {})
+                # Convert SQLite row to dict and get performance data
+                progress_dict = dict(user_progress[0])
+                # Performance might be stored as JSON
+                if "performance" in progress_dict:
+                    try:
+                        previous_performance = json.loads(progress_dict["performance"])
+                    except json.JSONDecodeError:
+                        previous_performance = {}
 
         # Construct the prompt for Gemini
         prompt = f"""
@@ -278,25 +297,38 @@ class LessonAI:
                             "metadata",
                         ]
                     ):
-                        # Save the content to the database
-                        now = datetime.now().isoformat()
-                        lesson_content = {
-                            "lesson_uid": lesson_uid,
-                            "content": content,
-                            "created_at": now,
-                            "updated_at": now,
-                        }
-                        db.table("lesson_content").insert(lesson_content)
+                        # Find module and lesson indices
+                        module_index = -1
+                        lesson_index = -1
+                        for i, module in enumerate(syllabus["modules"]):
+                            if module["title"] == module_title:
+                                module_index = i
+                                for j, lesson in enumerate(module["lessons"]):
+                                    if lesson["title"] == lesson_title:
+                                        lesson_index = j
+                                        break
+                            if lesson_index != -1:
+                                break
+
+                        if module_index == -1 or lesson_index == -1:
+                            raise ValueError(
+                                f"Lesson '{lesson_title}' not found in module '{module_title}'"
+                            )
+                        # Save the content to the SQLite database
+                        db.save_lesson_content(
+                            syllabus["syllabus_id"], module_index, lesson_index, content
+                        )  # Use syllabus_id
 
                         return {"generated_content": content, "lesson_uid": lesson_uid}
                 except Exception as e:
                     # Continue to the next pattern if this one fails
                     print(f"Failed to parse JSON: {e}")
 
-        # If all patterns fail, create a basic structure
+        # If all patterns fail, create a basic structure and save it
         print(f"Failed to parse JSON from response: {response_text[:200]}...")
         basic_content = {
-            "exposition_content": f"# {lesson_title}\n\nThis is a placeholder for the lesson content.",
+            "exposition_content":
+                f"# {lesson_title}\n\nThis is a placeholder for the lesson content.",
             "thought_questions": [
                 "What do you think about this topic?",
                 "How might this apply to real-world scenarios?",
@@ -333,19 +365,32 @@ class LessonAI:
             },
         }
 
-        # Save the basic content to the database
-        now = datetime.now().isoformat()
-        lesson_content = {
-            "lesson_uid": lesson_uid,
-            "content": basic_content,
-            "created_at": now,
-            "updated_at": now,
-        }
-        db.table("lesson_content").insert(lesson_content)
+        # Find module and lesson indices
+        module_index = -1
+        lesson_index = -1
+        for i, module in enumerate(syllabus["modules"]):
+            if module["title"] == module_title:
+                module_index = i
+                for j, lesson in enumerate(module["lessons"]):
+                    if lesson["title"] == lesson_title:
+                        lesson_index = j
+                        break
+            if lesson_index != -1:
+                break
 
+        if module_index == -1 or lesson_index == -1:
+            raise ValueError(
+                f"Lesson '{lesson_title}' not found in module '{module_title}'"
+            )
+
+        db.save_lesson_content(
+            syllabus["syllabus_id"], module_index, lesson_index, basic_content
+        )  # Use syllabus_id
         return {"generated_content": basic_content, "lesson_uid": lesson_uid}
 
-    def _evaluate_response(self, state: LessonState, response: str, question_id: str) -> Dict:
+    def _evaluate_response(
+        self, state: LessonState, response: str, question_id: str
+    ) -> Dict:
         """Evaluate a user's response to a question."""
         generated_content = state["generated_content"]
 
@@ -377,7 +422,8 @@ class LessonAI:
 
         Question: {question['question']}
 
-        Expected solution or correct answer: {question.get('expected_solution') or question.get('correct_answer')}
+        Expected solution or correct answer: {question.get('expected_solution')
+        or question.get('correct_answer')}
 
         User's response: {response}
 
@@ -412,7 +458,10 @@ class LessonAI:
                 json_str = re.sub(r"\\", "", json_str)
                 try:
                     evaluation = json.loads(json_str)
-                    if all(key in evaluation for key in ["score", "feedback", "misconceptions"]):
+                    if all(
+                        key in evaluation
+                        for key in ["score", "feedback", "misconceptions"]
+                    ):
                         # Add the response and evaluation to the user_responses list
                         user_response = {
                             "question_id": question_id,
@@ -465,12 +514,11 @@ class LessonAI:
 
     def _save_progress(self, state: LessonState) -> Dict:
         """Save the user's progress to the database."""
-        user_email = state.get("user_email")
+        user_id = state.get("user_id")
 
-        if not user_email:
+        if not user_id:
             return {}
 
-        topic = state["topic"]
         syllabus = state["syllabus"]
         lesson_title = state["lesson_title"]
         module_title = state["module_title"]
@@ -482,95 +530,62 @@ class LessonAI:
             if response["question_type"] == "assessment":
                 assessment_scores.append(response["evaluation"]["score"])
 
-        lesson_score = sum(assessment_scores) / len(assessment_scores) if assessment_scores else 0
+        lesson_score = (
+            sum(assessment_scores) / len(assessment_scores) if assessment_scores else 0
+        )
 
-        # Get existing user progress
-        user_query = Query()
-        existing_progress = user_progress_table.search(user_query.user_email == user_email)
-
+        # Get existing user progress from SQLite for the syllabus
+        syllabus_id = syllabus["syllabus_id"]
         now = datetime.now().isoformat()
 
-        if existing_progress:
-            progress = existing_progress[0]
+        # Find module and lesson indices
+        module_index = -1
+        lesson_index = -1
+        for i, module in enumerate(syllabus["modules"]):
+            if module["title"] == module_title:
+                module_index = i
+                for j, lesson in enumerate(module["lessons"]):
+                    if lesson["title"] == lesson_title:
+                        lesson_index = j
+                        break
+            if lesson_index != -1:
+                break
 
-            # Update the progress for this topic
-            topic_progress = progress.get(topic, {})
+        if module_index == -1 or lesson_index == -1:
+            raise ValueError(
+                f"Lesson '{lesson_title}' not found in module '{module_title}'"
+            )
 
-            # Update completed lessons
-            completed_lessons = topic_progress.get("completed_lessons", [])
-            if lesson_title not in completed_lessons:
-                completed_lessons.append(lesson_title)
+        # Assuming if we're saving, it's completed. Could add logic for "in_progress"
+        status = "completed"
 
-            # Update performance
-            performance = topic_progress.get("performance", {})
-            performance[lesson_title] = {
+        db.save_user_progress(
+            user_id, syllabus_id, module_index, lesson_index, status, lesson_score
+        )
+
+        # Construct user perf data - might need adjustment depending on use.
+        performance = {
+            lesson_title: {
                 "score": lesson_score,
                 "completed_at": now,
             }
+        }
 
-            # Update the topic progress
-            topic_progress["completed_lessons"] = completed_lessons
-            topic_progress["current_lesson"] = lesson_title
-            topic_progress["performance"] = performance
-
-            # Calculate overall progress
-            total_lessons = sum(len(module["lessons"]) for module in syllabus["modules"])
-            overall_progress = len(completed_lessons) / total_lessons if total_lessons > 0 else 0
-
-            # Calculate overall performance
-            overall_performance = sum(perf["score"] for perf in performance.values()) / len(performance) if performance else 0
-
-            topic_progress["overall_progress"] = overall_progress
-            topic_progress["overall_performance"] = overall_performance
-
-            # Update the progress object
-            progress[topic] = topic_progress
-            progress["updated_at"] = now
-
-            # Update in the database
-            user_progress_table.update(progress, user_query.user_email == user_email)
-
-            return {"user_performance": performance[lesson_title]}
-        else:
-            # Create new progress entry
-            performance = {
-                lesson_title: {
-                    "score": lesson_score,
-                    "completed_at": now,
-                }
-            }
-
-            # Calculate overall progress
-            total_lessons = sum(len(module["lessons"]) for module in syllabus["modules"])
-            overall_progress = 1 / total_lessons if total_lessons > 0 else 0
-
-            topic_progress = {
-                "completed_lessons": [lesson_title],
-                "current_lesson": lesson_title,
-                "performance": performance,
-                "overall_progress": overall_progress,
-                "overall_performance": lesson_score,
-            }
-
-            new_progress = {
-                "user_email": user_email,
-                "created_at": now,
-                "updated_at": now,
-                topic: topic_progress,
-            }
-
-            # Insert into the database
-            user_progress_table.insert(new_progress)
-
-            return {"user_performance": performance[lesson_title]}
+        return {"user_performance": performance[lesson_title]}
 
     def _end(self, _: LessonState) -> Dict:
         """End the workflow."""
         return {}
 
-    def initialize(self, topic: str, knowledge_level: str, user_email: Optional[str] = None) -> Dict:
+    def initialize(
+        self, topic: str, knowledge_level: str, user_id: Optional[str] = None
+    ) -> Dict:
         """Initialize the LessonAI with a topic, knowledge level, and user email."""
-        inputs = {"topic": topic, "knowledge_level": knowledge_level, "user_email": user_email}
+        inputs = {
+            "topic": topic,
+            "knowledge_level": knowledge_level,
+            "user_id": user_id,
+        }
         self.state = self.graph.invoke(inputs)
         return self.state
 
@@ -584,7 +599,9 @@ class LessonAI:
         self.state["lesson_title"] = lesson_title
 
         # Debug print
-        print(f"get_lesson_content: module_title={module_title}, lesson_title={lesson_title}")
+        print(
+            f"get_lesson_content: module_title={module_title}, lesson_title={lesson_title}"
+        )
         print(f"Current state before invoke: {self.state}")
 
         # Invoke the graph starting at generate_lesson_content
@@ -616,15 +633,23 @@ class LessonAI:
         self.state = self.graph.invoke({}, {"current": "save_progress"})
         return self.state["user_performance"]
 
-    def get_user_progress(self, user_email: str, topic: Optional[str] = None) -> Dict:
+    def get_user_progress(self, user_id: str, topic: Optional[str] = None) -> Dict:
         """Get the user's progress for a topic or all topics."""
-        user_query = Query()
-        progress = user_progress_table.search(user_query.user_email == user_email)
+        progress_data = db.get_user_in_progress_courses(user_id)
 
-        if not progress:
+        if not progress_data:
             return {}
 
         if topic:
-            return progress[0].get(topic, {})
-
-        return progress[0]
+            # Filter for the specific topic
+            filtered_progress = [
+                course for course in progress_data if course["topic"] == topic
+            ]
+            if filtered_progress:
+                # Assuming we only care about 1st match if multiple syllabi for same topic
+                return filtered_progress[0]
+            else:
+                return {}  # No progress found for the specified topic
+        else:
+            # Return all progress
+            return {"all_progress": progress_data}

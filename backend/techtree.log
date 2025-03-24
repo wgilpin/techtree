@@ -1,3 +1,3 @@
-2025-03-23 22:15:47,301 - backend.logger - DEBUG - sys.prefix: C:\Users\wgilp\projects\techtree\.venv
-2025-03-23 22:15:47,301 - backend.logger - DEBUG - sys.real_prefix: Not present
-2025-03-23 22:15:48,026 - backend.services.onboarding_service - INFO - Initializing OnboardingService
+2025-03-24 17:18:49,854 - backend.logger - DEBUG - sys.prefix: C:\Users\wgilp\projects\techtree\.venv
+2025-03-24 17:18:49,854 - backend.logger - DEBUG - sys.real_prefix: Not present
+2025-03-24 17:18:50,586 - backend.services.onboarding_service - INFO - Initializing OnboardingService

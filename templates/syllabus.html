@@ -13,19 +13,19 @@
     {% else %}
         <div class="syllabus-header">
             <div class="syllabus-title">
-                <h1>{{ syllabus.content.topic }}</h1>
-                <span class="level-badge">{{ syllabus.content.level }}</span>
+                <h1>{{ syllabus['content']['topic'] }}</h1>
+                <span class="level-badge">{{ syllabus['content']['level'] }}</span>
             </div>
             <div class="syllabus-meta">
                 <div class="meta-item">
                     <span class="meta-label">Duration:</span>
-                    <span class="meta-value">{{ syllabus.content.duration }}</span>
+                    <span class="meta-value">{{ syllabus['content']['duration'] }}</span>
                 </div>
             </div>
             <div class="syllabus-description">
                 <h2>Learning Objectives</h2>
                 <ul class="objectives-list">
-                    {% for objective in syllabus.content.learning_objectives %}
+                    {% for objective in syllabus['content']['learning_objectives'] %}
                         <li>{{ objective }}</li>
                     {% endfor %}
                 </ul>
@@ -33,20 +33,21 @@
         </div>
 
         <div class="modules-container">
-            {% for module in syllabus.content.modules %}
+            {% for module in syllabus['content']['modules'] %}
                 <div class="module-card">
+                    <!-- Debug: {{ module }} -->
                     <div class="module-header">
-                        <h2>Module {{ module.week }}: {{ module.title }}</h2>
+                        <h2>Module {{ loop.index }}: {{ module['title'] }}</h2>
                     </div>
 
                     <div class="lessons-list">
-                        {% for lesson in module.lessons %}
+                        {% for lesson in module['lessons'] %}
                             <div class="lesson-item">
                                 <div class="lesson-info">
                                     <span class="lesson-number">Lesson {{ loop.index }}</span>
-                                    <h3 class="lesson-title">{{ lesson.title }}</h3>
+                                    <h3 class="lesson-title">{{ lesson['title'] }}</h3>
                                 </div>
-                                <a href="{{ url_for('lesson', syllabus_id=syllabus.syllabus_id, module=module.week-1, lesson=loop.index0) }}" class="lesson-button">
+                                <a href="{{ url_for('lesson', syllabus_id=syllabus['syllabus_id'], module=loop.index0, lesson_id=loop.index0) }}" class="lesson-button">
                                     Start Lesson
                                 </a>
                             </div>

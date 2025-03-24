@@ -105,7 +105,7 @@ def run_app():
         st.session_state.messages.append(
             {
                 "role": "assistant",
-                "content": f"""Great! I've saved this syllabus for {st.session_state.topic} 
+                "content": f"""Great! I've saved this syllabus for {st.session_state.topic}
                                at the {st.session_state.knowledge_level} level.""",
             }
         )
@@ -298,7 +298,7 @@ def run_app():
                 st.session_state.messages.append(
                     {
                         "role": "user",
-                        "content": 
+                        "content":
                             f"My knowledge level is {st.session_state.knowledge_level_select}",
                     }
                 )
@@ -347,7 +347,7 @@ def run_app():
                 st.session_state.messages.append(
                     {
                         "role": "assistant",
-                        "content": 
+                        "content":
                             f"I found an existing syllabus for {st.session_state.topic}"
                             f"at the {st.session_state.knowledge_level} level."
                             "Would you like to accept it or provide feedback for improvements?",
@@ -357,7 +357,7 @@ def run_app():
                 st.session_state.messages.append(
                     {
                         "role": "assistant",
-                        "content": 
+                        "content":
                             f"Here's a new syllabus for {st.session_state.topic}"
                             f" at the {st.session_state.knowledge_level} level."
                             "Would you like to accept it or provide feedback for improvements?",

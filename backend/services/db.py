@@ -3,66 +3,21 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from tinydb import Query, TinyDB
+from backend.services.sqlite_db import SQLiteDatabaseService
 
 """
 Module providing database services for the TechTree application.
 """
 
-class DatabaseService:
+class DatabaseService(SQLiteDatabaseService):
     """
-    Service class for interacting with the TinyDB database.
+    Service class for interacting with the SQLite database.
     """
-    def __init__(self, db_path="techtree_db.json"):
+    def __init__(self, db_path="techtree.db"):
         """
-        Initializes the DatabaseService, connecting to the TinyDB database and creating tables.
+        Initializes the DatabaseService, connecting to the SQLite database.
         """
-        try:
-            # Always use the root directory techtree_db.json
-            root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            abs_path = os.path.join(root_dir, "techtree_db.json")
-            print(f"Using database at root directory: {abs_path}")
-
-            # Ensure the directory exists
-            db_dir = os.path.dirname(abs_path)
-            Path(db_dir).mkdir(parents=True, exist_ok=True)
-
-            # Check if file exists
-            if not os.path.exists(abs_path):
-                print(f"Database file does not exist, will be created at: {abs_path}")
-
-            self.db = TinyDB(abs_path)
-            print(f"TinyDB initialized at: {abs_path}")
-
-            self.users = self.db.table("users")
-            print("Created users table")
-            self.assessments = self.db.table("user_assessments")
-            print("Created assessments table")
-            self.syllabi = self.db.table("syllabi")
-            print("Created syllabi table")
-            self.lesson_content = self.db.table("lesson_content")
-            print("Created lesson_content table")
-            self.user_progress = self.db.table("user_progress")
-            print("Created user_progress table")
-            self.User = Query()
-            print("Created User query")
-
-        except Exception as e:
-            print(f"Error initializing database: {str(e)}")
-            raise
-
-    def get_all_table_data(self):
-        """
-        Retrieves all data from all tables in the database.
-
-        Returns:
-            dict: A dictionary containing all table data.
-        """
-        data = {}
-        for table_name in self.db.tables():
-            table = self.db.table(table_name)
-            data[table_name] = table.all()
-        return data
+        super().__init__(db_path)
 
     # User methods
     def create_user(self, email, password_hash, name=None):
@@ -80,27 +35,8 @@ class DatabaseService:
         Raises:
             Exception: If there is an error creating the user.
         """
-        try:
-            print(f"Creating user with email: {email}, name: {name}")
-            user_id = str(uuid.uuid4())
-            now = datetime.now().isoformat()
+        return super().create_user(email, password_hash, name)
 
-            user = {
-                "user_id": user_id,
-                "email": email,
-                "name": name or email.split("@")[0],
-                "password_hash": password_hash,
-                "created_at": now,
-                "updated_at": now
-            }
-
-            print(f"User object created: {user}")
-            self.users.insert(user)
-            print(f"User inserted into database with ID: {user_id}")
-            return user_id
-        except Exception as e:
-            print(f"Error creating user: {str(e)}")
-            raise
 
     def get_user_by_email(self, email):
         """
@@ -115,14 +51,8 @@ class DatabaseService:
         Raises:
             Exception: If there is an error retrieving the user.
         """
-        try:
-            print(f"Looking up user by email: {email}")
-            user = self.users.get(self.User.email == email)
-            print(f"User lookup result: {user}")
-            return user
-        except Exception as e:
-            print(f"Error looking up user by email: {str(e)}")
-            raise
+        return super().get_user_by_email(email)
+
 
     def get_user_by_id(self, user_id):
         """
@@ -137,14 +67,7 @@ class DatabaseService:
         Raises:
             Exception: If there is an error retrieving the user.
         """
-        try:
-            print(f"Looking up user by ID: {user_id}")
-            user = self.users.get(self.User.user_id == user_id)
-            print(f"User lookup result: {user}")
-            return user
-        except Exception as e:
-            print(f"Error looking up user by ID: {str(e)}")
-            raise
+        return super().get_user_by_id(user_id)
 
     # Assessment methods
     def save_assessment(self, user_id, topic, knowledge_level, score, questions, responses):
@@ -162,22 +85,8 @@ class DatabaseService:
         Returns:
             str: The newly created assessment's ID.
         """
-        assessment_id = str(uuid.uuid4())
-        now = datetime.now().isoformat()
+        return super().save_assessment(user_id, topic, knowledge_level, score, questions, responses)
 
-        assessment = {
-            "assessment_id": assessment_id,
-            "user_id": user_id,
-            "topic": topic,
-            "knowledge_level": knowledge_level,
-            "score": score,
-            "question_history": questions,
-            "response_history": responses,
-            "created_at": now
-        }
-
-        self.assessments.insert(assessment)
-        return assessment_id
 
     def get_user_assessments(self, user_id):
         """
@@ -189,7 +98,8 @@ class DatabaseService:
         Returns:
             list: A list of assessment data.
         """
-        return self.assessments.search(self.User.user_id == user_id)
+        return super().get_user_assessments(user_id)
+
 
     def get_assessment(self, assessment_id):
         """
@@ -201,8 +111,7 @@ class DatabaseService:
         Returns:
             dict: The assessment data if found, otherwise None.
         """
-        Assessment = Query()
-        return self.assessments.get(Assessment.assessment_id == assessment_id)
+        return super().get_assessment(assessment_id)
 
     # Syllabus methods
     def save_syllabus(self, topic, level, content, user_id=None):
@@ -218,21 +127,8 @@ class DatabaseService:
         Returns:
             str: The newly created syllabus's ID.
         """
-        syllabus_id = str(uuid.uuid4())
-        now = datetime.now().isoformat()
+        return super().save_syllabus(topic, level, content, user_id)
 
-        syllabus = {
-            "syllabus_id": syllabus_id,
-            "user_id": user_id,
-            "topic": topic,
-            "level": level,
-            "content": content,
-            "created_at": now,
-            "updated_at": now
-        }
-
-        self.syllabi.insert(syllabus)
-        return syllabus_id
 
     def get_syllabus(self, topic, level, user_id=None):
         """
@@ -246,13 +142,8 @@ class DatabaseService:
         Returns:
             dict: The syllabus data if found, otherwise None.
         """
-        Syllabus = Query()
-        query = (Syllabus.topic == topic) & (Syllabus.level == level)
+        return super().get_syllabus(topic, level, user_id)
 
-        if user_id:
-            query = query & ((Syllabus.user_id == user_id) | (Syllabus.user_id == None))
-
-        return self.syllabi.get(query)
 
     def get_syllabus_by_id(self, syllabus_id):
         """
@@ -264,8 +155,8 @@ class DatabaseService:
         Returns:
             dict: The syllabus data if found, otherwise None.
         """
-        Syllabus = Query()
-        return self.syllabi.get(Syllabus.syllabus_id == syllabus_id)
+        return super().get_syllabus_by_id(syllabus_id)
+
 
     # Lesson content methods
     def save_lesson_content(self, syllabus_id, module_index, lesson_index, content):
@@ -281,21 +172,8 @@ class DatabaseService:
         Returns:
             str: The newly created lesson's ID.
         """
-        lesson_id = str(uuid.uuid4())
-        now = datetime.now().isoformat()
+        return super().save_lesson_content(syllabus_id, module_index, lesson_index, content)
 
-        lesson = {
-            "lesson_id": lesson_id,
-            "syllabus_id": syllabus_id,
-            "module_index": module_index,
-            "lesson_index": lesson_index,
-            "content": content,
-            "created_at": now,
-            "updated_at": now
-        }
-
-        self.lesson_content.insert(lesson)
-        return lesson_id
 
     def get_lesson_content(self, syllabus_id, module_index, lesson_index):
         """
@@ -309,12 +187,8 @@ class DatabaseService:
         Returns:
             dict: The lesson content if found, otherwise None.
         """
-        Lesson = Query()
-        return self.lesson_content.get(
-            (Lesson.syllabus_id == syllabus_id) &
-            (Lesson.module_index == module_index) &
-            (Lesson.lesson_index == lesson_index)
-        )
+        return super().get_lesson_content(syllabus_id, module_index, lesson_index)
+
 
     def get_lesson_by_id(self, lesson_id):
         """
@@ -326,8 +200,7 @@ class DatabaseService:
         Returns:
             dict: The lesson data if found, otherwise None.
         """
-        Lesson = Query()
-        return self.lesson_content.get(Lesson.lesson_id == lesson_id)
+        return super().get_lesson_by_id(lesson_id)
 
     # User progress methods
     def save_user_progress(self, user_id, syllabus_id, module_index, lesson_index, status, score=None):
@@ -345,44 +218,8 @@ class DatabaseService:
         Returns:
             str: The ID of the progress entry.
         """
-        progress_id = str(uuid.uuid4())
-        now = datetime.now().isoformat()
+        return super().save_user_progress(user_id, syllabus_id, module_index, lesson_index, status, score)
 
-        Progress = Query()
-        existing = self.user_progress.get(
-            (Progress.user_id == user_id) &
-            (Progress.syllabus_id == syllabus_id) &
-            (Progress.module_index == module_index) &
-            (Progress.lesson_index == lesson_index)
-        )
-
-        if existing:
-            self.user_progress.update({
-                "status": status,
-                "score": score,
-                "updated_at": now
-            },
-            (Progress.user_id == user_id) &
-            (Progress.syllabus_id == syllabus_id) &
-            (Progress.module_index == module_index) &
-            (Progress.lesson_index == lesson_index))
-
-            return existing["progress_id"]
-
-        progress = {
-            "progress_id": progress_id,
-            "user_id": user_id,
-            "syllabus_id": syllabus_id,
-            "module_index": module_index,
-            "lesson_index": lesson_index,
-            "status": status,  # "not_started", "in_progress", "completed"
-            "score": score,
-            "created_at": now,
-            "updated_at": now
-        }
-
-        self.user_progress.insert(progress)
-        return progress_id
 
     def get_user_syllabus_progress(self, user_id, syllabus_id):
         """
@@ -395,11 +232,8 @@ class DatabaseService:
         Returns:
             list: A list of progress entries.
         """
-        Progress = Query()
-        return self.user_progress.search(
-            (Progress.user_id == user_id) &
-            (Progress.syllabus_id == syllabus_id)
-        )
+        return super().get_user_syllabus_progress(user_id, syllabus_id)
+
 
     def get_user_in_progress_courses(self, user_id):
         """
@@ -411,38 +245,4 @@ class DatabaseService:
         Returns:
             list: A list of dictionaries, each containing syllabus details and progress information.
         """
-        Progress = Query()
-        # Get unique syllabus_ids where the user has progress
-        progress_entries = self.user_progress.search(Progress.user_id == user_id)
-
-        # Extract unique syllabus_ids
-        syllabus_ids = set(entry["syllabus_id"] for entry in progress_entries)
-
-        # Get syllabus details for each syllabus_id
-        in_progress_courses = []
-
-        for syllabus_id in syllabus_ids:
-            syllabus = self.get_syllabus_by_id(syllabus_id)
-            if syllabus:
-                # Calculate progress
-                total_lessons = 0
-                completed_lessons = 0
-
-                for entry in progress_entries:
-                    if entry["syllabus_id"] == syllabus_id:
-                        total_lessons += 1
-                        if entry["status"] == "completed":
-                            completed_lessons += 1
-
-                progress_percentage = (completed_lessons / total_lessons * 100) if total_lessons > 0 else 0
-
-                in_progress_courses.append({
-                    "syllabus_id": syllabus_id,
-                    "topic": syllabus["topic"],
-                    "level": syllabus["level"],
-                    "progress_percentage": progress_percentage,
-                    "completed_lessons": completed_lessons,
-                    "total_lessons": total_lessons
-                })
-
-        return in_progress_courses
+        return super().get_user_in_progress_courses(user_id)
