@@ -50,7 +50,7 @@ The Streamlit app (`streamlit_app/app.py`) provides a more user-friendly chat-ba
     git clone https://github.com/wgilpin/techtree.git
     cd techtree
     ```
-    
+
 
 2.  **Create a virtual environment:**
 
@@ -101,11 +101,15 @@ The Streamlit app (`streamlit_app/app.py`) provides a more user-friendly chat-ba
 
 4.  **Create a `.env` file:**
 
-    Create a file named `.env` in the root directory of the project. Add the following lines to the file, replacing `YOUR_XXX_API_KEY` with your actual API keys:
+    Create a file named `.env` in the root directory of the project. Add the following lines to the file, replacing `YOUR_XXX_API_KEY` with your actual API keys and setting the backend API URL:
 
     ```
+    # Required API Keys
     GEMINI_API_KEY=YOUR_GEMINI_API_KEY
     TAVILY_API_KEY=YOUR_TAVILY_API_KEY
+
+    # URL for the backend API server (used by the Flask frontend)
+    API_URL="http://localhost:8000"
     ```
 
     Recommended but not required is free [LangSmith](https://www.langchain.com/langsmith) tracing. To use it, add the lines

@@ -24,7 +24,7 @@ load_dotenv()
 
 # Configure Gemini API
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-model = genai.GenerativeModel("gemini-2.0-pro-exp-02-05")
+model = genai.GenerativeModel(os.environ["GEMINI_MODEL"])
 
 # Configure Tavily API
 tavily = TavilyClient(api_key=os.environ.get("TAVILY_API_KEY"))

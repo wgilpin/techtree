@@ -9,7 +9,7 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Python: Run backend/main.py",
+            "name": "BE: Python",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/backend/main.py",
@@ -17,12 +17,24 @@
             "cwd": "${workspaceFolder}"
         },
         {
-            "name": "Python: Run Frontend",
+            "name": "FE: Python (Flask Module)", // Updated name slightly for clarity
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/app.py",
+            "module": "flask", // Use the flask module
+            "env": {
+                "FLASK_APP": "frontend.app", // Tell flask where the app is
+                "FLASK_ENV": "development" // Enable debug/reloader
+            },
+            "args": [
+                "run",
+                "--no-debugger", // Let VS Code handle debugging
+                "--no-reload",   // Let VS Code handle reloading if needed
+                "--port",
+                "5000"
+            ],
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}"
+            // "program" is removed
         },
         {
             "name": "Uvicorn: backend.main:app",

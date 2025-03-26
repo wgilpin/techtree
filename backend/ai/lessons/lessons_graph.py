@@ -22,7 +22,7 @@ load_dotenv()
 
 # Configure Gemini API
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-model = genai.GenerativeModel("gemini-2.0-pro-exp-02-05")
+model = genai.GenerativeModel(os.environ["GEMINI_MODEL"])
 
 # Initialize the database
 db = SQLiteDatabaseService()
@@ -234,7 +234,7 @@ class LessonAI:
             }
 
         # Read the system prompt
-        with open("lessons/system_prompt.txt", "r", encoding="utf-8") as f:
+        with open("backend/system_prompt.txt", "r", encoding="utf-8") as f:
             system_prompt = f.read()
 
         # Get user's previous performance if available

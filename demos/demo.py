@@ -26,7 +26,7 @@ load_dotenv()
 # Configure Gemini API
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 model = genai.GenerativeModel(
-    "gemini-2.0-pro-exp-02-05"
+    os.environ["GEMINI_MODEL"]
 )  # User specified gemini 2 flash, but using gemini-pro for now
 
 # Configure Tavily API
@@ -88,7 +88,8 @@ class AgentState(TypedDict):
         wikipedia_content: Content retrieved from Wikipedia.
         google_results: Content retrieved from Google search.
         search_completed: A flag indicating if the internet search is completed.
-        consecutive_hard_correct_or_partial: Number of consecutive correct/partially correct answers at HARD difficulty.
+        consecutive_hard_correct_or_partial: Number of consecutive correct/partially
+            correct answers at HARD difficulty.
     """
     topic: str
     knowledge_level: str
@@ -186,7 +187,7 @@ def perform_internet_search(state: AgentState) -> Dict:
             "google_results": google_results,
             "search_completed": True,
         }
-    except Exception as e:
+    except Exception as e: #pylint: disable=broad-exception-caught
         print(f"Error during internet search: {e}")
         # Return empty results but mark as completed to continue the flow
         return {

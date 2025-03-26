@@ -24,7 +24,7 @@ TAVILY_TIMEOUT = 5  # seconds
 # Configure Gemini API
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 model = genai.GenerativeModel(
-    "gemini-2.0-pro-exp-02-05"
+    os.environ["GEMINI_MODEL"]
 )  # User specified gemini 2 flash, but using gemini-pro for now
 
 # Configure Tavily API
