@@ -38,7 +38,7 @@
                                 <span class="stat-label">Total Lessons</span>
                             </div>
                         </div>
-                        <a href="{{ url_for('syllabus', topic=course.topic, level=course.level) }}" class="course-button">Continue Learning</a>
+                        <a href="{{ url_for('syllabus.syllabus_route', topic=course.topic, level=course.level) }}" class="course-button">Continue Learning</a>
                     </div>
                 {% endfor %}
             </div>
@@ -49,10 +49,10 @@
                 <p>Start your learning journey by selecting a topic below.</p>
 
                 <div class="topic-suggestions">
-                    <a href="{{ url_for('onboarding', topic='Python Programming') }}" class="topic-button">Python Programming</a>
-                    <a href="{{ url_for('onboarding', topic='Machine Learning') }}" class="topic-button">Machine Learning</a>
-                    <a href="{{ url_for('onboarding', topic='Web Development') }}" class="topic-button">Web Development</a>
-                    <a href="{{ url_for('onboarding', topic='Quantum Computing') }}" class="topic-button">Quantum Computing</a>
+                    <a href="{{ url_for('onboarding.onboarding_route', topic='Python Programming') }}" class="topic-button">Python Programming</a>
+                    <a href="{{ url_for('onboarding.onboarding_route', topic='Machine Learning') }}" class="topic-button">Machine Learning</a>
+                    <a href="{{ url_for('onboarding.onboarding_route', topic='Web Development') }}" class="topic-button">Web Development</a>
+                    <a href="{{ url_for('onboarding.onboarding_route', topic='Quantum Computing') }}" class="topic-button">Quantum Computing</a>
                 </div>
 <div class="custom-topic">
     <form action="{{ url_for('index') }}" method="post">

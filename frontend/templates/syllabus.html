@@ -47,7 +47,7 @@
                                     <span class="lesson-number">Lesson {{ loop.index }}</span>
                                     <h3 class="lesson-title">{{ lesson['title'] }}</h3>
                                 </div>
-                                <a href="{{ url_for('lesson', syllabus_id=syllabus['syllabus_id'], module=loop.index0, lesson_id=loop.index0) }}" class="lesson-button">
+                                <a href="{{ url_for('lessons.lesson', syllabus_id=syllabus['syllabus_id'], module=loop.index0, lesson_id=loop.index0) }}" class="lesson-button">
                                     Start Lesson
                                 </a>
                             </div>

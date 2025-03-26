@@ -14,6 +14,7 @@ import requests
 from dotenv import load_dotenv
 from flask import current_app
 from flask import Flask, flash, redirect, render_template, request, session, url_for
+from werkzeug.routing.exceptions import BuildError # Import BuildError
 from .auth.auth import auth_bp, login_required
 from .lessons.lessons import lessons_bp
 from .onboarding.onboarding import onboarding_bp
@@ -118,6 +119,18 @@ def dashboard():
 # Onboarding routes moved to frontend.onboarding.onboarding blueprint
 
 # Syllabus route moved to frontend.syllabus.syllabus blueprint
+
+
+# --- Error Handlers ---
+@app.errorhandler(BuildError)
+def handle_build_error(e):
+    """Logs BuildError exceptions and redirects the user."""
+    logger.error(f"URL Build Error: {e}", exc_info=True)
+    flash("An internal error occurred building a URL. Please try again later or contact support if the issue persists.", "error")
+    # Redirect to a safe page
+    if 'user' in session:
+        return redirect(url_for('dashboard'))
+    return redirect(url_for('auth.login'))
 
 
 # --- Register Blueprints ---

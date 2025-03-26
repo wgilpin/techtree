@@ -9,7 +9,7 @@
             <h1>What would you like to learn about?</h1>
             <p>Enter a topic to start your personalized learning journey.</p>
 
-            <form action="{{ url_for('onboarding', topic='') }}" method="post" class="topic-form">
+            <form action="{{ url_for('onboarding.onboarding_route', topic='') }}" method="post" class="topic-form">
                 <input type="text" name="topic" placeholder="Enter a topic (e.g., 'Quantum Physics')" required>
                 <button type="submit" class="primary-button">Start Assessment</button>
             </form>
@@ -17,10 +17,10 @@
             <div class="topic-suggestions">
                 <h3>Popular Topics</h3>
                 <div class="suggestion-buttons">
-                    <a href="{{ url_for('onboarding', topic='Python Programming') }}" class="topic-button">Python Programming</a>
-                    <a href="{{ url_for('onboarding', topic='Machine Learning') }}" class="topic-button">Machine Learning</a>
-                    <a href="{{ url_for('onboarding', topic='Web Development') }}" class="topic-button">Web Development</a>
-                    <a href="{{ url_for('onboarding', topic='Quantum Computing') }}" class="topic-button">Quantum Computing</a>
+                    <a href="{{ url_for('onboarding.onboarding_route', topic='Python Programming') }}" class="topic-button">Python Programming</a>
+                    <a href="{{ url_for('onboarding.onboarding_route', topic='Machine Learning') }}" class="topic-button">Machine Learning</a>
+                    <a href="{{ url_for('onboarding.onboarding_route', topic='Web Development') }}" class="topic-button">Web Development</a>
+                    <a href="{{ url_for('onboarding.onboarding_route', topic='Quantum Computing') }}" class="topic-button">Quantum Computing</a>
                 </div>
             </div>
         </div>
@@ -49,7 +49,7 @@
                         <div class="message-content">{{ question }}</div>
                     </div>
 
-                    <form action="{{ url_for('onboarding', topic=topic) }}" method="post" class="answer-form">
+                    <form action="{{ url_for('onboarding.onboarding_route', topic=topic) }}" method="post" class="answer-form">
                         <textarea name="answer" placeholder="Type your answer here..." rows="3" required></textarea>
                         <button type="submit" id="submit-answer-btn" class="primary-button">Submit Answer</button>
                     </form>

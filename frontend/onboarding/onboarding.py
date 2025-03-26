@@ -87,7 +87,7 @@ def _handle_onboarding_get(topic):
     # Check if user is logged in to start assessment
     if "user" not in session:
         flash("Please log in to start the assessment.")
-        return redirect(url_for("login"))
+        return redirect(url_for("auth.login"))
 
     result = _start_assessment(topic)
     if result:
@@ -107,7 +107,7 @@ def _handle_onboarding_post(topic):
     """Handles POST requests for the onboarding route."""
     if "user" not in session:
         flash("Please log in to continue the assessment.")
-        return redirect(url_for("login"))
+        return redirect(url_for("auth.login"))
 
     if not topic:
         # Should ideally not happen if form includes topic or URL has it
@@ -135,7 +135,7 @@ def _handle_onboarding_post(topic):
             )
             # Assuming syllabus route exists in the main app or another blueprint
             # Adjust 'syllabus.syllabus_route' if the blueprint/route name differs
-            return redirect(url_for("syllabus", topic=topic, level=knowledge_level))
+            return redirect(url_for("syllabus.syllabus_route", topic=topic, level=knowledge_level))
         else:
             # Continue assessment
             logger.info("Assessment continuing.")

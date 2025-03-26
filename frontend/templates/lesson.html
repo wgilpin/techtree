@@ -13,7 +13,7 @@
     {% else %}
         <div class="lesson-header">
             <div class="lesson-navigation">
-                <a href="{{ url_for('syllabus', topic=lesson_data.topic, level=lesson_data.level) }}" class="back-link">
+                <a href="{{ url_for('syllabus.syllabus_route', topic=lesson_data.topic, level=lesson_data.level) }}" class="back-link">
                     &larr; Back to Syllabus
                 </a>
             </div>
@@ -80,12 +80,12 @@
             </div>
 
             <div class="lesson-navigation-bottom">
-                <a href="{{ url_for('syllabus', topic=lesson_data.topic, level=lesson_data.level) }}" class="nav-button">
+                <a href="{{ url_for('syllabus.syllabus_route', topic=lesson_data.topic, level=lesson_data.level) }}" class="nav-button">
                     Back to Syllabus
                 </a>
 
                 {% if lesson_data.next_lesson %}
-                    <a href="{{ url_for('lesson', syllabus_id=syllabus_id, module=lesson_data.next_lesson.module, lesson_id=lesson_data.next_lesson.lesson) }}" class="nav-button primary">
+                    <a href="{{ url_for('lessons.lesson', syllabus_id=syllabus_id, module=lesson_data.next_lesson.module, lesson_id=lesson_data.next_lesson.lesson) }}" class="nav-button primary">
                         Next Lesson &rarr;
                     </a>
                 {% else %}
