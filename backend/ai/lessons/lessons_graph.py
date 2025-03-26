@@ -228,11 +228,10 @@ class LessonAI:
         history = state.get("conversation_history", [])
         user_id = state.get("user_id", "unknown_user")
         lesson_title = state.get("lesson_title", "this lesson")
-        # Extract exposition or relevant context if available
+        # Get the full exposition content
         exposition = state.get("generated_content", {}).get(
             "exposition_content", "No exposition available."
         )
-        # TODO: Maybe summarize or chunk the exposition if it's too long for the prompt
 
         logger.debug(
             f"Generating chat response for user {user_id} in lesson '{lesson_title}'"
@@ -242,7 +241,6 @@ class LessonAI:
             logger.warning(
                 "generate_chat_response called without a preceding user message."
             )
-            # Return a generic response or handle appropriately
             ai_response_content = (
                 "Is there something specific I can help you with regarding the lesson?"
             )
@@ -252,18 +250,21 @@ class LessonAI:
 
             prompt = f"""
             You are a helpful and encouraging tutor explaining '{lesson_title}'.
-            Your goal is to help the user understand the material.
+            Your goal is to help the user understand the material based on the provided context and conversation history.
             Keep your responses concise and focused on the lesson topic.
-            If the user asks a question, answer it based on the provided lesson exposition and conversation history.
-            If the user makes a general comment, respond conversationally.
-            Do not suggest exercises or quizzes unless explicitly asked.
 
-            Lesson Exposition Context:
+            **Instructions:**
+            1. Prioritize answering the user's LAST message based on the RECENT conversation history.
+            2. Use the full 'Lesson Exposition Context' below primarily as a factual reference if the user asks specific questions about the material covered there. Do not simply repeat parts of the exposition unless directly relevant to the user's query.
+            3. If the user makes a general comment, respond conversationally.
+            4. Do not suggest exercises or quizzes unless explicitly asked in the user's last message.
+
+            **Lesson Exposition Context:**
             ---
-            {exposition[:1500]} ... (truncated exposition)
+            {exposition}
             ---
 
-            Recent Conversation History (most recent last):
+            **Recent Conversation History (most recent last):**
             {json.dumps(history_for_prompt, indent=2)}
 
             Based on the history and context, generate an appropriate and helpful response to the user's last message.
