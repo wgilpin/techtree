@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS user_progress (
     lesson_index INTEGER NOT NULL,
     status TEXT NOT NULL,  -- "not_started", "in_progress", "completed"
     score REAL,
+    lesson_state_json TEXT, -- JSON blob for conversational state (history, mode, etc.)
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,

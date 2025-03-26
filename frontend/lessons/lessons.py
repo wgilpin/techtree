@@ -154,89 +154,157 @@ def _process_lesson_content(lesson_data):
         "raw_summary": summary_list, # Pass the raw summary list under a new key
         "summary": [], # Keep summary key but make it empty, as it's processed in template now
     }
-    logger.info("Lesson content processed, passing raw summary.")
-    return template_data
+    logger.info("Lesson content processed (exposition only).")
 
+    # Return only the processed content dict, not the full template_data structure
+    processed_content = {
+        "topic": content_data.get("topic", ""),
+        "level": content_data.get("level", ""),
+        "metadata": content_data.get("metadata", {}),
+        "exposition": markdown.markdown(exposition_markdown), # Convert exposition here
+        # Exercises and summary are no longer processed here
+        "active_exercises": content_data.get("active_exercises", []), # Pass raw definitions
+        "knowledge_assessment": content_data.get("knowledge_assessment", []) # Pass raw definitions
+    }
+    return processed_content
 
-def _render_lesson(template_data, syllabus_id, module, lesson_id):
-    """Renders the lesson template with processed data, converting markdown."""
-    logger.info("Rendering lesson template.")
-
-    # Convert exposition markdown to HTML
-    exposition_markdown = template_data.get("exposition", "")
-    if not isinstance(exposition_markdown, str):
-        logger.error(
-            "Processed exposition is not a string: "
-            f"{type(exposition_markdown)}. Defaulting to empty."
-        )
-        exposition_markdown = ""
-    template_data["exposition"] = markdown.markdown(exposition_markdown)
-
-    # Convert exercise questions markdown to HTML
-    for exercise in template_data.get("exercises", []):
-        question_content = exercise.get("question", "")
-        if not isinstance(question_content, str):
-            logger.warning(
-                f"Exercise question is not a string: {type(question_content)}. Defaulting."
-            )
-            question_content = ""
-        exercise["question"] = markdown.markdown(question_content)
-
-    # Summary processing is now handled in the template using the 'raw_summary' data
-    logger.debug(f"Raw summary data being passed to template: {template_data.get('raw_summary')}")
-
-    # Use the blueprint's template folder context
-    try:
-        return render_template(
-            "lesson.html",
-            user=session["user"],
-            syllabus_id=syllabus_id,
-            module=module,
-            lesson_id=lesson_id,
-            lesson_data=template_data,
-        )
-    except Exception as render_error:
-        logger.error(f"Error during render_template: {render_error}", exc_info=True)
-        logger.error(f"Data passed to template: {template_data}") # Log data on error
-        raise # Re-raise the exception after logging
+# _render_lesson function is removed as processing is simplified or moved
 
 
 # --- Lesson Routes ---
 
 
-@lessons_bp.route("/<syllabus_id>/<module>/<lesson_id>")
+@lessons_bp.route("/<syllabus_id>/<module>/<lesson_id>") # Assuming module/lesson_id are indices
 @login_required
 def lesson(syllabus_id, module, lesson_id):
     """
-    Displays a specific lesson.
+    Displays a specific lesson, including exposition and chat state.
 
-    Fetches lesson data, processes it, and renders the template.
-    Requires the user to be logged in.
+    Fetches lesson data (content structure + conversational state)
+    and renders the template. Requires the user to be logged in.
     """
     logger.info(
+        # Route parameters are strings, ensure indices are integers if needed later
         f"Entering lesson route: syllabus_id={syllabus_id}, module={module}, lesson_id={lesson_id}"
     )
     try:
-        lesson_data = _fetch_lesson_data(syllabus_id, module, lesson_id)
-        if lesson_data is None:
-            return render_template(
-                "lesson.html", user=session["user"], lesson_data=None
-            )
+        # Convert route params early
+        module_index = int(module)
+        lesson_index = int(lesson_id) # Assuming lesson_id route param is the index
+    except ValueError:
+        logger.error(f"Invalid module/lesson index in route: module={module}, lesson_id={lesson_id}")
+        flash("Invalid lesson URL.")
+        # Redirect to syllabus or dashboard?
+        return render_template("lesson.html", user=session.get("user"), lesson_data=None, lesson_state=None)
 
-        template_data = _process_lesson_content(lesson_data)
-        if template_data is None:
+    try:
+        # Fetch the combined data (content + state) from the backend
+        # Pass integer indices to the fetch function
+        backend_response = _fetch_lesson_data(syllabus_id, module_index, lesson_index)
+        if backend_response is None:
+            # _fetch_lesson_data already flashes a message
+            return render_template("lesson.html", user=session.get("user"), lesson_data=None, lesson_state=None)
+
+        # Extract state and raw content
+        lesson_state = backend_response.get("lesson_state")
+        raw_content = backend_response.get("content")
+
+        if raw_content is None:
+             logger.error("Backend response missing 'content'.")
+             flash("Failed to load lesson content structure.")
+             return render_template("lesson.html", user=session.get("user"), lesson_data=None, lesson_state=None)
+
+        # Process the raw content (e.g., format exposition markdown)
+        # Pass raw_content directly, _process_lesson_content expects dict with 'content' key
+        processed_content = _process_lesson_content({"content": raw_content})
+        if processed_content is None:
             logger.error("Failed to process lesson content.")
             flash("An error occurred while processing the lesson content.")
-            return render_template(
-                "lesson.html", user=session["user"], lesson_data=None
-            )
+            return render_template("lesson.html", user=session.get("user"), lesson_data=None, lesson_state=None)
 
-        return _render_lesson(template_data, syllabus_id, module, lesson_id)
+        # Prepare data for the template
+        lesson_data_for_template = {
+            "lesson_id": backend_response.get("lesson_id"), # Actual lesson PK/ID from backend
+            "syllabus_id": syllabus_id,
+            "module_index": module_index,
+            "lesson_index": lesson_index,
+            "content": processed_content, # Pass the processed content dict
+            # is_new is also available in backend_response if needed
+        }
 
+        # Render the template directly, passing both content data and state
+        return render_template(
+            "lesson.html",
+            user=session.get("user"),
+            syllabus_id=syllabus_id, # Pass for JS URL construction
+            lesson_data=lesson_data_for_template, # Contains processed content and indices
+            lesson_state=lesson_state # Pass the conversational state
+        )
+
+    except ValueError as e: # Catch specific errors like invalid indices from conversion
+         logger.error(f"Value error in lesson route: {e}", exc_info=True)
+         flash(str(e))
+         # Redirect? Show error page? For now, render template with None
+         return render_template("lesson.html", user=session.get("user"), lesson_data=None, lesson_state=None)
     except Exception as e: #pylint: disable=broad-exception-caught
         logger.exception(f"Unexpected error in lesson route: {str(e)}")
         flash(f"An unexpected error occurred: {str(e)}")
-        return render_template("lesson.html", user=session["user"], lesson_data=None)
+        return render_template("lesson.html", user=session.get("user"), lesson_data=None, lesson_state=None)
+
+
+# --- NEW Chat POST Route ---
+@lessons_bp.route("/chat/<syllabus_id>/<int:module_index>/<int:lesson_index>", methods=["POST"])
+@login_required
+def lesson_chat(syllabus_id, module_index, lesson_index):
+    """
+    Handles incoming chat messages from the frontend, forwards to the backend API,
+    and returns the AI's response.
+    """
+    user_message = request.json.get("message")
+    if not user_message:
+        return jsonify({"error": "No message provided"}), 400
+
+    if 'user' not in session:
+         return jsonify({"error": "User not logged in"}), 401
+
+    logger.info(f"Received chat message for lesson {syllabus_id}/{module_index}/{lesson_index}: '{user_message[:50]}...'")
+
+    try:
+        api_url = current_app.config["API_URL"]
+        backend_chat_url = f"{api_url}/lesson/chat/{syllabus_id}/{module_index}/{lesson_index}"
+        headers = {"Authorization": f"Bearer {session['user']['access_token']}"}
+
+        # Forward the request to the backend API
+        backend_response = requests.post(
+            backend_chat_url,
+            headers=headers,
+            json={"message": user_message},
+            timeout=60,  # Set appropriate timeout for potentially long AI responses
+        )
+
+        # Check if the backend request was successful
+        backend_response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+
+        # Return the JSON response from the backend directly to the frontend JS
+        response_data = backend_response.json()
+        logger.info(f"Received backend response: {response_data}")
+        return jsonify(response_data)
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error calling backend chat API: {e}", exc_info=True)
+        # Check if the error response from backend was JSON
+        error_detail = "Failed to communicate with the learning assistant."
+        if e.response is not None:
+            try:
+                error_json = e.response.json()
+                error_detail = error_json.get("detail", error_detail)
+            except ValueError: # If response is not JSON
+                 error_detail = f"{error_detail} Status: {e.response.status_code}"
+
+        return jsonify({"error": error_detail}), 502 # Bad Gateway or appropriate error
+    except Exception as e:
+        logger.exception(f"Unexpected error in lesson_chat route: {e}")
+        return jsonify({"error": "An internal server error occurred."}), 500
 
 
 @lessons_bp.route("/exercise/evaluate", methods=["POST"])

@@ -5,6 +5,7 @@ import json
 import sqlite3
 from datetime import datetime
 from pathlib import Path
+from typing import Optional # Added import
 
 
 class SQLiteDatabaseService:
@@ -776,10 +777,17 @@ class SQLiteDatabaseService:
 
     # User progress methods
     def save_user_progress(
-        self, user_id, syllabus_id, module_index, lesson_index, status, score=None
+        self,
+        user_id,
+        syllabus_id,
+        module_index,
+        lesson_index,
+        status,
+        score: Optional[float] = None, # Added type hint
+        lesson_state_json: Optional[str] = None, # Added parameter
     ):
         """
-        Saves or updates user progress for a specific lesson.
+        Saves or updates user progress for a specific lesson, including conversational state.
 
         Args:
             user_id (str): The ID of the user
@@ -788,6 +796,7 @@ class SQLiteDatabaseService:
             lesson_index (int): The index of the lesson
             status (str): The status of the lesson ("not_started", "in_progress", "completed")
             score (float, optional): The user's score for the lesson
+            lesson_state_json (str, optional): JSON string representing the conversational state.
 
         Returns:
             str: The ID of the progress entry
@@ -807,10 +816,11 @@ class SQLiteDatabaseService:
             progress_id = existing["progress_id"]
             update_query = """
                 UPDATE user_progress
-                SET status = ?, score = ?, updated_at = ?
+                SET status = ?, score = ?, lesson_state_json = ?, updated_at = ?
                 WHERE progress_id = ?
             """
-            update_params = (status, score, now, progress_id)
+            # Ensure lesson_state_json is included in update
+            update_params = (status, score, lesson_state_json, now, progress_id)
             self.execute_query(update_query, update_params, commit=True)
             return progress_id
         else:
@@ -818,9 +828,10 @@ class SQLiteDatabaseService:
             progress_id = str(uuid.uuid4())
             insert_query = """
                 INSERT INTO user_progress
-                (progress_id, user_id, syllabus_id, module_index, lesson_index, status, score, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (progress_id, user_id, syllabus_id, module_index, lesson_index, status, score, lesson_state_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
+            # Ensure lesson_state_json is included in insert
             insert_params = (
                 progress_id,
                 user_id,
@@ -829,11 +840,47 @@ class SQLiteDatabaseService:
                 lesson_index,
                 status,
                 score,
+                lesson_state_json, # Added value
                 now,
                 now,
             )
             self.execute_query(insert_query, insert_params, commit=True)
             return progress_id
+
+    def get_lesson_progress(self, user_id, syllabus_id, module_index, lesson_index):
+        """
+        Retrieves a specific progress entry for a user and lesson, including parsed state.
+
+        Args:
+            user_id (str): The ID of the user.
+            syllabus_id (str): The ID of the syllabus.
+            module_index (int): The index of the module.
+            lesson_index (int): The index of the lesson.
+
+        Returns:
+            dict: The progress entry including parsed 'lesson_state', or None if not found.
+        """
+        query = """
+            SELECT * FROM user_progress
+            WHERE user_id = ? AND syllabus_id = ? AND module_index = ? AND lesson_index = ?
+        """
+        params = (user_id, syllabus_id, module_index, lesson_index)
+        entry = self.execute_query(query, params, fetch_one=True)
+
+        if entry:
+            entry_dict = dict(entry)
+            # Parse lesson_state_json if it exists
+            if 'lesson_state_json' in entry_dict and entry_dict['lesson_state_json']:
+                try:
+                    entry_dict['lesson_state'] = json.loads(entry_dict['lesson_state_json'])
+                except json.JSONDecodeError:
+                    print(f"Warning: Failed to parse lesson_state_json for progress_id {entry_dict.get('progress_id')}")
+                    entry_dict['lesson_state'] = None # Or some default error state
+            else:
+                 entry_dict['lesson_state'] = None # Ensure the key exists even if JSON is null/empty
+            return entry_dict
+
+        return None
 
     def get_user_syllabus_progress(self, user_id, syllabus_id):
         """
@@ -854,7 +901,17 @@ class SQLiteDatabaseService:
 
         result = []
         for entry in progress_entries:
-            result.append(dict(entry))
+            entry_dict = dict(entry)
+            # Parse lesson_state_json if it exists
+            if 'lesson_state_json' in entry_dict and entry_dict['lesson_state_json']:
+                try:
+                    entry_dict['lesson_state'] = json.loads(entry_dict['lesson_state_json'])
+                except json.JSONDecodeError:
+                    print(f"Warning: Failed to parse lesson_state_json for progress_id {entry_dict.get('progress_id')}")
+                    entry_dict['lesson_state'] = None # Or some default error state
+            else:
+                 entry_dict['lesson_state'] = None # Ensure the key exists even if JSON is null/empty
+            result.append(entry_dict)
 
         return result
 

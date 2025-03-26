@@ -17,10 +17,41 @@ from backend.logger import logger
 router = APIRouter()
 lesson_service = LessonService()
 
-# Models
+# --- Pydantic Models ---
+
+# ... (existing models: LessonRequest, ExerciseSubmission, etc.) ...
+
+# New models for chat
+class ChatMessageRequest(BaseModel):
+    """Request model for sending a chat message."""
+    message: str
+
+class ChatMessage(BaseModel):
+    """Model for a single message in the conversation history."""
+    role: str # 'user' or 'assistant'
+    content: str
+
+class ChatTurnResponse(BaseModel):
+    """Response model for a chat turn, containing AI responses."""
+    responses: List[ChatMessage]
+    error: Optional[str] = None # Include optional error field
+
+# Updated model for GET /lesson to include state
+class LessonDataResponse(BaseModel):
+    """Response model for lesson data including conversational state."""
+    lesson_id: Optional[str] # Can be None if lesson doesn't exist yet?
+    syllabus_id: str
+    module_index: int
+    lesson_index: int
+    content: Optional[Dict[str, Any]] # Base content (exposition, exercise defs, etc.)
+    lesson_state: Optional[Dict[str, Any]] # Conversational state
+    is_new: bool
+
+
+# Existing models (ensure they are still here or adjust if needed)
 class LessonRequest(BaseModel):
     """
-    Request model for retrieving a lesson.
+    Request model for retrieving a lesson. (May not be needed if using path params)
     """
     syllabus_id: str
     module_index: int
@@ -30,20 +61,21 @@ class ExerciseSubmission(BaseModel):
     """
     Request model for submitting an exercise answer.
     """
-    lesson_id: str
+    lesson_id: str # This might need to be syllabus_id/module/lesson indices now
     exercise_index: int
     answer: str
 
-class LessonContent(BaseModel):
-    """
-    Response model for lesson content.
-    """
-    lesson_id: str
-    syllabus_id: str
-    module_index: int
-    lesson_index: int
-    content: Dict[str, Any]
-    is_new: bool
+# LessonContent might be replaced by LessonDataResponse
+# class LessonContent(BaseModel):
+#     """
+#     Response model for lesson content.
+#     """
+#     lesson_id: str
+#     syllabus_id: str
+#     module_index: int
+#     lesson_index: int
+#     content: Dict[str, Any]
+#     is_new: bool
 
 class ExerciseFeedback(BaseModel):
     """
@@ -74,41 +106,99 @@ class ProgressResponse(BaseModel):
     lesson_index: int
     status: str
 
-# Routes
-@router.get("/{syllabus_id}/{module_index}/{lesson_index}", response_model=LessonContent)
-async def get_lesson(
+# --- API Routes ---
+
+# Modify existing GET endpoint
+@router.get("/{syllabus_id}/{module_index}/{lesson_index}", response_model=LessonDataResponse) # Updated response model
+async def get_lesson_data( # Renamed function for clarity
     syllabus_id: str,
     module_index: int,
     lesson_index: int,
     current_user: Optional[User] = Depends(get_current_user),
-    response: Response = None
+    response: Response = None # Keep Response for headers if needed
 ):
     """
-    Get or generate content for a specific lesson.
+    Get or generate lesson content structure and current conversational state.
     """
-    logger.info(f"Entering get_lesson endpoint for syllabus_id: {syllabus_id}, module_index: {module_index}, lesson_index: {lesson_index}")
+    logger.info(f"Entering get_lesson_data endpoint for syllabus: {syllabus_id}, mod: {module_index}, lesson: {lesson_index}")
     user_id = current_user.user_id if current_user else None
-    if current_user and current_user.user_id == "no-auth":
-        response.headers["X-No-Auth"] = "true"
+    # Handle no-auth if necessary
+    # if current_user and current_user.user_id == "no-auth":
+    #     response.headers["X-No-Auth"] = "true" # Example
 
     try:
+        # This service method now returns content and lesson_state
         result = await lesson_service.get_or_generate_lesson(
             syllabus_id,
             module_index,
             lesson_index,
             user_id
         )
-        return result
+        # Ensure the response matches the LessonDataResponse model
+        return LessonDataResponse(**result)
     except ValueError as e:
+        logger.error(f"Value error in get_lesson_data: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e)
         ) from e
     except Exception as e:
+        logger.error(f"Unexpected error in get_lesson_data: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error retrieving lesson: {str(e)}"
+            detail=f"Error retrieving lesson data: {str(e)}"
         ) from e
+
+# Add new POST endpoint for chat
+@router.post("/chat/{syllabus_id}/{module_index}/{lesson_index}", response_model=ChatTurnResponse)
+async def handle_chat_message(
+    syllabus_id: str,
+    module_index: int,
+    lesson_index: int,
+    request_body: ChatMessageRequest,
+    current_user: User = Depends(get_current_user), # Require authentication for chat
+):
+    """
+    Process a user's chat message for a specific lesson and return the AI's response.
+    """
+    # Check authentication first
+    if not current_user or current_user.user_id == "no-auth": # Ensure authenticated user
+         raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required to chat."
+        )
+
+    # Log after confirming user exists
+    logger.info(f"Entering handle_chat_message for syllabus: {syllabus_id}, mod: {module_index}, lesson: {lesson_index}, user: {current_user.user_id}")
+
+    try:
+        result = await lesson_service.handle_chat_turn(
+            user_id=current_user.user_id,
+            syllabus_id=syllabus_id,
+            module_index=module_index,
+            lesson_index=lesson_index,
+            user_message=request_body.message
+        )
+        if "error" in result:
+             # If service layer handled an error and returned it
+             return ChatTurnResponse(responses=[], error=result["error"])
+        else:
+             # Map result['responses'] to ChatMessage model if needed, though structure matches
+             return ChatTurnResponse(responses=result.get("responses", []))
+
+    except ValueError as e: # Catch errors like "Lesson state not found"
+        logger.error(f"Value error in handle_chat_message: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, # Or 400 Bad Request?
+            detail=str(e)
+        ) from e
+    except Exception as e:
+        logger.error(f"Unexpected error in handle_chat_message: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error processing chat message: {str(e)}"
+        ) from e
+
 
 @router.get("/by-id/{lesson_id}", response_model=Dict[str, Any])
 async def get_lesson_by_id(lesson_id: str):
