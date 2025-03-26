@@ -1,4 +1,5 @@
 # frontend/syllabus/syllabus.py
+""" Blueprint for the syllabus frontend """
 import logging
 
 import requests
@@ -59,14 +60,15 @@ def syllabus_route(topic, level): # Renamed function slightly to avoid clash if 
                 syllabus=syllabus_data,
             )
         else:
-            logger.error(f"Failed to load syllabus. Status: {response.status_code}, Text: {response.text}")
+            logger.error(
+                f"Failed to load syllabus. Status: {response.status_code}, Text: {response.text}")
             flash("Failed to load syllabus. Please try again later.")
             return render_template("syllabus.html", user=session["user"], syllabus=None)
     except requests.RequestException as e:
         logger.error(f"Syllabus API request failed: {str(e)}")
         flash(f"Error loading syllabus: {str(e)}")
         return render_template("syllabus.html", user=session["user"], syllabus=None)
-    except Exception as e:
+    except Exception as e: #pylint: disable=broad-exception-caught
         logger.exception(f"Unexpected error loading syllabus: {str(e)}")
         flash(f"An unexpected error occurred: {str(e)}")
         return render_template("syllabus.html", user=session["user"], syllabus=None)

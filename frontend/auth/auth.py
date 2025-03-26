@@ -1,4 +1,6 @@
 # frontend/auth/auth.py
+""" Blueprint for authentication and authorization """
+
 import logging
 from functools import wraps
 
