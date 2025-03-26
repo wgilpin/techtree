@@ -287,3 +287,50 @@ def evaluate_exercise():
     except Exception as e: #pylint: disable=broad-exception-caught
         logger.exception(f"Unexpected error during exercise evaluation: {str(e)}")
         return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
+
+
+@lessons_bp.route("/assessment/submit", methods=["POST"])
+@login_required
+def submit_assessment():
+    """
+    Receives and processes submitted answers for the knowledge assessment.
+    """
+    data = request.json
+    lesson_id = data.get("lesson_id")
+    answers = data.get("answers") # Expected format: {"0": "A", "1": "True", ...}
+    user_id = session.get("user", {}).get("id")
+
+    logger.info(f"Received assessment submission for lesson_id: {lesson_id} by user_id: {user_id}")
+    logger.info(f"Answers: {answers}")
+
+    if not lesson_id or not answers or user_id is None:
+        logger.warning("Missing lesson_id, answers, or user_id in assessment submission.")
+        return jsonify({"error": "Missing required data"}), 400
+
+    # --- Placeholder for backend processing ---
+    # Here you would typically:
+    # 1. Fetch the correct answers for the assessment from the backend/DB.
+    # 2. Compare user's answers with correct answers.
+    # 3. Calculate a score or provide feedback.
+    # 4. Store the results (e.g., in the database associated with the user and lesson).
+    # 5. Potentially call the backend API to record completion or score.
+    # Example API call (if needed):
+    # try:
+    #     api_url = current_app.config["API_URL"]
+    #     headers = {"Authorization": f"Bearer {session['user']['access_token']}"}
+    #     response = requests.post(
+    #         f"{api_url}/lesson/assessment/record", # Hypothetical endpoint
+    #         json={"lesson_id": lesson_id, "user_id": user_id, "answers": answers},
+    #         headers=headers,
+    #         timeout=15,
+    #     )
+    #     if not response.ok:
+    #         logger.error(f"Failed to record assessment results: {response.status_code} - {response.text}")
+    #         # Handle error appropriately
+    # except requests.RequestException as e:
+    #     logger.error(f"API request failed during assessment recording: {str(e)}")
+    #     # Handle error appropriately
+    # --- End Placeholder ---
+
+    # For now, just return a success message
+    return jsonify({"message": "Assessment submitted successfully.", "received_answers": answers})

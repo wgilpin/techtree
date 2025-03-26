@@ -84,47 +84,86 @@
             {% endif %}
 
             <div class="content-section summary">
-                <h2>Knowledge Assessment</h2> {# Renamed from Summary for clarity #}
-                <div class="summary-content">
-                    {# Loop through the raw summary data passed from Python #}
-                    {% if lesson_data.raw_summary %}
-                        {% for qa in lesson_data.raw_summary %}
-                            <div class="knowledge-assessment-item" style="margin-bottom: 1.5em; padding-bottom: 1em; border-bottom: 1px solid #eee;">
-                                <p><strong>Question {{ loop.index }}:</strong></p>
-                                {# Apply markdown filter directly in the template #}
-                                <div class="qa-question">{{ qa.question|markdown|safe }}</div>
+                <h2>Knowledge Assessment</h2>
+                <form id="knowledge-assessment-form">
+                    <div class="summary-content">
+                        {# Loop through the raw summary data passed from Python #}
+                        {% if lesson_data.raw_summary %}
+                            {% for qa in lesson_data.raw_summary %}
+                                <div class="knowledge-assessment-item" style="margin-bottom: 1.5em; padding-bottom: 1em; border-bottom: 1px solid #eee;">
+                                    <p><strong>Question {{ loop.index }}:</strong></p>
+                                    {# Apply markdown filter directly in the template #}
+                                    <div class="qa-question">{{ qa.question|markdown|safe }}</div>
 
-                                {% if qa.type == 'multiple_choice' and qa.options %}
-                                    <ul class="qa-options" style="list-style: none; padding-left: 0;">
-                                        {% if qa.options is mapping %} {# Check if options is a dictionary #}
-                                            {% for option_key, option_text in qa.options.items() %}
-                                                <li>{{ option_key }}) {{ option_text }}</li>
-                                            {% endfor %}
-                                        {% else %} {# Handle cases where options might be a list #}
-                                            {% for option_text in qa.options %}
-                                                <li>{{ option_text }}</li>
-                                            {% endfor %}
-                                        {% endif %}
-                                    </ul>
-                                {% elif qa.type == 'true_false' %}
-                                     <ul class="qa-options" style="list-style: none; padding-left: 0;">
-                                        <li>True</li>
-                                        <li>False</li>
-                                     </ul>
-                                {% elif qa.type == 'confidence_check' and qa.options %}
-                                     <ul class="qa-options" style="list-style: none; padding-left: 0;">
-                                        {% for option_text in qa.options %}
-                                            <li>{{ option_text }}</li>
-                                        {% endfor %}
-                                    </ul>
-                                {% endif %}
-                                {# Add more types as needed #}
-                            </div>
-                        {% endfor %}
-                    {% else %}
-                        <p>No knowledge assessment questions available for this lesson.</p>
-                    {% endif %}
-                </div>
+                                    <div class="qa-options" style="margin-top: 0.5em;">
+                                        {% set question_index = loop.index0 %} {# Use loop.index0 for unique names #}
+                                        <table class="qa-options-table" style="border-collapse: collapse; width: 100%;">
+                                            {% if qa.type == 'multiple_choice' and qa.options %}
+                                                {% if qa.options is mapping %} {# Check if options is a dictionary #}
+                                                    {% for option_key, option_text in qa.options.items() %}
+                                                        <tr>
+                                                            <td style="width: 30px; vertical-align: top; padding: 5px 0;">
+                                                                <input type="radio" id="q{{ question_index }}_opt{{ loop.index0 }}" name="question_{{ question_index }}" value="{{ option_key }}">
+                                                            </td>
+                                                            <td style="vertical-align: top; padding: 5px 0;">
+                                                                <label for="q{{ question_index }}_opt{{ loop.index0 }}">{{ option_key }}) {{ option_text }}</label>
+                                                            </td>
+                                                        </tr>
+                                                    {% endfor %}
+                                                {% else %} {# Handle cases where options might be a list #}
+                                                    {% for option_text in qa.options %}
+                                                        <tr>
+                                                            <td style="width: 30px; vertical-align: top; padding: 5px 0;">
+                                                                <input type="radio" id="q{{ question_index }}_opt{{ loop.index0 }}" name="question_{{ question_index }}" value="{{ option_text }}">
+                                                            </td>
+                                                            <td style="vertical-align: top; padding: 5px 0;">
+                                                                <label for="q{{ question_index }}_opt{{ loop.index0 }}">{{ option_text }}</label>
+                                                            </td>
+                                                        </tr>
+                                                    {% endfor %}
+                                                {% endif %}
+                                            {% elif qa.type == 'true_false' %}
+                                                <tr>
+                                                    <td style="width: 30px; vertical-align: top; padding: 5px 0;">
+                                                        <input type="radio" id="q{{ question_index }}_opt_true" name="question_{{ question_index }}" value="True">
+                                                    </td>
+                                                    <td style="vertical-align: top; padding: 5px 0;">
+                                                        <label for="q{{ question_index }}_opt_true">True</label>
+                                                    </td>
+                                                </tr>
+                                                <tr>
+                                                    <td style="width: 30px; vertical-align: top; padding: 5px 0;">
+                                                        <input type="radio" id="q{{ question_index }}_opt_false" name="question_{{ question_index }}" value="False">
+                                                    </td>
+                                                    <td style="vertical-align: top; padding: 5px 0;">
+                                                        <label for="q{{ question_index }}_opt_false">False</label>
+                                                    </td>
+                                                </tr>
+                                            {% elif qa.type == 'confidence_check' and qa.options %}
+                                                {% for option_text in qa.options %}
+                                                    <tr>
+                                                        <td style="width: 30px; vertical-align: top; padding: 5px 0;">
+                                                            {# Assuming options are like "1: Not confident", extract value #}
+                                                            {% set option_value = option_text.split(':')[0] %}
+                                                            <input type="radio" id="q{{ question_index }}_opt{{ loop.index0 }}" name="question_{{ question_index }}" value="{{ option_value }}">
+                                                        </td>
+                                                        <td style="vertical-align: top; padding: 5px 0;">
+                                                            <label for="q{{ question_index }}_opt{{ loop.index0 }}">{{ option_text }}</label>
+                                                        </td>
+                                                    </tr>
+                                                {% endfor %}
+                                            {% endif %}
+                                            {# Add more types as needed #}
+                                        </table>
+                                    </div>
+                                </div>
+                            {% endfor %}
+                             <button type="submit" class="nav-button primary" style="margin-top: 1em;">Submit Assessment</button>
+                        {% else %}
+                            <p>No knowledge assessment questions available for this lesson.</p>
+                        {% endif %}
+                    </div>
+                </form>
             </div>
 
             <div class="lesson-navigation-bottom">
@@ -221,6 +260,77 @@
                 window.location.reload();
             }, 5000);
         }
+
+        // Handle Knowledge Assessment Submission
+        const assessmentForm = document.getElementById('knowledge-assessment-form');
+        if (assessmentForm) {
+            assessmentForm.addEventListener('submit', async function(event) {
+                event.preventDefault(); // Prevent default form submission
+
+                const formData = new FormData(assessmentForm);
+                const answers = {};
+                let allAnswered = true;
+                const questions = assessmentForm.querySelectorAll('.knowledge-assessment-item');
+
+                questions.forEach((questionDiv, index) => {
+                    const questionName = `question_${index}`;
+                    const selectedValue = formData.get(questionName);
+                    if (selectedValue) {
+                        answers[index] = selectedValue; // Store answer with question index as key
+                    } else {
+                        allAnswered = false; // Mark if any question is unanswered
+                    }
+                });
+
+                if (!allAnswered) {
+                    alert('Please answer all knowledge assessment questions before submitting.');
+                    return;
+                }
+
+                console.log('Collected assessment answers:', answers);
+
+                // Send 'answers' object to the backend endpoint
+                const submitButton = assessmentForm.querySelector('button[type="submit"]');
+                submitButton.disabled = true;
+                submitButton.innerHTML = '<span class="spinner"></span> Submitting...';
+
+                try {
+                    // Construct the correct URL using url_for
+                    const response = await fetch("{{ url_for('lessons.submit_assessment') }}", { // Use url_for
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            // Add CSRF token if needed later
+                        },
+                        body: JSON.stringify({
+                            lesson_id: "{{ lesson_data.lesson_id }}", // Pass lesson_id
+                            answers: answers
+                        })
+                    });
+
+                    const result = await response.json();
+                    console.log('Assessment submission result:', result);
+
+                    if (response.ok) {
+                        alert('Assessment submitted successfully!'); // Simple feedback
+                        // Optionally display more detailed feedback from 'result'
+                        submitButton.textContent = 'Submitted';
+                        // Optionally disable radio buttons after successful submission
+                        assessmentForm.querySelectorAll('input[type="radio"]').forEach(radio => radio.disabled = true);
+                    } else {
+                        alert(`Error submitting assessment: ${result.error || 'Unknown error'}`);
+                        submitButton.textContent = 'Submit Assessment';
+                        submitButton.disabled = false;
+                    }
+
+                } catch (error) {
+                    console.error('Error submitting assessment:', error);
+                    alert('An error occurred while submitting the assessment. Please check the console.');
+                    submitButton.textContent = 'Submit Assessment';
+                    submitButton.disabled = false;
+                }
+            });
+        }
     });
 </script>
 <style>
@@ -239,6 +349,25 @@
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Style for knowledge assessment options */
+.qa-option {
+  margin-bottom: 0.5em; /* Space between options */
+  /* The div provides block separation, input/label are inline inside */
+}
+
+.qa-option input[type="radio"] {
+  display: inline-block; /* Ensure inline-block behavior */
+  vertical-align: middle; /* Align vertically with label */
+  margin-right: 0.5em; /* Space between radio and label */
+}
+
+.qa-option label {
+  display: inline-block; /* Ensure inline-block behavior */
+  vertical-align: middle; /* Align vertically with radio */
+  /* Ensure label doesn't take up excessive width if it wraps */
+  max-width: calc(100% - 2em); /* Adjust as needed */
 }
 </style>
 {% endblock %}
