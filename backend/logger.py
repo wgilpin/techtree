@@ -7,8 +7,8 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
         logging.FileHandler(
-            "techtree.log", mode="w"
-        )  # added mode='w' to overwrite each time
+            "../techtree.log", mode="a", encoding="utf-8"
+        )  # Log to root dir, append mode, USE UTF-8
     ],
 )
 

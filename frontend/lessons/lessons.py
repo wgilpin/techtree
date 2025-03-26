@@ -118,11 +118,15 @@ def _process_lesson_content(lesson_data):
     if isinstance(active_exercises, list):
         for exercise in active_exercises:
             if isinstance(exercise, dict):
+                exercise_type = exercise.get("type", "open_ended")
                 formatted_exercise = {
                     "question": exercise.get("instructions", ""),
-                    "type": exercise.get("type", "open_ended"),
+                    "type": exercise_type,
                     "answer": exercise.get("correct_answer", ""),
                 }
+                # Add 'items' if it's an ordering exercise
+                if exercise_type == 'ordering':
+                    formatted_exercise["ordering_items"] = exercise.get("items", []) # Renamed key
                 formatted_exercises.append(formatted_exercise)
     else:
         logger.warning(f"active_exercises is not a list: {type(active_exercises)}")
@@ -145,11 +149,12 @@ def _process_lesson_content(lesson_data):
         "topic": content_data.get("topic", ""),
         "level": content_data.get("level", ""),
         "title": content_data.get("metadata", {}).get("title", ""),
-        "exposition": exposition_markdown,
-        "exercises": formatted_exercises,
-        "summary": summary_list,
+        "exposition": exposition_markdown, # Keep processed exposition
+        "exercises": formatted_exercises, # Keep processed exercises
+        "raw_summary": summary_list, # Pass the raw summary list under a new key
+        "summary": [], # Keep summary key but make it empty, as it's processed in template now
     }
-    logger.info("Lesson content processed.")
+    logger.info("Lesson content processed, passing raw summary.")
     return template_data
 
 
@@ -177,36 +182,23 @@ def _render_lesson(template_data, syllabus_id, module, lesson_id):
             question_content = ""
         exercise["question"] = markdown.markdown(question_content)
 
-    # Convert summary questions/answers/explanations markdown to HTML
-    summary_list = template_data.get("summary", [])
-    if isinstance(summary_list, list):
-        for qa in summary_list:
-            if isinstance(qa, dict):
-                for key in ["question", "correct_answer", "explanation"]:
-                    content = qa.get(key, "")
-                    if not isinstance(content, str):
-                        logger.warning(
-                            f"Summary field '{key}' is not a string: {type(content)}. Defaulting."
-                        )
-                        content = ""
-                    qa[key] = markdown.markdown(content)
-            else:
-                logger.warning(f"Item in summary list is not a dict: {type(qa)}")
-    else:
-        logger.error(
-            f"Summary data is not a list: {type(summary_list)}. Cannot render."
-        )
-        template_data["summary"] = []
+    # Summary processing is now handled in the template using the 'raw_summary' data
+    logger.debug(f"Raw summary data being passed to template: {template_data.get('raw_summary')}")
 
     # Use the blueprint's template folder context
-    return render_template(
-        "lesson.html",
-        user=session["user"],
-        syllabus_id=syllabus_id,
-        module=module,
-        lesson_id=lesson_id,
-        lesson_data=template_data,
-    )
+    try:
+        return render_template(
+            "lesson.html",
+            user=session["user"],
+            syllabus_id=syllabus_id,
+            module=module,
+            lesson_id=lesson_id,
+            lesson_data=template_data,
+        )
+    except Exception as render_error:
+        logger.error(f"Error during render_template: {render_error}", exc_info=True)
+        logger.error(f"Data passed to template: {template_data}") # Log data on error
+        raise # Re-raise the exception after logging
 
 
 # --- Lesson Routes ---

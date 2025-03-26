@@ -46,6 +46,17 @@
                                 <div class="question-content">
                                     {{ exercise.question|safe }}
                                 </div>
+                                {# NEW: Display items for ordering exercises #}
+                                {% if exercise.type == 'ordering' and exercise.ordering_items %} {# Use new key #}
+                                    <div class="ordering-items" style="margin-top: 1em; margin-bottom: 1em;">
+                                        <p><strong>Items to order:</strong></p>
+                                        <ul style="list-style-position: inside; padding-left: 0;">
+                                            {% for item in exercise.ordering_items %} {# Use new key #}
+                                                <li>{{ item }}</li>
+                                            {% endfor %}
+                                        </ul>
+                                    </div>
+                                {% endif %}
                             </div>
 
                             <div class="exercise-answer">
@@ -73,9 +84,46 @@
             {% endif %}
 
             <div class="content-section summary">
-                <h2>Summary</h2>
+                <h2>Knowledge Assessment</h2> {# Renamed from Summary for clarity #}
                 <div class="summary-content">
-                    {{ lesson_data.summary|safe }}
+                    {# Loop through the raw summary data passed from Python #}
+                    {% if lesson_data.raw_summary %}
+                        {% for qa in lesson_data.raw_summary %}
+                            <div class="knowledge-assessment-item" style="margin-bottom: 1.5em; padding-bottom: 1em; border-bottom: 1px solid #eee;">
+                                <p><strong>Question {{ loop.index }}:</strong></p>
+                                {# Apply markdown filter directly in the template #}
+                                <div class="qa-question">{{ qa.question|markdown|safe }}</div>
+
+                                {% if qa.type == 'multiple_choice' and qa.options %}
+                                    <ul class="qa-options" style="list-style: none; padding-left: 0;">
+                                        {% if qa.options is mapping %} {# Check if options is a dictionary #}
+                                            {% for option_key, option_text in qa.options.items() %}
+                                                <li>{{ option_key }}) {{ option_text }}</li>
+                                            {% endfor %}
+                                        {% else %} {# Handle cases where options might be a list #}
+                                            {% for option_text in qa.options %}
+                                                <li>{{ option_text }}</li>
+                                            {% endfor %}
+                                        {% endif %}
+                                    </ul>
+                                {% elif qa.type == 'true_false' %}
+                                     <ul class="qa-options" style="list-style: none; padding-left: 0;">
+                                        <li>True</li>
+                                        <li>False</li>
+                                     </ul>
+                                {% elif qa.type == 'confidence_check' and qa.options %}
+                                     <ul class="qa-options" style="list-style: none; padding-left: 0;">
+                                        {% for option_text in qa.options %}
+                                            <li>{{ option_text }}</li>
+                                        {% endfor %}
+                                    </ul>
+                                {% endif %}
+                                {# Add more types as needed #}
+                            </div>
+                        {% endfor %}
+                    {% else %}
+                        <p>No knowledge assessment questions available for this lesson.</p>
+                    {% endif %}
                 </div>
             </div>
 

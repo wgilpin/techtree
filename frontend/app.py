@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 from flask import current_app
 from flask import Flask, flash, redirect, render_template, request, session, url_for
 from werkzeug.routing.exceptions import BuildError # Import BuildError
+import markdown
 from .auth.auth import auth_bp, login_required
 from .lessons.lessons import lessons_bp
 from .onboarding.onboarding import onboarding_bp
@@ -38,14 +39,19 @@ logger.info("Logging initialized in app.py")
 # Suppress Werkzeug "Detected change" INFO logs
 werkzeug_logger = logging.getLogger("werkzeug")
 werkzeug_logger.setLevel(logging.WARNING)
-
 app = Flask(__name__)
 """
 Flask application instance.
 """
 
+# Register the markdown filter for Jinja2 templates
+@app.template_filter('markdown')
+def markdown_filter(text):
+    return markdown.markdown(text)
+
 app.secret_key = "your-secret-key"  # For session management
 
+# Load API_URL from environment variable into app config
 # Load API_URL from environment variable into app config
 # Provide a default value in case the environment variable is not set
 app.config["API_URL"] = os.environ.get("API_URL", "http://localhost:8000")

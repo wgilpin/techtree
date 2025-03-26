@@ -221,16 +221,14 @@ class SQLiteDatabaseService:
             dict: The user data if found, otherwise None
         """
         try:
-            print(f"Looking up user by email: {email}")
             query = "SELECT * FROM users WHERE email = ?"
             user = self.execute_query(query, (email,), fetch_one=True)
 
             if user:
                 user_dict = dict(user)
-                print(f"User lookup result: {user_dict}")
                 return user_dict
 
-            print("User not found")
+            print(f"User not found: {email}")
             return None
 
         except Exception as e:
@@ -248,16 +246,14 @@ class SQLiteDatabaseService:
             dict: The user data if found, otherwise None
         """
         try:
-            print(f"Looking up user by ID: {user_id}")
             query = "SELECT * FROM users WHERE user_id = ?"
             user = self.execute_query(query, (user_id,), fetch_one=True)
 
             if user:
                 user_dict = dict(user)
-                print(f"User lookup result: {user_dict}")
                 return user_dict
 
-            print("User not found")
+            print("User not found: {user_id}")
             return None
 
         except Exception as e:
