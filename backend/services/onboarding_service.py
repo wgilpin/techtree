@@ -1,12 +1,15 @@
+""" Service for onboarding - new topics and user assessment """
+
 import logging
+from typing import Dict, Any, Optional
 from backend.ai.app import TechTreeAI
 from backend.services.sqlite_db import SQLiteDatabaseService
-from typing import Dict, Any, Optional, List
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 class OnboardingService:
+    """ Service for onboarding - new topics and user assessment """
     def __init__(self, db_service=None):
         logger.info("Initializing OnboardingService")
         self.tech_tree_ai = TechTreeAI()
@@ -67,7 +70,7 @@ class OnboardingService:
                 "is_complete": False,
                 "logs": logs
             }
-        except Exception as e:
+        except Exception as e: #pylint: disable=broad-exception-caught
             logger.error(f"Error starting assessment: {str(e)}", exc_info=True)
             logs.append(f"Error starting assessment: {str(e)}")
             return {

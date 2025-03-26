@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 from backend.ai.app import LessonAI
 from backend.services.sqlite_db import SQLiteDatabaseService
 from backend.services.syllabus_service import SyllabusService
+from backend.logger import logger  # Import the configured logger
 
 
 class LessonService:
@@ -129,16 +130,31 @@ class LessonService:
 
         content = lesson["content"]
 
-        if (
-            not content
-            or "exercises" not in content
-            or exercise_index >= len(content["exercises"])
+        # Determine the correct key for exercises and get the list
+        exercises_list = None
+        if "exercises" in content and isinstance(content.get("exercises"), list):
+            exercises_list = content["exercises"]
+            logger.debug(f"Using 'exercises' key for lesson {lesson_id}")
+        elif "active_exercises" in content and isinstance(
+            content.get("active_exercises"), list
         ):
-            raise ValueError(
-                f"Exercise index {exercise_index} out of range for lesson {lesson_id}"
+            exercises_list = content["active_exercises"]
+            logger.debug(f"Using 'active_exercises' key for lesson {lesson_id}")
+        else:
+            logger.warning(
+                "Neither 'exercises' nor 'active_exercises' key found"
+                f" or valid list in content for lesson {lesson_id}"
             )
 
-        exercise = content["exercises"][exercise_index]
+        # Check if exercises list is valid and index is within bounds
+        # Added check for exercises_list being None
+        if exercises_list is None or exercise_index >= len(exercises_list):
+            raise ValueError(
+                f"Exercise index {exercise_index} out of range or"
+                f" exercises not found/invalid for lesson {lesson_id}"
+            )
+
+        exercise = exercises_list[exercise_index]
 
         # Initialize evaluation with the AI
         # Here we use the LessonAI to evaluate the exercise response
@@ -153,7 +169,11 @@ class LessonService:
         evaluation_result = self.lesson_ai.evaluate_exercise(user_answer)
 
         # If user_id is provided and this is the final exercise, mark the lesson as completed
-        if user_id and exercise_index == len(content["exercises"]) - 1:
+        if (
+            user_id
+            and exercises_list is not None
+            and exercise_index == len(exercises_list) - 1
+        ):  # Use exercises_list here
             # Update user progress to completed
             self.db_service.save_user_progress(
                 user_id=user_id,
