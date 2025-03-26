@@ -3,23 +3,23 @@
 import os
 import logging
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from pydantic import BaseModel
+# Cleaned up imports
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from backend.services.auth_service import AuthService
 from backend.models import User
-from backend.dependencies import get_current_user
+from backend.dependencies import get_current_user, get_db
 from backend.logger import logger
+from backend.services.sqlite_db import SQLiteDatabaseService # Import for type hint
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
-auth_service = AuthService()
+# Direct instantiation of auth_service is removed.
+
+# Dependency function to get AuthService instance
+def get_auth_service(db: SQLiteDatabaseService = Depends(get_db)) -> AuthService:
+    return AuthService(db_service=db)
 
 # Models
 class UserCreate(BaseModel):
@@ -49,7 +49,8 @@ class Token(BaseModel):
 
 # Routes
 @router.post("/register", response_model=Token)
-async def register(user: UserCreate):
+# Inject AuthService using the dependency function
+async def register(user: UserCreate, auth_service: AuthService = Depends(get_auth_service)):
     """
     Register a new user.
     """
@@ -84,7 +85,8 @@ async def register(user: UserCreate):
         ) from e
 
 @router.post("/login", response_model=Token)
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+# Inject AuthService using the dependency function
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), auth_service: AuthService = Depends(get_auth_service)):
     """
     Log in an existing user.
     """

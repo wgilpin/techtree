@@ -12,9 +12,17 @@ from pydantic import BaseModel
 
 from backend.services.onboarding_service import OnboardingService
 from backend.logger import logger
+# Import necessary dependencies
+from fastapi import Depends
+from backend.dependencies import get_db
+from backend.services.sqlite_db import SQLiteDatabaseService
 
 router = APIRouter()
-onboarding_service = OnboardingService()
+# Removed direct instantiation of onboarding_service
+
+# Dependency function to get OnboardingService instance
+def get_onboarding_service(db: SQLiteDatabaseService = Depends(get_db)) -> OnboardingService:
+    return OnboardingService(db_service=db)
 
 # Models
 class TopicRequest(BaseModel):
@@ -60,8 +68,10 @@ class AssessmentResult(BaseModel):
 
 # Routes
 @router.post("/assessment", response_model=AssessmentQuestion)
+# Inject OnboardingService
 async def start_assessment(
-    topic_req: TopicRequest
+    topic_req: TopicRequest,
+    onboarding_service: OnboardingService = Depends(get_onboarding_service)
 ):
     """
     Start a new assessment on a topic.
@@ -82,7 +92,8 @@ async def start_assessment(
         ) from e
 
 @router.post("/answer", response_model=AssessmentAnswer)
-async def submit_answer(answer_req: AnswerRequest):
+# Inject OnboardingService
+async def submit_answer(answer_req: AnswerRequest, onboarding_service: OnboardingService = Depends(get_onboarding_service)):
     """
     Submit an answer to the current question.
     """
@@ -98,7 +109,8 @@ async def submit_answer(answer_req: AnswerRequest):
         ) from e
 
 @router.get("/result", response_model=AssessmentResult)
-async def get_assessment_result():
+# Inject OnboardingService
+async def get_assessment_result(onboarding_service: OnboardingService = Depends(get_onboarding_service)):
     """
     Get the final result of the assessment.
     """
@@ -118,7 +130,8 @@ async def get_assessment_result():
         ) from e
 
 @router.post("/reset")
-async def reset_assessment():
+# Inject OnboardingService
+async def reset_assessment(onboarding_service: OnboardingService = Depends(get_onboarding_service)):
     """
     Reset the current assessment session.
     """

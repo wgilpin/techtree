@@ -10,9 +10,10 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 40320  # Increased to 28 days  (28 * 60 * 24)
 
 class AuthService:
-    def __init__(self, db_service=None):
-        print("Init DB in AuthService")
-        self.db_service = db_service or SQLiteDatabaseService()
+    # Make db_service a required argument and add type hint
+    def __init__(self, db_service: SQLiteDatabaseService):
+        # Remove the fallback initialization and print statement
+        self.db_service = db_service
 
     def _hash_password(self, password: str) -> str:
         """Hash a password for storing"""

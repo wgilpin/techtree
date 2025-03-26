@@ -29,10 +29,12 @@ model = genai.GenerativeModel(os.environ["GEMINI_MODEL"])
 # Configure Tavily API
 tavily = TavilyClient(api_key=os.environ.get("TAVILY_API_KEY"))
 
-# Initialize the database
-# db = TinyDB("syllabus_db.json")
+# Import the shared database service instance
+from backend.dependencies import db_service as db # Import and alias as 'db' for minimal changes
+
+# db = TinyDB("syllabus_db.json") # Keep old comments if needed
 # syllabi_table = db.table("syllabi")
-db = SQLiteDatabaseService()
+# Direct instantiation removed
 
 
 def call_with_retry(func, *args, max_retries=5, initial_delay=1, **kwargs):

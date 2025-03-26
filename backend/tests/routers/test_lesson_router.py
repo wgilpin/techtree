@@ -36,19 +36,37 @@ def override_get_current_user():
     app.dependency_overrides = {}
 
 
-# Mock the LessonService instance used by the router
-# We patch the instance created in lesson_router.py
+# Import the dependency getter function we need to override
+from backend.routers.lesson_router import get_lesson_service
+
+# Mock the LessonService by overriding the dependency
 @pytest.fixture
 def mock_lesson_service():
-    print("Setting up mock_lesson_service patch") # Debug print
-    # Ensure the patch target string is correct relative to where the tests run
-    with patch("backend.routers.lesson_router.lesson_service", spec=LessonService) as mock_service:
-        print("Patch applied, configuring mock") # Debug print
-        # Configure async methods
-        mock_service.get_or_generate_lesson = AsyncMock()
-        mock_service.handle_chat_turn = AsyncMock()
-        yield mock_service
-    print("Mock_lesson_service patch finished") # Debug print
+    print("Setting up mock_lesson_service override") # Debug print
+    # Create a MagicMock instance that adheres to the LessonService spec
+    mock_service = MagicMock(spec=LessonService)
+    # Configure async methods on the mock
+    mock_service.get_or_generate_lesson = AsyncMock()
+    mock_service.handle_chat_turn = AsyncMock()
+    # Add other methods used in tests if necessary, e.g., evaluate_exercise, update_lesson_progress
+    mock_service.get_lesson_by_id = AsyncMock()
+    mock_service.evaluate_exercise = AsyncMock()
+    mock_service.update_lesson_progress = AsyncMock()
+
+    # Define the override function
+    def override_get_lesson_service():
+        print("Using mock get_lesson_service") # Debug print
+        return mock_service
+
+    # Apply the override
+    app.dependency_overrides[get_lesson_service] = override_get_lesson_service
+    print(f"Overriding get_lesson_service: {get_lesson_service} with {override_get_lesson_service}") # Debug print
+
+    yield mock_service # Yield the mock for use in tests
+
+    # Clean up the override after the test
+    print("Cleaning up lesson_service dependency override") # Debug print
+    del app.dependency_overrides[get_lesson_service]
 
 
 # --- Test Cases ---

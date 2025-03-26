@@ -3,11 +3,20 @@ import logging
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from backend.services.auth_service import AuthService
+from backend.services.sqlite_db import SQLiteDatabaseService  # Import the DB service
 from backend.models import User
 
+# Create a single instance of the database service
+db_service = SQLiteDatabaseService()
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
-auth_service = AuthService()
+# Pass the shared db_service instance to AuthService
+auth_service = AuthService(db_service=db_service)
 logger = logging.getLogger(__name__)
+
+# Dependency function to get the shared DB instance
+def get_db():
+    return db_service
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     """

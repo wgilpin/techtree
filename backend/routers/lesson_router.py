@@ -11,11 +11,25 @@ from fastapi import APIRouter, Depends, HTTPException, status, Response
 from pydantic import BaseModel
 from backend.services.lesson_service import LessonService
 from backend.models import User
-from backend.dependencies import get_current_user
+from backend.dependencies import get_current_user, get_db # Add get_db
 from backend.logger import logger
+# Import necessary dependencies
+from fastapi import Depends # Add Depends
+from backend.services.sqlite_db import SQLiteDatabaseService # Add SQLiteDatabaseService
+# We also need SyllabusService to instantiate LessonService
+from backend.services.syllabus_service import SyllabusService
+# Import the getter for SyllabusService (defined in syllabus_router, ideally should be in dependencies.py)
+from backend.routers.syllabus_router import get_syllabus_service
 
 router = APIRouter()
-lesson_service = LessonService()
+# Removed direct instantiation of lesson_service
+
+# Dependency function to get LessonService instance
+def get_lesson_service(
+    db: SQLiteDatabaseService = Depends(get_db),
+    syllabus_service: SyllabusService = Depends(get_syllabus_service)
+) -> LessonService:
+    return LessonService(db_service=db, syllabus_service=syllabus_service)
 
 # --- Pydantic Models ---
 
@@ -110,12 +124,14 @@ class ProgressResponse(BaseModel):
 
 # Modify existing GET endpoint
 @router.get("/{syllabus_id}/{module_index}/{lesson_index}", response_model=LessonDataResponse) # Updated response model
+# Inject LessonService
 async def get_lesson_data( # Renamed function for clarity
     syllabus_id: str,
     module_index: int,
     lesson_index: int,
     current_user: Optional[User] = Depends(get_current_user),
-    response: Response = None # Keep Response for headers if needed
+    response: Response = None, # Keep Response for headers if needed
+    lesson_service: LessonService = Depends(get_lesson_service)
 ):
     """
     Get or generate lesson content structure and current conversational state.
@@ -151,12 +167,14 @@ async def get_lesson_data( # Renamed function for clarity
 
 # Add new POST endpoint for chat
 @router.post("/chat/{syllabus_id}/{module_index}/{lesson_index}", response_model=ChatTurnResponse)
+# Inject LessonService
 async def handle_chat_message(
     syllabus_id: str,
     module_index: int,
     lesson_index: int,
     request_body: ChatMessageRequest,
     current_user: User = Depends(get_current_user), # Require authentication for chat
+    lesson_service: LessonService = Depends(get_lesson_service)
 ):
     """
     Process a user's chat message for a specific lesson and return the AI's response.
@@ -201,7 +219,8 @@ async def handle_chat_message(
 
 
 @router.get("/by-id/{lesson_id}", response_model=Dict[str, Any])
-async def get_lesson_by_id(lesson_id: str):
+# Inject LessonService
+async def get_lesson_by_id(lesson_id: str, lesson_service: LessonService = Depends(get_lesson_service)):
     """
     Get a lesson by its ID.
     """
@@ -221,10 +240,12 @@ async def get_lesson_by_id(lesson_id: str):
         ) from e
 
 @router.post("/exercise/evaluate", response_model=ExerciseFeedback)
+# Inject LessonService
 async def evaluate_exercise(
     submission: ExerciseSubmission,
     current_user: Optional[User] = Depends(get_current_user),
-    response: Response = None
+    response: Response = None,
+    lesson_service: LessonService = Depends(get_lesson_service)
 ):
     """
     Evaluate a user's answer to an exercise.
@@ -254,10 +275,12 @@ async def evaluate_exercise(
         ) from e
 
 @router.post("/progress", response_model=ProgressResponse)
+# Inject LessonService
 async def update_lesson_progress(
     progress: ProgressUpdate,
     current_user: User = Depends(get_current_user),
-    response: Response = None
+    response: Response = None,
+    lesson_service: LessonService = Depends(get_lesson_service)
 ):
     """
     Update user's progress for a specific lesson.

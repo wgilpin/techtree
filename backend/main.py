@@ -12,7 +12,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI
-from backend.services.sqlite_db import SQLiteDatabaseService
+# Remove direct import of SQLiteDatabaseService
+# Import the shared db_service instance from dependencies
+from backend.dependencies import db_service
 from backend.logger import logger
 
 app = FastAPI(title="TechTree API")
@@ -20,8 +22,7 @@ app = FastAPI(title="TechTree API")
 FastAPI application instance for the TechTree API.
 """
 
-print("Init DB in main.py")
-db_service = SQLiteDatabaseService()
+# Removed direct DB instantiation and print statement
 
 
 @app.on_event("shutdown")
@@ -29,6 +30,7 @@ async def shutdown_event():
     """
     Gracefully closes the database connection on application shutdown.
     """
+    # Use the imported shared db_service instance
     db_service.close()
     print("Database connection closed.")
 

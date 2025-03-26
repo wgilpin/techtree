@@ -10,12 +10,13 @@ from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from backend.services.sqlite_db import SQLiteDatabaseService
 from backend.models import User
-from backend.dependencies import get_current_user
+# Import Depends and get_db, keep get_current_user
+from backend.dependencies import get_current_user, get_db
 from backend.logger import logger
+from fastapi import Depends # Ensure Depends is imported
 
 router = APIRouter()
-print("Init DB in progress_router.py")
-db_service = SQLiteDatabaseService()
+# Removed direct DB instantiation and print statement
 
 
 # Models

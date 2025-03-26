@@ -25,8 +25,10 @@ load_dotenv()
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 model = genai.GenerativeModel(os.environ["GEMINI_MODEL"])
 
-# Initialize the database
-db = SQLiteDatabaseService()
+# Import the shared database service instance
+from backend.dependencies import db_service as db # Import and alias as 'db'
+
+# Direct instantiation removed
 
 
 def call_with_retry(func, *args, max_retries=5, initial_delay=1, **kwargs):
@@ -657,9 +659,7 @@ class LessonAI:
         knowledge_level = state["knowledge_level"]
         user_id = state.get("user_id")
         from backend.logger import logger  # Ensure logger is available
-        from backend.services.sqlite_db import SQLiteDatabaseService  # Need DB access
-
-        db = SQLiteDatabaseService()  # Instantiate DB service - careful with lifecycle
+        # Remove local import and instantiation; use module-level 'db' alias
 
         # Debug print
         logger.debug(

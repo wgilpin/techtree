@@ -8,12 +8,17 @@ from backend.services.sqlite_db import SQLiteDatabaseService
 # Configure logging
 logger = logging.getLogger(__name__)
 
+# Import SQLiteDatabaseService for type hinting
+from .sqlite_db import SQLiteDatabaseService
+
 class OnboardingService:
     """ Service for onboarding - new topics and user assessment """
-    def __init__(self, db_service=None):
+    # Require db_service and add type hint
+    def __init__(self, db_service: SQLiteDatabaseService):
         logger.info("Initializing OnboardingService")
         self.tech_tree_ai = TechTreeAI()
-        self.db_service = db_service or SQLiteDatabaseService()
+        # Remove fallback
+        self.db_service = db_service
         self.current_session = {}
 
     def _get_or_create_session(self, user_id: Optional[str] = None) -> Dict[str, Any]:

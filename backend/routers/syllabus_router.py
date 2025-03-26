@@ -11,11 +11,18 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from backend.services.syllabus_service import SyllabusService
 from backend.models import User
-from backend.dependencies import get_current_user
+from backend.dependencies import get_current_user, get_db # Add get_db
 from backend.logger import logger
+# Import necessary dependencies
+from fastapi import Depends # Add Depends
+from backend.services.sqlite_db import SQLiteDatabaseService # Add SQLiteDatabaseService
 
 router = APIRouter()
-syllabus_service = SyllabusService()
+# Removed direct instantiation of syllabus_service
+
+# Dependency function to get SyllabusService instance
+def get_syllabus_service(db: SQLiteDatabaseService = Depends(get_db)) -> SyllabusService:
+    return SyllabusService(db_service=db)
 
 # Models
 class SyllabusRequest(BaseModel):
@@ -69,10 +76,12 @@ class LessonSummary(BaseModel):
 
 # Routes
 @router.post("/create", response_model=SyllabusResponse)
+# Inject SyllabusService
 async def create_syllabus(
     syllabus_req: SyllabusRequest,
     current_user: Optional[User] = Depends(get_current_user),
-    response: Response = None
+    response: Response = None,
+    syllabus_service: SyllabusService = Depends(get_syllabus_service)
 ):
     """
     Create a new syllabus based on topic and knowledge level.
@@ -96,7 +105,8 @@ async def create_syllabus(
         ) from e
 
 @router.get("/{syllabus_id}", response_model=SyllabusResponse)
-async def get_syllabus(syllabus_id: str):
+# Inject SyllabusService
+async def get_syllabus(syllabus_id: str, syllabus_service: SyllabusService = Depends(get_syllabus_service)):
     """
     Get a syllabus by ID.
     """
@@ -118,11 +128,13 @@ async def get_syllabus(syllabus_id: str):
         ) from e
 
 @router.get("/topic/{topic}/level/{level}", response_model=SyllabusResponse)
+# Inject SyllabusService
 async def get_syllabus_by_topic_level(
     topic: str,
     level: str,
     current_user: Optional[User] = Depends(get_current_user),
-    response: Response = None
+    response: Response = None,
+    syllabus_service: SyllabusService = Depends(get_syllabus_service)
 ):
     """
     Get a syllabus by topic and level.
@@ -142,7 +154,8 @@ async def get_syllabus_by_topic_level(
         ) from e
 
 @router.get("/{syllabus_id}/module/{module_index}", response_model=ModuleResponse)
-async def get_module_details(syllabus_id: str, module_index: int):
+# Inject SyllabusService
+async def get_module_details(syllabus_id: str, module_index: int, syllabus_service: SyllabusService = Depends(get_syllabus_service)):
     """
     Get details for a specific module in the syllabus.
     """
@@ -164,7 +177,8 @@ async def get_module_details(syllabus_id: str, module_index: int):
 @router.get(
     "/{syllabus_id}/module/{module_index}/lesson/{lesson_index}",
     response_model=LessonSummary)
-async def get_lesson_summary(syllabus_id: str, module_index: int, lesson_index: int):
+# Inject SyllabusService
+async def get_lesson_summary(syllabus_id: str, module_index: int, lesson_index: int, syllabus_service: SyllabusService = Depends(get_syllabus_service)):
     """
     Get summary for a specific lesson in the syllabus.
     """

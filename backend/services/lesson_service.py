@@ -13,14 +13,20 @@ import json  # Added import
 from backend.logger import logger  # Import the configured logger
 
 
+# Need to import SyllabusService and SQLiteDatabaseService for type hinting
+from .syllabus_service import SyllabusService
+from .sqlite_db import SQLiteDatabaseService
+
 class LessonService:
     """Service for managing and generating lesson content."""
 
-    def __init__(self, db_service=None, syllabus_service=None):
+    # Require db_service and syllabus_service, add type hints
+    def __init__(self, db_service: SQLiteDatabaseService, syllabus_service: SyllabusService):
         # LessonAI is still needed for generation
         self.lesson_ai = LessonAI()
-        self.db_service = db_service or SQLiteDatabaseService()
-        self.syllabus_service = syllabus_service or SyllabusService(self.db_service)
+        # Remove fallbacks
+        self.db_service = db_service
+        self.syllabus_service = syllabus_service
 
     async def get_or_generate_lesson(
         self,
