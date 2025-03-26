@@ -24,6 +24,7 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+logger.info("Logging initialized in app.py")  # Added log
 
 # Suppress Werkzeug "Detected change" INFO logs
 werkzeug_logger = logging.getLogger('werkzeug')
@@ -55,9 +56,8 @@ def login_required(f):
             return redirect(url_for('login'))
         try:
             return f(*args, **kwargs)
-        except TypeError as e:
-            #display the function name and all args
-            logger.error(f"Error in {f.__name__},({', '.join(map(str, args))}): {str(e)}")
+        except Exception as e:  # Changed to catch all exceptions
+            logger.error(f"Error in login_required decorator: {str(e)}")  # Added log
             raise e
     return decorated_function
 
@@ -321,6 +321,7 @@ def syllabus(topic, level):
 @app.route("/lesson/<syllabus_id>/<module>/<lesson_id>")
 @login_required
 def lesson(syllabus_id, module, lesson_id):
+    logger.info(f"Entering lesson route with syllabus_id: {syllabus_id}, module: {module}, lesson_id: {lesson_id}")  # Added log
     """
     Displays a specific lesson.
 
@@ -328,29 +329,99 @@ def lesson(syllabus_id, module, lesson_id):
     Requires the user to be logged in.
     """
     try:
+        logger.info("About to set headers")  # Added log
         headers = {'Authorization': f"Bearer {session['user']['access_token']}"}
+        logger.info("About to make API request")  # Added log
         response = requests.get(
             f"{API_URL}/lesson/{syllabus_id}/{module}/{lesson_id}",
             headers=headers,
             timeout=30
         )
+        logger.info(f"API response received: status_code={response.status_code}")  # Added log
 
         if response.ok:
+            logger.info("Response is OK, about to parse JSON")  # Added log
             lesson_data = response.json()
+            logger.info(f"Successfully fetched lesson data: {lesson_data}")  # Added log
+            logger.info("About to render template")  # Added log
+
+            # Create a new dictionary with the expected field names
+            content_data = lesson_data["content"]
+
+            # Check if content_data is a dictionary
+            if not isinstance(content_data, dict):
+                logger.error(f"content_data is not a dictionary: {type(content_data)}")
+                content_data = {}
+
+            # Log the structure of content_data
+            logger.info(f"Content data structure: {content_data.keys()}")
+
+            # Log the structure of active_exercises
+            active_exercises = content_data.get("active_exercises", [])
+            logger.info(f"Active exercises: {active_exercises}")
+
+            # Format exercises to match template expectations
+            formatted_exercises = []
+            if isinstance(active_exercises, list):
+                for exercise in active_exercises:
+                    if isinstance(exercise, dict):
+                        formatted_exercise = {
+                            "question": exercise.get("instructions", ""),  # Map instructions to question
+                            "type": exercise.get("type", "open_ended"),
+                            "answer": exercise.get("correct_answer", "")  # Map correct_answer to answer
+                        }
+                        formatted_exercises.append(formatted_exercise)
+
+            # Create a new dictionary with the expected field names
+            template_data = {
+                "module_index": lesson_data["module_index"],
+                "lesson_index": lesson_data["lesson_index"],
+                "lesson_id": lesson_data["lesson_id"],
+                "topic": content_data.get("topic", ""),
+                "level": content_data.get("level", ""),
+                "title": content_data.get("metadata", {}).get("title", ""),
+                "exposition": content_data.get("exposition_content", ""),
+                "exercises": formatted_exercises,
+                "summary": content_data.get("knowledge_assessment", "")
+            }
+
+            # Log the structure of template_data
+            logger.info(f"Template data structure: {template_data.keys()}")
+            logger.info(f"Formatted exercises: {formatted_exercises}")
+
+            from pprint import pprint
+            pprint(template_data)
+
+            import markdown
+
+            # Convert markdown to HTML before passing to template
+            template_data["exposition"] = markdown.markdown(template_data["exposition"])
+            for exercise in template_data["exercises"]:
+                exercise["question"] = markdown.markdown(exercise["question"])
+
+            for qa in template_data["summary"]:
+                qa["question"] = markdown.markdown(qa["question"])
+                qa["correct_answer"] = markdown.markdown(qa["correct_answer"])
+                qa["explanation"] = markdown.markdown(qa["explanation"])
+
             return render_template(
                 "lesson.html",
                 user=session['user'],
                 syllabus_id=syllabus_id,
                 module=module,
                 lesson_id=lesson_id,
-                lesson_data=lesson_data
+                lesson_data=template_data
             )
         else:
+            logger.info("Response is not OK")  # Added log
             flash("Failed to load lesson. Please try again later.")
+            logger.error(f"Failed to load lesson. Status code: {response.status_code}, Response text: {response.text}") # Added log
+            logger.info("About to render template with lesson_data=None")  # Added log
             return render_template("lesson.html", user=session['user'], lesson_data=None)
-    except requests.RequestException as e:
-        logger.error(f"Lesson error: {str(e)}")
+    except Exception as e:  # Changed to catch all exceptions
+        logger.error(f"Exception in lesson route: {str(e)}")  # Changed log message
         flash(f"Error: {str(e)}")
+        logger.info("About to render template with lesson_data=None after exception")  # Added log
         return render_template("lesson.html", user=session['user'], lesson_data=None)
 
 @app.route("/lesson/exercise/evaluate", methods=["POST"])

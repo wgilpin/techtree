@@ -35,15 +35,13 @@ class LessonService:
             knowledge_level=syllabus["level"],
             module_title=module["title"],
             lesson_title=lesson_details["title"],
+            user_id=user_id,
             # lesson_summary=lesson_details.get("summary", ""),
             # previous_lessons=[] # In a future implementation, we could pass previous lessons
         )
 
         # Generate the full lesson content
-        lesson_content = self.lesson_ai.get_lesson_content(
-            module_title=module["title"],
-            lesson_title=lesson_details["title"],
-        )
+        lesson_content = self.lesson_ai.get_lesson_content()
 
         # Save the lesson content to the database
         lesson_id = self.db_service.save_lesson_content(

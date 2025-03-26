@@ -17,3 +17,6 @@ wheels/
 techtree.log
 /techtree.log
 backend/techtree.log
+uv.lock
+techtree.db-wal
+techtree.db-shm

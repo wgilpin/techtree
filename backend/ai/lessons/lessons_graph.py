@@ -123,12 +123,19 @@ class LessonAI:
         if knowledge_level not in valid_levels:
             knowledge_level = "beginner"  # Default to beginner if invalid
 
+        # Preserve lesson_title and module_title from state if they exist
+        lesson_title = None
+        module_title = None
+        if state and isinstance(state, dict):
+            lesson_title = state.get("lesson_title")
+            module_title = state.get("module_title")
+
         return {
             "topic": topic,
             "knowledge_level": knowledge_level,
             "syllabus": None,
-            "lesson_title": None,
-            "module_title": None,
+            "lesson_title": lesson_title,
+            "module_title": module_title,
             "generated_content": None,
             "user_responses": [],
             "user_performance": {},
@@ -156,6 +163,7 @@ class LessonAI:
             user_specific = db.get_syllabus(topic, knowledge_level, user_id)
             if user_specific:
                 return {
+                    **state,  # Merge with existing state
                     "syllabus": user_specific,
                     "module_title": module_title,
                     "lesson_title": lesson_title,
@@ -166,6 +174,7 @@ class LessonAI:
 
         if master_version:
             return {
+                **state,  # Merge with existing state
                 "syllabus": master_version,
                 "module_title": module_title,
                 "lesson_title": lesson_title,
@@ -176,14 +185,14 @@ class LessonAI:
             f"No syllabus found for topic '{topic}' at level '{knowledge_level}'"
         )
 
-    def _generate_lesson_content(self, _: LessonState) -> Dict:
+    def _generate_lesson_content(self, state: LessonState) -> Dict:
         """Generate lesson content based on the syllabus, module title, and lesson title."""
         # Access values from self.state instead of state parameter
-        syllabus = self.state["syllabus"]
-        lesson_title = self.state.get("lesson_title")
-        module_title = self.state.get("module_title")
-        knowledge_level = self.state["knowledge_level"]
-        user_id = self.state.get("user_id")
+        syllabus = state["syllabus"]
+        lesson_title = state.get("lesson_title")
+        module_title = state.get("module_title")
+        knowledge_level = state["knowledge_level"]
+        user_id = state.get("user_id")
 
         # Debug print
         print(
@@ -196,7 +205,7 @@ class LessonAI:
 
         # Find the lesson in the syllabus
         lesson_found = False
-        for module in syllabus["modules"]:
+        for module in syllabus["content"]["modules"]:
             if module["title"] == module_title:
                 for lesson in module["lessons"]:
                     if lesson["title"] == lesson_title:
@@ -211,7 +220,7 @@ class LessonAI:
             )
 
         # Check if we already have generated content for this lesson
-        lesson_uid = f"{syllabus['uid']}_{module_title}_{lesson_title}"
+        lesson_uid = f"{syllabus['syllabus_id']}_{module_title}_{lesson_title}"
 
         # Use get_lesson_content to check for existing content
         existing_content = db.get_lesson_by_id(
@@ -304,7 +313,7 @@ class LessonAI:
                         # Find module and lesson indices
                         module_index = -1
                         lesson_index = -1
-                        for i, module in enumerate(syllabus["modules"]):
+                        for i, module in enumerate(syllabus["content"]["modules"]):
                             if module["title"] == module_title:
                                 module_index = i
                                 for j, lesson in enumerate(module["lessons"]):
@@ -372,7 +381,7 @@ class LessonAI:
         # Find module and lesson indices
         module_index = -1
         lesson_index = -1
-        for i, module in enumerate(syllabus["modules"]):
+        for i, module in enumerate(syllabus["content"]["modules"]):
             if module["title"] == module_title:
                 module_index = i
                 for j, lesson in enumerate(module["lessons"]):
@@ -545,7 +554,7 @@ class LessonAI:
         # Find module and lesson indices
         module_index = -1
         lesson_index = -1
-        for i, module in enumerate(syllabus["modules"]):
+        for i, module in enumerate(syllabus["content"]["modules"]):
             if module["title"] == module_title:
                 module_index = i
                 for j, lesson in enumerate(module["lessons"]):
@@ -582,37 +591,48 @@ class LessonAI:
         return {}
 
     def initialize(
-        self, topic: str, knowledge_level: str, user_id: Optional[str] = None
+        self, topic: str, knowledge_level: str, module_title: str, lesson_title: str, user_id: Optional[str] = None
     ) -> Dict:
         """Initialize the LessonAI with a topic, knowledge level, and user email."""
         inputs = {
             "topic": topic,
             "knowledge_level": knowledge_level,
             "user_id": user_id,
+            "module_title": module_title,
+            "lesson_title": lesson_title,
         }
-        self.state = self.graph.invoke(inputs)
+        try:
+            self.state = self.graph.invoke(inputs)
+        except ValueError as e:
+            raise ValueError(
+                f"Failed to initialize lesson: {e}. Ensure a syllabus exists for the given topic and knowledge level."
+            ) from e
         return self.state
 
-    def get_lesson_content(self, module_title: str, lesson_title: str) -> Dict:
-        """Get or generate content for a specific lesson."""
+    def get_lesson_content(self) -> Dict:
+        """Get or generate content for the current lesson."""
         if not self.state:
             raise ValueError("LessonAI not initialized. Call initialize() first.")
 
-        # Update the state directly with module_title and lesson_title
-        self.state["module_title"] = module_title
-        self.state["lesson_title"] = lesson_title
-
         # Debug print
         print(
-            f"get_lesson_content: module_title={module_title}, lesson_title={lesson_title}"
+            f"get_lesson_content: module_title={self.state.get('module_title')},",
+            f" lesson_title={self.state.get('lesson_title')}"
         )
-        print(f"Current state before invoke: {self.state}")
 
-        # Invoke the graph starting at generate_lesson_content
-        self.state = self.graph.invoke({}, {"current": "generate_lesson_content"})
+        # Invoke the graph starting at generate_lesson_content,
+        # passing the relevant parts of the existing state.
+        inputs = {
+            "topic": self.state["topic"],
+            "knowledge_level": self.state["knowledge_level"],
+            "syllabus": self.state["syllabus"],
+            "lesson_title": self.state["lesson_title"],
+            "module_title": self.state["module_title"],
+            "user_id": self.state.get("user_id")  # user_id might not always be present
+        }
 
-        # Debug print
-        print(f"State after invoke: {self.state}")
+        self.state = self.graph.invoke(inputs, {"current": "generate_lesson_content"})
+
 
         return self.state["generated_content"]
 
