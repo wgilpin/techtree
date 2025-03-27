@@ -2,14 +2,19 @@
 
 import json
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple, List # Added Tuple and List
 
-# Import necessary components from lessons_graph
-from backend.ai.lessons.lessons_graph import model, call_with_retry
-from backend.ai.app import LessonAI
+# Import necessary components
+from backend.ai.app import LessonAI # Keep LessonAI for chat interaction
 from backend.services.sqlite_db import SQLiteDatabaseService
 from backend.services.syllabus_service import SyllabusService
 from backend.logger import logger  # Import the configured logger
+# Import LLM utils and prompt loader
+from backend.ai.llm_utils import call_with_retry, MODEL as llm_model # Import MODEL from llm_utils
+from backend.ai.prompt_loader import load_prompt
+from backend.models import GeneratedLessonContent # For validation
+from pydantic import ValidationError
+from google.api_core.exceptions import ResourceExhausted
 
 
 # Need to import SyllabusService and SQLiteDatabaseService for type hinting
@@ -21,11 +26,124 @@ class LessonService:
 
     # Require db_service and syllabus_service, add type hints
     def __init__(self, db_service: SQLiteDatabaseService, syllabus_service: SyllabusService):
-        # LessonAI is still needed for generation
+        # LessonAI is still needed for chat interaction
         self.lesson_ai = LessonAI()
         # Remove fallbacks
         self.db_service = db_service
         self.syllabus_service = syllabus_service
+
+    async def _generate_and_save_lesson_content(
+        self,
+        syllabus: Dict,
+        module_title: str,
+        lesson_title: str,
+        knowledge_level: str,
+        user_id: Optional[str], # Keep user_id if needed for prompt context (e.g., performance)
+        syllabus_id: str,
+        module_index: int,
+        lesson_index: int
+    ) -> Tuple[Dict[str, Any], str]:
+        """
+        Generates lesson content using the LLM, validates it, saves it to the DB,
+        and returns the content along with the lesson's database ID.
+
+        Raises:
+            RuntimeError: If content generation or saving fails.
+        """
+        logger.info(
+            f"Generating new content for {syllabus_id}/{module_index}/{lesson_index}"
+        )
+        # Read the system prompt
+        system_prompt: str
+        try:
+            # Assuming system_prompt.txt is relative to the backend directory
+            with open("backend/system_prompt.txt", "r", encoding="utf-8") as f:
+                system_prompt = f.read()
+        except FileNotFoundError:
+            logger.error("system_prompt.txt not found!")
+            system_prompt = "You are a helpful tutor."  # Fallback prompt
+
+        # Get user's previous performance if available (Simplified)
+        previous_performance: Dict = {}
+        # TODO: Implement logic to fetch actual previous performance if needed
+
+        response_text: str
+        try:
+            # Load and format the prompt
+            prompt = load_prompt(
+                "generate_lesson_content",
+                system_prompt=system_prompt,
+                topic=syllabus.get("topic", "Unknown Topic"),
+                syllabus_json=json.dumps(syllabus, indent=2),
+                lesson_name=lesson_title,
+                user_level=knowledge_level,
+                previous_performance_json=json.dumps(previous_performance, indent=2),
+                time_constraint="5 minutes",
+            )
+            # Use call_with_retry from llm_utils with the imported llm_model
+            response = call_with_retry(llm_model.generate_content, prompt)
+            response_text = response.text
+        except ResourceExhausted:
+             logger.error("LLM call failed after multiple retries due to resource exhaustion in content generation.")
+             raise RuntimeError("LLM content generation failed due to resource limits.") from None
+        except Exception as e:
+            logger.error(f"LLM call failed during content generation: {e}", exc_info=True)
+            raise RuntimeError("LLM content generation failed") from e
+
+        # Extract JSON from response
+        json_patterns: List[str] = [
+            r"```(?:json)?\s*({.*?})```",
+            r'({[\s\S]*"exposition_content"[\s\S]*"active_exercises"[\s\S]*"knowledge_assessment"[\s\S]*"metadata"[\s\S]*})',
+            r"({[\s\S]*})",
+        ]
+
+        generated_content_dict: Optional[Dict] = None
+        for pattern in json_patterns:
+            json_match: Optional[re.Match] = re.search(pattern, response_text, re.DOTALL)
+            if json_match:
+                json_str: str = json_match.group(1)
+                json_str = re.sub(r"\\n", "", json_str)
+                json_str = re.sub(r"\\", "", json_str)
+                try:
+                    content_parsed: Dict = json.loads(json_str)
+                    # Attempt Pydantic validation
+                    try:
+                        validated_model = GeneratedLessonContent.model_validate(content_parsed)
+                        # Add topic/level if missing
+                        if not validated_model.topic:
+                            validated_model.topic = syllabus.get("topic", "Unknown Topic")
+                        if not validated_model.level:
+                            validated_model.level = knowledge_level
+                        generated_content_dict = validated_model.model_dump(mode='json')
+                        logger.info("Successfully parsed and validated generated lesson content.")
+                        break # Success
+                    except ValidationError as ve:
+                         logger.warning(f"Pydantic validation failed for parsed JSON: {ve}")
+                         # Continue to next pattern if validation fails
+                except json.JSONDecodeError as e:
+                    logger.warning(f"JSON parsing failed for pattern {pattern}: {e}")
+
+        if generated_content_dict is None:
+            logger.error(f"Failed to parse valid JSON content from LLM response: {response_text[:500]}...")
+            raise RuntimeError("Failed to parse valid content structure from LLM.")
+
+        # Save the generated content structure
+        try:
+            lesson_db_id = self.db_service.save_lesson_content(
+                syllabus_id=syllabus_id,
+                module_index=module_index,
+                lesson_index=lesson_index,
+                content=generated_content_dict,
+            )
+            if not lesson_db_id:
+                 logger.error("save_lesson_content did not return a valid lesson_id.")
+                 raise RuntimeError("Failed to save lesson content or retrieve lesson ID.")
+            logger.info(f"Saved new lesson content, associated lesson_id: {lesson_db_id}")
+            return generated_content_dict, str(lesson_db_id) # Return content and ID
+        except Exception as save_err:
+             logger.error(f"Failed to save lesson content: {save_err}", exc_info=True)
+             raise RuntimeError("Database error saving lesson content") from save_err
+
 
     def _initialize_lesson_state(
         self,
@@ -46,7 +164,7 @@ class LessonService:
         initial_state = {
             "topic": topic,
             "knowledge_level": level,
-            "syllabus_id": syllabus_id,
+            "syllabus_id": syllabus_id, # Keep syllabus_id for context
             "lesson_title": lesson_title,
             "module_title": module_title,
             "generated_content": generated_content,
@@ -59,19 +177,17 @@ class LessonService:
             "current_quiz_question_index": -1,
             "user_responses": [],
             "user_performance": {},
+            # Add syllabus dict itself if needed by LessonAI, though content is primary
+            "syllabus": self.syllabus_service.get_syllabus_sync(syllabus_id) # Add sync version or make init async
         }
 
         if not user_id: # No need to call AI or save state if no user
              return initial_state
 
         try:
-            # Pass the state to start_chat. Assume it modifies the state in-place or returns updated state.
-            # The actual implementation of start_chat is in LessonAI (backend/ai/app.py or lessons_graph.py)
-            # This TODO is removed here, but remains conceptually in LessonAI.
-            updated_state = self.lesson_ai.start_chat(initial_state.copy()) # Pass a copy if start_chat modifies
-            # If start_chat returns the updated state, use it. If it modifies in-place, initial_state is already updated (less safe).
-            # Assuming it returns the updated state for clarity:
-            initial_state = updated_state
+            # Pass the state to start_chat.
+            updated_state = self.lesson_ai.start_chat(initial_state.copy()) # Pass a copy
+            initial_state = updated_state # Use the returned state
             logger.info(
                 "Called start_chat and potentially added initial AI welcome message to state."
             )
@@ -139,48 +255,36 @@ class LessonService:
                 logger.info(f"No existing progress or state found for user {user_id}")
 
         # --- Check for Existing Lesson Content ---
-        # Use get_lesson_by_id which combines lesson details and content
-        # We need the lesson_id first, which might be in progress or need lookup
-        lesson_db_id = None
-        if progress_entry:
-            # Assuming get_lesson_progress can join to get lesson_id
-            # lesson_db_id = progress_entry.get('lesson_db_id') # Hypothetical field name
-            # TEMP: Need to look up lesson_id separately if not joined
-            try:
-                lesson_details_temp = await self.syllabus_service.get_lesson_details(
-                    syllabus_id, module_index, lesson_index
-                )
-                lesson_db_id = lesson_details_temp.get("lesson_id")
-            except ValueError:
-                lesson_db_id = None
-
-        # If not in progress, find lesson_id via module/lesson index
-        if not lesson_db_id:
-            try:
-                lesson_details = await self.syllabus_service.get_lesson_details(
-                    syllabus_id, module_index, lesson_index
-                )
-                lesson_db_id = lesson_details.get(
-                    "lesson_id"
-                )  # Actual lesson primary key
-            except ValueError:
-                logger.error(
-                    f"Could not find lesson details for mod={module_index}, lesson={lesson_index}"
-                )
-                lesson_db_id = None  # Ensure it's None if lookup fails
-
         existing_lesson_content = None
-        if lesson_db_id:
-            # Use get_lesson_content using syllabus_id, module_index, lesson_index
-            content_data = self.db_service.get_lesson_content(
-                syllabus_id, module_index, lesson_index
+        lesson_db_id = None # Initialize lesson_db_id
+
+        # Try to get lesson_db_id from progress first
+        if progress_entry and progress_entry.get('lesson_id'):
+             lesson_db_id = progress_entry.get('lesson_id')
+             logger.debug(f"Found lesson_id {lesson_db_id} from progress entry.")
+        # If not in progress or progress doesn't have it, look up via indices
+        if not lesson_db_id:
+             try:
+                 lesson_details = await self.syllabus_service.get_lesson_details(
+                     syllabus_id, module_index, lesson_index
+                 )
+                 lesson_db_id = lesson_details.get("lesson_id")
+                 logger.debug(f"Looked up lesson_id {lesson_db_id} via indices.")
+             except ValueError:
+                 logger.error(
+                     f"Could not find lesson details for mod={module_index}, lesson={lesson_index}"
+                 )
+                 # lesson_db_id remains None
+
+        # Now try fetching content using indices (as DB method expects this)
+        content_data = self.db_service.get_lesson_content(
+            syllabus_id, module_index, lesson_index
+        )
+        if content_data:
+            existing_lesson_content = content_data # Assign directly
+            logger.info(
+                f"Found existing lesson content for {syllabus_id}/{module_index}/{lesson_index}"
             )
-            # get_lesson_content now returns the content dict directly or None
-            if content_data:
-                existing_lesson_content = content_data # Assign directly
-                logger.info(
-                    f"Found existing lesson content for lesson_id {lesson_db_id}"
-                )
 
         # --- Return Existing Content & State (if found) ---
         if existing_lesson_content:
@@ -201,6 +305,7 @@ class LessonService:
                         syllabus_id, module_index
                     )
                     module_title = module_details.get("title", "Unknown Module")
+                    # Get lesson title from content metadata if possible
                     lesson_title = existing_lesson_content.get("metadata", {}).get(
                         "title", "Unknown Lesson"
                     )
@@ -228,6 +333,7 @@ class LessonService:
                         lesson_index=lesson_index,
                         status="in_progress",
                         lesson_state_json=state_json,
+                        lesson_id=lesson_db_id # Ensure lesson_id is saved with progress
                     )
                     logger.info(f"Saved initialized state for user {user_id}")
 
@@ -236,8 +342,7 @@ class LessonService:
                         f"Failed to initialize or save lesson state: {init_err}",
                         exc_info=True,
                     )
-                    # Decide how to handle this - maybe return error or proceed without state?
-                    # For now, proceed but lesson_state might remain None if error occurred before assignment
+                    # Proceed but lesson_state might remain None
 
             return {
                 "lesson_id": lesson_db_id,  # Use the actual lesson PK
@@ -268,50 +373,22 @@ class LessonService:
                 f"Could not find module/lesson details for syllabus {syllabus_id}, mod {module_index}, lesson {lesson_index}"
             ) from e
 
-        # Generate the base lesson content structure (exposition, exercises, quiz defs)
+        # Generate the base lesson content structure using the new helper
         try:
-            # Construct the state needed for the generation logic
-            generation_input_state = {
-                 "topic": topic,
-                 "knowledge_level": level,
-                 "module_title": module_title,
-                 "lesson_title": lesson_title,
-                 "user_id": user_id,
-                 "syllabus": syllabus, # Pass the fetched syllabus
-                 # Include other fields expected by _generate_lesson_content if any
-            }
-            # Call the generation logic directly (assuming it's available on the instance)
-            # This returns a dict like {"generated_content": ...}
-            generation_result = self.lesson_ai._generate_lesson_content(generation_input_state)
-            generated_content = generation_result.get("generated_content")
-            if not generated_content:
-                 raise RuntimeError("Content generation logic did not return 'generated_content'.")
-
-        except Exception as gen_err:
-            logger.error(f"Lesson content generation failed: {gen_err}", exc_info=True)
-            raise RuntimeError("Failed to generate lesson content") from gen_err
-
-        # Save the generated content structure
-        # Assume save_lesson_content will handle finding/creating the lesson entry,
-        # linking the content, and returning the actual lesson_id PK.
-        try:
-            lesson_db_id = self.db_service.save_lesson_content(
-                syllabus_id=syllabus_id,
-                module_index=module_index,
-                lesson_index=lesson_index,
-                content=generated_content,
+            generated_content, lesson_db_id = await self._generate_and_save_lesson_content(
+                 syllabus=syllabus,
+                 module_title=module_title,
+                 lesson_title=lesson_title,
+                 knowledge_level=level,
+                 user_id=user_id,
+                 syllabus_id=syllabus_id,
+                 module_index=module_index,
+                 lesson_index=lesson_index
             )
-            if not lesson_db_id:
-                 # If save_lesson_content doesn't return it or fails silently
-                 logger.error("save_lesson_content did not return a valid lesson_id.")
-                 raise RuntimeError("Failed to save lesson content or retrieve lesson ID.")
-            logger.info(f"Saved new lesson content, associated lesson_id: {lesson_db_id}")
-        except Exception as save_err:
-             logger.error(f"Failed to save lesson content: {save_err}", exc_info=True)
-             # Re-raise or handle as appropriate
-             raise RuntimeError("Database error saving lesson content") from save_err
+        except Exception as gen_err:
+            # Error logging happens within the helper
+            raise RuntimeError("Failed to generate and save lesson content") from gen_err
 
-        # Now lesson_db_id should be valid for the rest of the function
 
         # Initialize conversational state using the helper function
         initial_lesson_state = self._initialize_lesson_state(
@@ -324,7 +401,7 @@ class LessonService:
             user_id=user_id,
             module_index=module_index,
             lesson_index=lesson_index,
-            lesson_db_id=lesson_db_id # Pass the db id
+            lesson_db_id=lesson_db_id # Pass the db id from generation step
         )
 
         # Save initial progress and state if user_id is provided
@@ -338,6 +415,7 @@ class LessonService:
                     lesson_index=lesson_index,
                     status="in_progress",  # Start as in_progress if chat starts
                     lesson_state_json=state_json,
+                    lesson_id=lesson_db_id # Ensure lesson_id is saved
                 )
                 logger.info(f"Saved initial progress and state for user {user_id}")
             except Exception as db_err:
@@ -401,24 +479,15 @@ class LessonService:
             logger.warning(
                 "Lesson state missing 'generated_content'. Attempting to reload."
             )
-            # Need lesson_id PK to load content
             try:
-                lesson_details = await self.syllabus_service.get_lesson_details(
+                # Use indices to fetch content
+                content_data = self.db_service.get_lesson_content(
                     syllabus_id, module_index, lesson_index
                 )
-                lesson_db_id = lesson_details.get("lesson_id")
-                if lesson_db_id:
-                    content_data = self.db_service.get_lesson_content(
-                        syllabus_id, module_index, lesson_index
-                    )  # Use indices here
-                    if content_data and "content" in content_data:
-                        current_lesson_state["generated_content"] = content_data[
-                            "content"
-                        ]
-                    else:
-                        raise ValueError("Failed to reload generated_content.")
+                if content_data:
+                    current_lesson_state["generated_content"] = content_data
                 else:
-                    raise ValueError("Could not determine lesson_id to reload content.")
+                    raise ValueError("Failed to reload generated_content using indices.")
             except Exception as load_err:
                 logger.error(
                     f"Fatal error: Could not reload generated_content for state: {load_err}"
@@ -427,8 +496,7 @@ class LessonService:
 
         # 2. Call LessonAI.process_chat_turn
         try:
-            # Ensure LessonAI instance is ready (might need re-init if service is long-lived?)
-            # Assuming self.lesson_ai is persistent for the service instance
+            # Ensure LessonAI instance is ready
             updated_lesson_state = self.lesson_ai.process_chat_turn(
                 current_state=current_lesson_state, user_message=user_message
             )
@@ -442,13 +510,12 @@ class LessonService:
         # 3. Serialize and save the updated state
         try:
             updated_state_json = json.dumps(updated_lesson_state)
-            # Determine status (e.g., check if quiz/exercises completed in updated_state)
-            # For now, keep it simple and assume "in_progress"
-            current_status = "in_progress"
-            # Extract score if updated
-            current_score = updated_lesson_state.get("user_performance", {}).get(
-                "score"
-            )  # Example path
+            current_status = "in_progress" # Default status during chat
+            # Extract score if updated (assuming structure)
+            current_score = updated_lesson_state.get("user_performance", {}).get("score")
+
+            # Get lesson_id from the state if possible, otherwise fallback needed
+            lesson_db_id = updated_lesson_state.get("lesson_uid") # Assuming lesson_uid holds the DB ID
 
             self.db_service.save_user_progress(
                 user_id=user_id,
@@ -456,8 +523,9 @@ class LessonService:
                 module_index=module_index,
                 lesson_index=lesson_index,
                 status=current_status,
-                score=current_score,  # Pass score if available
+                score=current_score,
                 lesson_state_json=updated_state_json,
+                lesson_id=lesson_db_id # Pass lesson_id if available
             )
             logger.info(f"Saved updated lesson state for user {user_id}")
         except Exception as db_err:
@@ -469,16 +537,13 @@ class LessonService:
         # 4. Return the AI's response(s)
         # Find messages added in the last turn (assistant messages after the last user message)
         last_user_msg_index = -1
-        for i in range(
-            len(updated_lesson_state.get("conversation_history", [])) - 1, -1, -1
-        ):
-            if updated_lesson_state["conversation_history"][i].get("role") == "user":
+        history = updated_lesson_state.get("conversation_history", [])
+        for i in range(len(history) - 1, -1, -1):
+            if history[i].get("role") == "user":
                 last_user_msg_index = i
                 break
 
-        ai_responses = updated_lesson_state.get("conversation_history", [])[
-            last_user_msg_index + 1 :
-        ]
+        ai_responses = history[last_user_msg_index + 1 :]
 
         return {"responses": ai_responses}
 
@@ -624,7 +689,8 @@ Example JSON format:
 
         # Call the Gemini model directly
         try:
-            evaluation_response = call_with_retry(model.generate_content, prompt)
+            # Use call_with_retry and llm_model imported from llm_utils
+            evaluation_response = call_with_retry(llm_model.generate_content, prompt)
             evaluation_text = evaluation_response.text
             logger.debug(f"Raw evaluation response: {evaluation_text}")
 
@@ -698,6 +764,7 @@ Example JSON format:
                 lesson_index=lesson["lesson_index"],
                 status="completed",
                 score=evaluation_result.get("score", 0),  # Use score from parsed result
+                lesson_id=lesson_id # Pass lesson_id
             )
 
         # Return the structured evaluation result
@@ -730,6 +797,8 @@ Example JSON format:
             status=status,
             # Score is only updated during evaluation, pass None here
             score=None,
+            # Need lesson_id if updating progress without state
+            # lesson_id= ? # How to get lesson_id here reliably?
         )
 
         return {

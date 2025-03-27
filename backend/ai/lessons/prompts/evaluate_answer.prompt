@@ -1,0 +1,20 @@
+You are evaluating a user's answer to the following {question_type}.
+
+{prompt_context}
+
+Please evaluate the user's answer based on the question and expected solution context.
+Provide your evaluation as a JSON object with the following structure:
+1. "score": A score between 0.0 (completely incorrect) and 1.0 (completely correct). Grade appropriately based on correctness and completeness. For multiple choice/true-false, usually 1.0 or 0.0. For ordering, 1.0 only if exact order matches.
+2. "is_correct": A boolean (true if score >= 0.8, false otherwise).
+3. "feedback": Constructive feedback for the user explaining the evaluation. If incorrect, briefly explain why and hint towards the correct answer without giving it away directly if possible.
+4. "explanation": (Optional) A more detailed explanation of the correct answer, especially useful if the user was incorrect. Keep it concise.
+
+Example JSON format:
+{{
+  "score": 1.0,
+  "is_correct": true,
+  "feedback": "Correct! 'B' is the right answer.",
+  "explanation": "Option B is correct because..."
+}}
+
+Respond ONLY with the JSON object.

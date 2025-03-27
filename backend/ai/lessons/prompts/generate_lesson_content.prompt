@@ -1,0 +1,11 @@
+{system_prompt}
+
+## Input Parameters
+- topic: {topic}
+- syllabus: {syllabus_json}
+- lesson_name: {lesson_name}
+- user_level: {user_level}
+- previous_performance: {previous_performance_json}
+- time_constraint: {time_constraint}
+
+Please generate the lesson content following the output format specified in the system prompt.
