@@ -180,11 +180,11 @@ class LessonAI:
         user_id: str = state.get("user_id", "unknown_user")
         lesson_title: str = state.get("lesson_title", "this lesson")
         # Get the full exposition content
-        exposition: Optional[str] = str(
-            state.get("generated_content", {}).get(
-                "exposition_content", "No exposition available."
-            )
-        )  # Cast to str for prompt
+        generated_content = state.get("generated_content")
+        exposition: Optional[str] = "No exposition available."
+        if generated_content:
+            exposition = str(generated_content.exposition_content)
+        # Cast to str for prompt
 
         logger.debug(
             f"Generating chat response for user {user_id} in lesson '{lesson_title}'"
@@ -309,6 +309,7 @@ class LessonAI:
             return {
                 "conversation_history": updated_history,
                 "current_interaction_mode": "chatting",
+                "current_exercise_index": current_index,  # Preserve the current index
             }
 
     def _present_quiz_question(self, state: LessonState) -> Dict[str, Any]:
@@ -395,7 +396,7 @@ class LessonAI:
             return {
                 "conversation_history": updated_history,
                 "current_interaction_mode": "chatting",  # Reset mode
-                # Keep current_quiz_question_index as is
+                "current_quiz_question_index": current_index,  # Preserve the current index
             }
 
     # Refactored _evaluate_chat_answer function
