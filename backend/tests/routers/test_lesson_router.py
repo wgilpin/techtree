@@ -94,8 +94,34 @@ def test_get_lesson_data_success(mock_lesson_service):
     syllabus_id = "syllabus1"
     module_index = 0
     lesson_index = 1
-    mock_content = {"metadata": {"title": "Test Lesson"}, "exposition": "<p>Test</p>"}
+    # Define mock_content matching the GeneratedLessonContent structure
+    mock_content = {
+        "topic": None, # Assuming topic/level might be None if not set
+        "level": None,
+        "exposition_content": {
+            "content": [
+                {
+                    "type": "paragraph",
+                    "text": "<p>Test</p>",
+                    "level": None, # Explicitly include None fields
+                    "items": None, # Explicitly include None fields
+                    "question": None # Explicitly include None fields
+                }
+            ]
+        },
+        "active_exercises": [], # Default empty list
+        "knowledge_assessment": [], # Default empty list
+        "metadata": { # Match Metadata structure
+            "title": "Test Lesson",
+            "tags": None,
+            "difficulty": None,
+            "related_topics": None,
+            "prerequisites": None
+        }
+    }
     mock_state = {"conversation_history": [], "current_interaction_mode": "chatting"}
+    # The service should return a dictionary that can be validated by GeneratedLessonContent
+    # So, the 'content' key in the return_value should hold the mock_content dict
     mock_lesson_service.get_or_generate_lesson.return_value = {
         "lesson_id": "lesson_db_id_1",
         "syllabus_id": syllabus_id,

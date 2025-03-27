@@ -10,6 +10,9 @@ import json
 from typing import Dict, List, TypedDict, Optional
 from datetime import datetime
 
+from pydantic import ValidationError
+from backend.models import GeneratedLessonContent # Import the new model
+
 import google.generativeai as genai
 from google.api_core.exceptions import ResourceExhausted
 from dotenv import load_dotenv
@@ -1113,79 +1116,72 @@ class LessonAI:
                     # --- END DEBUG LOG ---
                     try:
                         content_candidate = json.loads(json_str)
-                        # Validate the structure
-                        if all(
-                            key in content_candidate
-                            for key in [
-                                "exposition_content",
-                                "thought_questions",
-                                "active_exercises",
-                                "knowledge_assessment",
-                                "metadata",
-                            ]
-                        ):
-                            generated_content = content_candidate
-                            break  # Successfully parsed and validated
-                    except Exception as e:
-                        print(f"Failed to parse JSON with pattern '{pattern}': {e}")
-                        continue  # Try next pattern
+                        # Validate the structure using Pydantic
+                        generated_content_model = GeneratedLessonContent.model_validate(content_candidate)
+                        # Add topic and level if not present in LLM output but available in context
+                        if not generated_content_model.topic:
+                            generated_content_model.topic = syllabus['topic']
+                        if not generated_content_model.level:
+                            generated_content_model.level = knowledge_level
+                        # Convert back to dict for saving and returning, ensuring consistency
+                        generated_content = generated_content_model.model_dump(mode='json') # Use mode='json' for JSON-compatible types
+                        print("Successfully parsed and validated lesson content using Pydantic.")
+                        break  # Successfully parsed and validated
+                    except ValidationError as e:
+                        print(f"Pydantic validation failed for pattern '{pattern}': {e}")
+                        # Optionally log more details e.g., logger.warning(...)
+                        continue # Try next pattern
+                    except json.JSONDecodeError as e:
+                        print(f"JSON parsing failed for pattern '{pattern}': {e}")
+                        continue # Try next pattern
+                    except Exception as e: # Catch other potential errors during validation/parsing
+                        print(f"Unexpected error during parsing/validation with pattern '{pattern}': {e}")
+                        continue # Try next pattern
 
-            # If JSON parsing failed or structure was invalid after trying all patterns
+            # If JSON parsing or validation failed after trying all patterns
             if generated_content is None:
                 print(
-                    f"Failed to parse valid JSON from response: {response_text[:200]}..."
+                    f"Failed to parse or validate JSON from response: {response_text[:200]}..."
                 )
+                # Option 1: Raise an error
+                # raise RuntimeError("Failed to generate valid lesson content structure from LLM.")
+                # Option 2: Return a default/placeholder structure (as before, but ensure it matches the model if possible)
+                # Creating a default model instance might be cleaner if feasible
+                print("Warning: Using placeholder content due to parsing/validation failure.")
+                # For simplicity, keeping the dictionary placeholder for now.
+                # A default Pydantic model instance could also be created here.
                 generated_content = {
-                    "exposition_content": f"# {lesson_title}\n\nThis is a placeholder for the lesson content.",
-                    "thought_questions": [
-                        "What do you think about this topic?",
-                        "How might this apply to real-world scenarios?",
-                    ],
-                    "active_exercises": [
-                        {
-                            "id": "ex1",
-                            "type": "scenario",
-                            "question": "Consider the following scenario...",
-                            "expected_solution": "The correct approach would be...",
-                            "hints": ["Think about...", "Consider..."],
-                            "explanation": "This works because...",
-                            "misconceptions": {
-                                "common_error_1": "This is incorrect because...",
-                                "common_error_2": "This approach fails because...",
-                            },
-                        }
-                    ],
-                    "knowledge_assessment": [
-                        {
-                            "id": "q1",
-                            "type": "multiple_choice",
-                            "question": "Which of the following best describes...?",
-                            "options": ["Option A", "Option B", "Option C", "Option D"],
-                            "correct_answer": "Option B",
-                            "explanation": "Option B is correct because...",
-                        }
-                    ],
-                    "metadata": {
-                        "tags": ["placeholder"],
-                        "difficulty": 3,
-                        "related_topics": ["Related Topic 1", "Related Topic 2"],
-                        "prerequisites": ["Prerequisite 1"],
-                    },
+                    "topic": syllabus['topic'],
+                    "level": knowledge_level,
+                    "exposition_content": f"# {lesson_title}\n\nThis is placeholder content.",
+                    "active_exercises": [],
+                    "knowledge_assessment": [],
+                    "metadata": {"title": lesson_title},
                 }
+        # Save the newly generated (or placeholder) content
+        # Ensure generated_content is a dictionary before saving (it should be after model_dump or placeholder creation)
+        content_to_save = generated_content if isinstance(generated_content, dict) else {}
+        # Add a check for the model object in case the dict conversion failed earlier but validation succeeded
+        if not content_to_save and 'generated_content_model' in locals() and generated_content_model:
+            try:
+                content_to_save = generated_content_model.model_dump(mode='json')
+            except Exception as dump_error:
+                print(f"Error dumping validated model to dict: {dump_error}")
+                content_to_save = {} # Fallback to empty dict
 
-            # Save the newly generated (or placeholder) content
-            print(
-                f"Saving content for syllabus {syllabus_id}, module {module_index}, lesson {lesson_index}"
-            )
-            # --- DEBUG LOG ---
-            print(
-                f"DEBUG_SAVE: Content being saved: {json.dumps(generated_content, indent=2)}"
-            )
-            # --- END DEBUG LOG ---
-            db.save_lesson_content(
-                syllabus_id, module_index, lesson_index, generated_content
-            )
-            return {"generated_content": generated_content}
+        print(
+            f"Saving content for syllabus {syllabus_id}, module {module_index}, lesson {lesson_index}"
+        )
+        # --- DEBUG LOG ---
+        print(
+            f"DEBUG_SAVE: Content being saved: {json.dumps(content_to_save, indent=2)}"
+        )
+        # --- END DEBUG LOG ---
+        db.save_lesson_content(
+            syllabus_id, module_index, lesson_index, content_to_save # Use content_to_save
+        )
+        # Return the dictionary representation
+        return {"generated_content": content_to_save} # Use content_to_save
 
     def _evaluate_response(
         self, state: LessonState, response: str, question_id: str

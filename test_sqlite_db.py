@@ -129,14 +129,10 @@ class TestSQLiteDatabaseService(unittest.TestCase):
         # Retrieve the lesson content
         lesson = self.db_service.get_lesson_content(syllabus_id, 0, 0)
 
-        # Verify the lesson content was created correctly
+        # Verify the lesson content was retrieved correctly
         self.assertIsNotNone(lesson)
-        self.assertEqual(lesson["lesson_id"], content_id)
-        self.assertEqual(lesson["syllabus_id"], syllabus_id)
-        self.assertEqual(lesson["module_index"], 0)
-        self.assertEqual(lesson["lesson_index"], 0)
-        self.assertIn("content", lesson)
-        self.assertEqual(lesson["content"]["title"], lesson_content["title"])
+        # Assuming get_lesson_content returns the content dict directly
+        self.assertEqual(lesson, lesson_content)
 
     def test_save_and_get_user_progress(self):
         """

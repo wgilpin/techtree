@@ -3,7 +3,6 @@
 Update the database schema to include user progress tracking
 """
 
-import json
 from tinydb import TinyDB
 
 # Initialize the database

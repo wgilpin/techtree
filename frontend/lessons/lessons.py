@@ -2,6 +2,7 @@
 """blueprint for lesson handling in the flask app"""
 
 import logging
+from typing import Optional, Union, Dict  # Add Optional and Union
 
 import requests
 import markdown
@@ -14,6 +15,16 @@ from flask import (
     session,
     current_app,
 )
+from pydantic import ValidationError
+
+# Assuming backend models are accessible via PYTHONPATH or similar mechanism
+# Adjust the import path if necessary based on project structure
+from backend.models import (
+    GeneratedLessonContent,
+    ExpositionContent,
+    ExpositionContentItem,
+)
+
 from frontend.auth.auth import login_required  # Import the centralized decorator
 
 # Configure logging for the blueprint
@@ -27,62 +38,122 @@ lessons_bp = Blueprint("lessons", __name__, template_folder="../templates")
 
 
 # --- Helper function to format exposition (Copied from app.py) ---
-def format_exposition_to_markdown(exposition_data):
+def format_exposition_to_markdown(
+    exposition_input: Optional[Union[str, ExpositionContent, Dict]],
+):
     """
-    Converts the structured exposition content from the API
+    Converts structured exposition content (Pydantic model, dict, or string)
     into a single markdown string.
     """
-    logger.debug(f"DEBUG_FORMAT: Received exposition_data type: {type(exposition_data)}") # DEBUG LOG
-    logger.debug(f"DEBUG_FORMAT: Received exposition_data type: {type(exposition_data)}") # DEBUG LOG
-    logger.debug(f"DEBUG_FORMAT: Received exposition_data keys: {list(exposition_data.keys()) if isinstance(exposition_data, dict) else 'N/A'}") # DEBUG LOG
-    # Check for the 'content' key which contains the list of content items
-    has_content = isinstance(exposition_data, dict) and "content" in exposition_data
-    logger.debug(f"DEBUG_FORMAT: 'content' key found: {has_content}") # DEBUG LOG
+    logger.debug(
+        f"DEBUG_FORMAT: Received exposition_input type: {type(exposition_input)}"
+    )
 
     markdown_parts = []
-    # Check for the 'content' key which contains the list of content items
-    if has_content:
-        logger.debug("DEBUG_FORMAT: Processing 'content' block.") # DEBUG LOG
-        content_list = exposition_data.get("content", []) # Get the list from 'content'
-        if isinstance(content_list, list):
-            for item in content_list: # Iterate through items in 'content' list
-                if isinstance(item, dict):
-                    # Process based on 'type' key within each item
-                    item_type = item.get("type")
-                    text = item.get("text", "") # Common field
+
+    # Handle if input is the Pydantic Model
+    if isinstance(exposition_input, ExpositionContent):
+        logger.debug("DEBUG_FORMAT: Processing ExpositionContent model.")
+        content_data = exposition_input.content
+        if isinstance(content_data, str):
+            logger.debug("DEBUG_FORMAT: ExpositionContent.content is a string.")
+            return content_data  # Return string directly
+        elif isinstance(content_data, list):
+            logger.debug(
+                "DEBUG_FORMAT: Processing list from ExpositionContent.content."
+            )
+            for item in content_data:  # item should be ExpositionContentItem
+                if isinstance(item, ExpositionContentItem):
+                    item_type = item.type
+                    text = item.text or ""  # Use attribute access, handle None
 
                     if item_type == "paragraph":
                         markdown_parts.append(text)
                     elif item_type == "heading":
-                        level = item.get("level", 2) # Default to level 2 if not specified
+                        level = item.level or 2  # Default to level 2 if None
                         markdown_parts.append(f"{'#' * level} {text}")
-                    elif item_type == "list": # Handle lists if they appear
-                         list_items = item.get("items", [])
-                         md_list = "\n".join([f"- {li}" for li in list_items])
-                         markdown_parts.append(md_list)
-                    elif item_type == "thought_question": # Handle thought questions if they appear
-                         question = item.get("question", "")
-                         markdown_parts.append(f"> *Thought Question: {question}*")
-                    else: # Fallback for unknown dict types
-                        if text:
+                    elif item_type == "list":
+                        list_items = item.items or []
+                        if list_items:  # Avoid adding empty list markers
+                            md_list = "\n".join([f"- {li}" for li in list_items])
+                            markdown_parts.append(md_list)
+                    elif item_type == "thought_question":
+                        question = item.question or ""
+                        if question:  # Avoid adding empty thought question
+                            markdown_parts.append(f"> *Thought Question: {question}*")
+                    else:  # Fallback for unknown item types within the model list
+                        logger.warning(
+                            f"Unknown ExpositionContentItem type: {item_type}"
+                        )
+                        if text:  # Still append text if available
                             markdown_parts.append(text)
-
-                elif isinstance(item, str): # Fallback if an item in the list is just a string
-                    markdown_parts.append(item)
+                else:
+                    logger.warning(
+                        f"Unexpected item type in ExpositionContent list: {type(item)}"
+                    )
+                    # Optionally try to convert to string or skip
+                    markdown_parts.append(str(item))
+        elif content_data is None:
+            logger.debug("DEBUG_FORMAT: ExpositionContent.content is None.")
+            return ""  # Return empty string if content is None
         else:
             logger.warning(
-                f"Exposition 'content' field is not a list: {type(content_list)}"
+                f"Unexpected type for ExpositionContent.content: {type(content_data)}"
             )
-            return ""
-    elif isinstance(exposition_data, str):
-        logger.debug("DEBUG_FORMAT: Processing as plain string.") # DEBUG LOG
-        logger.info("Exposition data is a plain string.")
-        return exposition_data
+            return ""  # Return empty string for unexpected types
+
+    # Handle if input is a plain string
+    elif isinstance(exposition_input, str):
+        logger.debug("DEBUG_FORMAT: Processing as plain string.")
+        return exposition_input
+
+    # Handle if input is still a dictionary (e.g., validation failed upstream) - Legacy support
+    elif isinstance(exposition_input, dict):
+        logger.warning(
+            "DEBUG_FORMAT: Processing as dictionary (fallback). "
+            "Pydantic validation may have failed."
+        )
+        # Attempt to use the old logic as a fallback
+        content_list = exposition_input.get("content", [])
+        if isinstance(content_list, list):
+            for item_dict in content_list:
+                if isinstance(item_dict, dict):
+                    item_type = item_dict.get("type")
+                    text = item_dict.get("text", "")
+                    if item_type == "paragraph":
+                        markdown_parts.append(text)
+                    elif item_type == "heading":
+                        markdown_parts.append(
+                            f"{'#' * item_dict.get('level', 2)} {text}"
+                        )
+                    elif item_type == "list":
+                        markdown_parts.append(
+                            "\n".join([f"- {li}" for li in item_dict.get("items", [])])
+                        )
+                    elif item_type == "thought_question":
+                        markdown_parts.append(
+                            f"> *Thought Question: {item_dict.get('question', '')}*"
+                        )
+                    elif text:
+                        markdown_parts.append(text)
+                elif isinstance(item_dict, str):
+                    markdown_parts.append(item_dict)
+        elif isinstance(
+            exposition_input.get("content"), str
+        ):  # Check if dict['content'] is string
+            return exposition_input.get("content", "")
+
+    # Handle None or other unexpected types
+    elif exposition_input is None:
+        logger.debug("DEBUG_FORMAT: Received None input.")
+        return ""
     else:
         logger.warning(
-            f"Unexpected exposition_data format: {type(exposition_data)}. Returning empty string."
+            f"Unexpected exposition_input format: {type(exposition_input)}. Returning empty string."
         )
         return ""
+
+    # Join the parts for list-based content
     return "\n\n".join(markdown_parts)
 
 
@@ -106,12 +177,42 @@ def _fetch_lesson_data(syllabus_id, module, lesson_id):
         logger.info(f"API response status: {response.status_code}")
 
         if response.ok:
-            lesson_data = response.json()
-            # --- ADDED LOGGING ---
-            logger.info(f"Raw lesson data received from backend: {lesson_data}")
-            # --- END LOGGING ---
-            logger.info("Successfully fetched lesson data.")
-            return lesson_data
+            lesson_data_dict = response.json()
+            logger.info(f"Raw lesson data received from backend: {lesson_data_dict}")
+
+            # Validate the 'content' part using Pydantic
+            raw_content_dict = lesson_data_dict.get("content")
+            if raw_content_dict:
+                try:
+                    # Validate and store the model object within the dictionary
+                    lesson_data_dict["content_model"] = (
+                        GeneratedLessonContent.model_validate(raw_content_dict)
+                    )
+                    logger.info("Successfully validated lesson content using Pydantic.")
+                except ValidationError as e:
+                    logger.error(
+                        f"Pydantic validation failed for lesson content: {e}",
+                        exc_info=True,
+                    )
+                    # Decide how to handle validation failure:
+                    # Option 1: Flash error and return None (prevents loading broken lesson)
+                    flash(
+                        "Failed to parse lesson content structure."
+                        " The lesson might be displayed incorrectly."
+                    )
+                    # Option 2: Keep the raw dict but maybe flag it?
+                    lesson_data_dict["content_model"] = (
+                        None  # Explicitly set to None on failure
+                    )
+                    # return None # Or return None to prevent loading
+            else:
+                logger.warning("Backend response missing 'content' dictionary.")
+                lesson_data_dict["content_model"] = (
+                    None  # Ensure key exists even if content is missing
+                )
+
+            logger.info("Successfully fetched lesson data dictionary.")
+            return lesson_data_dict  # Return the dictionary possibly containing the validated model
         else:
             logger.error(
                 f"Failed to load lesson. Status: {response.status_code}, Text: {response.text}"
@@ -124,69 +225,55 @@ def _fetch_lesson_data(syllabus_id, module, lesson_id):
         return None
 
 
-def _process_lesson_content(lesson_data):
-    """Processes raw lesson data into the format needed for the template."""
-    logger.info("Processing lesson content.")
-    content_data = lesson_data.get("content")
-    if not isinstance(content_data, dict):
-        logger.error(f"Lesson 'content' is not a dictionary: {type(content_data)}")
-        return None
+def _process_lesson_content(lesson_data_dict):
+    """
+    Processes lesson data, primarily using the validated Pydantic model,
+    into the format needed for the template.
+    """
+    logger.info("Processing lesson content using Pydantic model.")
 
-    # Format exercises
-    formatted_exercises = []
-    active_exercises = content_data.get("active_exercises", [])
-    if isinstance(active_exercises, list):
-        for exercise in active_exercises:
-            if isinstance(exercise, dict):
-                exercise_type = exercise.get("type", "open_ended")
-                formatted_exercise = {
-                    "question": exercise.get("instructions", ""),
-                    "type": exercise_type,
-                    "answer": exercise.get("correct_answer", ""),
-                }
-                # Add 'items' if it's an ordering exercise
-                if exercise_type == 'ordering':
-                    formatted_exercise["ordering_items"] = exercise.get("items", []) # Renamed key
-                formatted_exercises.append(formatted_exercise)
-    else:
-        logger.warning(f"active_exercises is not a list: {type(active_exercises)}")
-
-    # Format exposition
-    exposition_markdown = format_exposition_to_markdown(
-        content_data.get("exposition_content", {})
+    # Get the validated model from the dictionary
+    content_model: Optional[GeneratedLessonContent] = lesson_data_dict.get(
+        "content_model"
     )
 
-    # Format summary (knowledge assessment)
-    summary_list = content_data.get("knowledge_assessment", [])
-    if not isinstance(summary_list, list):
-        logger.warning(f"knowledge_assessment is not a list: {type(summary_list)}")
-        summary_list = []
+    # Handle cases where validation might have failed or content was missing
+    if not content_model:
+        logger.error(
+            "Validated content model not found in lesson data. Cannot process."
+        )
+        # Return a default structure or None, depending on how the route handles it
+        # Returning None might be safer to prevent rendering errors.
+        return None
 
-    template_data = {
-        "module_index": lesson_data.get("module_index"),
-        "lesson_index": lesson_data.get("lesson_index"),
-        "lesson_id": lesson_data.get("lesson_id"),
-        "topic": content_data.get("topic", ""),
-        "level": content_data.get("level", ""),
-        "title": content_data.get("metadata", {}).get("title", ""),
-        "exposition": exposition_markdown, # Keep processed exposition
-        "exercises": formatted_exercises, # Keep processed exercises
-        "raw_summary": summary_list, # Pass the raw summary list under a new key
-        "summary": [], # Keep summary key but make it empty, as it's processed in template now
-    }
-    logger.info("Lesson content processed (exposition only).")
+    # Format exposition using the model
+    # Pass the exposition part of the model to the formatting function
+    exposition_markdown_str = format_exposition_to_markdown(
+        content_model.exposition_content
+    )
 
-    # Return only the processed content dict, not the full template_data structure
+    # Prepare the dictionary to be returned, using data from the model
+    # This dictionary structure should match what the template expects
     processed_content = {
-        "topic": content_data.get("topic", ""),
-        "level": content_data.get("level", ""),
-        "metadata": content_data.get("metadata", {}),
-        "exposition": markdown.markdown(exposition_markdown), # Convert exposition here
-        # Exercises and summary are no longer processed here
-        "active_exercises": content_data.get("active_exercises", []), # Pass raw definitions
-        "knowledge_assessment": content_data.get("knowledge_assessment", []) # Pass raw definitions
+        "topic": content_model.topic or "",
+        "level": content_model.level or "",
+        # Access metadata safely
+        "metadata": (
+            content_model.metadata.model_dump() if content_model.metadata else {}
+        ),
+        # Convert the formatted exposition markdown string to HTML
+        "exposition": markdown.markdown(exposition_markdown_str),
+        # Pass the raw exercise and assessment definitions from the model
+        # The template (lesson.html) will need to handle rendering these lists of objects
+        "active_exercises": [ex.model_dump() for ex in content_model.active_exercises],
+        "knowledge_assessment": [
+            q.model_dump() for q in content_model.knowledge_assessment
+        ],
     }
+
+    logger.info("Lesson content processed using Pydantic model.")
     return processed_content
+
 
 # _render_lesson function is removed as processing is simplified or moved
 
@@ -194,7 +281,9 @@ def _process_lesson_content(lesson_data):
 # --- Lesson Routes ---
 
 
-@lessons_bp.route("/<syllabus_id>/<module>/<lesson_id>") # Assuming module/lesson_id are indices
+@lessons_bp.route(
+    "/<syllabus_id>/<module>/<lesson_id>"
+)  # Assuming module/lesson_id are indices
 @login_required
 def lesson(syllabus_id, module, lesson_id):
     """
@@ -210,12 +299,16 @@ def lesson(syllabus_id, module, lesson_id):
     try:
         # Convert route params early
         module_index = int(module)
-        lesson_index = int(lesson_id) # Assuming lesson_id route param is the index
+        lesson_index = int(lesson_id)  # Assuming lesson_id route param is the index
     except ValueError:
-        logger.error(f"Invalid module/lesson index in route: module={module}, lesson_id={lesson_id}")
+        logger.error(
+            f"Invalid module/lesson index in route: module={module}, lesson_id={lesson_id}"
+        )
         flash("Invalid lesson URL.")
         # Redirect to syllabus or dashboard?
-        return render_template("lesson.html", user=session.get("user"), lesson_data=None, lesson_state=None)
+        return render_template(
+            "lesson.html", user=session.get("user"), lesson_data=None, lesson_state=None
+        )
 
     try:
         # Fetch the combined data (content + state) from the backend
@@ -223,7 +316,12 @@ def lesson(syllabus_id, module, lesson_id):
         backend_response = _fetch_lesson_data(syllabus_id, module_index, lesson_index)
         if backend_response is None:
             # _fetch_lesson_data already flashes a message
-            return render_template("lesson.html", user=session.get("user"), lesson_data=None, lesson_state=None)
+            return render_template(
+                "lesson.html",
+                user=session.get("user"),
+                lesson_data=None,
+                lesson_state=None,
+            )
 
         # Extract state and raw content
         lesson_state = backend_response.get("lesson_state")
@@ -231,9 +329,14 @@ def lesson(syllabus_id, module, lesson_id):
         raw_content = backend_response.get("content")
 
         if raw_content is None:
-             logger.error("Backend response missing 'content'.")
-             flash("Failed to load lesson content structure.")
-             return render_template("lesson.html", user=session.get("user"), lesson_data=None, lesson_state=None)
+            logger.error("Backend response missing 'content'.")
+            flash("Failed to load lesson content structure.")
+            return render_template(
+                "lesson.html",
+                user=session.get("user"),
+                lesson_data=None,
+                lesson_state=None,
+            )
 
         # Process the raw content (e.g., format exposition markdown)
         # Pass raw_content directly, _process_lesson_content expects dict with 'content' key
@@ -241,15 +344,22 @@ def lesson(syllabus_id, module, lesson_id):
         if processed_content is None:
             logger.error("Failed to process lesson content.")
             flash("An error occurred while processing the lesson content.")
-            return render_template("lesson.html", user=session.get("user"), lesson_data=None, lesson_state=None)
+            return render_template(
+                "lesson.html",
+                user=session.get("user"),
+                lesson_data=None,
+                lesson_state=None,
+            )
 
         # Prepare data for the template
         lesson_data_for_template = {
-            "lesson_id": backend_response.get("lesson_id"), # Actual lesson PK/ID from backend
+            "lesson_id": backend_response.get(
+                "lesson_id"
+            ),  # Actual lesson PK/ID from backend
             "syllabus_id": syllabus_id,
             "module_index": module_index,
             "lesson_index": lesson_index,
-            "content": processed_content, # Pass the processed content dict
+            "content": processed_content,  # Pass the processed content dict
             # is_new is also available in backend_response if needed
         }
 
@@ -257,24 +367,32 @@ def lesson(syllabus_id, module, lesson_id):
         return render_template(
             "lesson.html",
             user=session.get("user"),
-            syllabus_id=syllabus_id, # Pass for JS URL construction
-            lesson_data=lesson_data_for_template, # Contains processed content and indices
-            lesson_state=lesson_state # Pass the conversational state
+            syllabus_id=syllabus_id,  # Pass for JS URL construction
+            lesson_data=lesson_data_for_template,  # Contains processed content and indices
+            lesson_state=lesson_state,  # Pass the conversational state
         )
 
-    except ValueError as e: # Catch specific errors like invalid indices from conversion
-         logger.error(f"Value error in lesson route: {e}", exc_info=True)
-         flash(str(e))
-         # Redirect? Show error page? For now, render template with None
-         return render_template("lesson.html", user=session.get("user"), lesson_data=None, lesson_state=None)
-    except Exception as e: #pylint: disable=broad-exception-caught
+    except (
+        ValueError
+    ) as e:  # Catch specific errors like invalid indices from conversion
+        logger.error(f"Value error in lesson route: {e}", exc_info=True)
+        flash(str(e))
+        # Redirect? Show error page? For now, render template with None
+        return render_template(
+            "lesson.html", user=session.get("user"), lesson_data=None, lesson_state=None
+        )
+    except Exception as e:  # pylint: disable=broad-exception-caught
         logger.exception(f"Unexpected error in lesson route: {str(e)}")
         flash(f"An unexpected error occurred: {str(e)}")
-        return render_template("lesson.html", user=session.get("user"), lesson_data=None, lesson_state=None)
+        return render_template(
+            "lesson.html", user=session.get("user"), lesson_data=None, lesson_state=None
+        )
 
 
 # --- NEW Chat POST Route ---
-@lessons_bp.route("/chat/<syllabus_id>/<int:module_index>/<int:lesson_index>", methods=["POST"])
+@lessons_bp.route(
+    "/chat/<syllabus_id>/<int:module_index>/<int:lesson_index>", methods=["POST"]
+)
 @login_required
 def lesson_chat(syllabus_id, module_index, lesson_index):
     """
@@ -285,14 +403,19 @@ def lesson_chat(syllabus_id, module_index, lesson_index):
     if not user_message:
         return jsonify({"error": "No message provided"}), 400
 
-    if 'user' not in session:
-         return jsonify({"error": "User not logged in"}), 401
+    if "user" not in session:
+        return jsonify({"error": "User not logged in"}), 401
 
-    logger.info(f"Received chat message for lesson {syllabus_id}/{module_index}/{lesson_index}: '{user_message[:50]}...'")
+    logger.info(
+        f"Received chat message for lesson {syllabus_id}/{module_index}/{lesson_index}: "
+        f"'{user_message[:50]}...'"
+    )
 
     try:
         api_url = current_app.config["API_URL"]
-        backend_chat_url = f"{api_url}/lesson/chat/{syllabus_id}/{module_index}/{lesson_index}"
+        backend_chat_url = (
+            f"{api_url}/lesson/chat/{syllabus_id}/{module_index}/{lesson_index}"
+        )
         headers = {"Authorization": f"Bearer {session['user']['access_token']}"}
 
         # Forward the request to the backend API
@@ -304,7 +427,7 @@ def lesson_chat(syllabus_id, module_index, lesson_index):
         )
 
         # Check if the backend request was successful
-        backend_response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+        backend_response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
 
         # Return the JSON response from the backend directly to the frontend JS
         response_data = backend_response.json()
@@ -319,10 +442,10 @@ def lesson_chat(syllabus_id, module_index, lesson_index):
             try:
                 error_json = e.response.json()
                 error_detail = error_json.get("detail", error_detail)
-            except ValueError: # If response is not JSON
-                 error_detail = f"{error_detail} Status: {e.response.status_code}"
+            except ValueError:  # If response is not JSON
+                error_detail = f"{error_detail} Status: {e.response.status_code}"
 
-        return jsonify({"error": error_detail}), 502 # Bad Gateway or appropriate error
+        return jsonify({"error": error_detail}), 502  # Bad Gateway or appropriate error
     except Exception as e:
         logger.exception(f"Unexpected error in lesson_chat route: {e}")
         return jsonify({"error": "An internal server error occurred."}), 500
@@ -373,7 +496,7 @@ def evaluate_exercise():
     except requests.RequestException as e:
         logger.error(f"API request failed during evaluation: {str(e)}")
         return jsonify({"error": f"API request failed: {str(e)}"}), 500
-    except Exception as e: #pylint: disable=broad-exception-caught
+    except Exception as e:  # pylint: disable=broad-exception-caught
         logger.exception(f"Unexpected error during exercise evaluation: {str(e)}")
         return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
 
@@ -386,14 +509,18 @@ def submit_assessment():
     """
     data = request.json
     lesson_id = data.get("lesson_id")
-    answers = data.get("answers") # Expected format: {"0": "A", "1": "True", ...}
+    answers = data.get("answers")  # Expected format: {"0": "A", "1": "True", ...}
     user_id = session.get("user", {}).get("id")
 
-    logger.info(f"Received assessment submission for lesson_id: {lesson_id} by user_id: {user_id}")
+    logger.info(
+        f"Received assessment submission for lesson_id: {lesson_id} by user_id: {user_id}"
+    )
     logger.info(f"Answers: {answers}")
 
     if not lesson_id or not answers or user_id is None:
-        logger.warning("Missing lesson_id, answers, or user_id in assessment submission.")
+        logger.warning(
+            "Missing lesson_id, answers, or user_id in assessment submission."
+        )
         return jsonify({"error": "Missing required data"}), 400
 
     # --- Placeholder for backend processing ---
@@ -414,7 +541,8 @@ def submit_assessment():
     #         timeout=15,
     #     )
     #     if not response.ok:
-    #         logger.error(f"Failed to record assessment results: {response.status_code} - {response.text}")
+    #         logger.error(
+    #           f"Failed to record assessment results: {response.status_code} - {response.text}")
     #         # Handle error appropriately
     # except requests.RequestException as e:
     #     logger.error(f"API request failed during assessment recording: {str(e)}")
@@ -422,4 +550,6 @@ def submit_assessment():
     # --- End Placeholder ---
 
     # For now, just return a success message
-    return jsonify({"message": "Assessment submitted successfully.", "received_answers": answers})
+    return jsonify(
+        {"message": "Assessment submitted successfully.", "received_answers": answers}
+    )

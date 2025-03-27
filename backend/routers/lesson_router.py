@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from backend.dependencies import get_current_user, get_db
 from backend.logger import logger
-from backend.models import User
+from backend.models import User, GeneratedLessonContent # Import GeneratedLessonContent
 from backend.routers.syllabus_router import get_syllabus_service
 from backend.services.lesson_service import LessonService
 from backend.services.sqlite_db import SQLiteDatabaseService
@@ -63,8 +63,8 @@ class LessonDataResponse(BaseModel):
     syllabus_id: str
     module_index: int
     lesson_index: int
-    content: Optional[Dict[str, Any]]  # Base content (exposition, exercise defs, etc.)
-    lesson_state: Optional[Dict[str, Any]]  # Conversational state
+    content: Optional[GeneratedLessonContent]  # Use the specific Pydantic model
+    lesson_state: Optional[Dict[str, Any]]  # Conversational state (Keep as dict for now)
     is_new: bool
 
 
