@@ -32,26 +32,42 @@ def format_exposition_to_markdown(exposition_data):
     Converts the structured exposition content from the API
     into a single markdown string.
     """
+    logger.debug(f"DEBUG_FORMAT: Received exposition_data type: {type(exposition_data)}") # DEBUG LOG
+    logger.debug(f"DEBUG_FORMAT: Received exposition_data type: {type(exposition_data)}") # DEBUG LOG
+    logger.debug(f"DEBUG_FORMAT: Received exposition_data keys: {list(exposition_data.keys()) if isinstance(exposition_data, dict) else 'N/A'}") # DEBUG LOG
+    # Check for the 'content' key which contains the list of content items
+    has_content = isinstance(exposition_data, dict) and "content" in exposition_data
+    logger.debug(f"DEBUG_FORMAT: 'content' key found: {has_content}") # DEBUG LOG
+
     markdown_parts = []
-    if isinstance(exposition_data, dict) and "content" in exposition_data:
-        content_list = exposition_data.get("content", [])
+    # Check for the 'content' key which contains the list of content items
+    if has_content:
+        logger.debug("DEBUG_FORMAT: Processing 'content' block.") # DEBUG LOG
+        content_list = exposition_data.get("content", []) # Get the list from 'content'
         if isinstance(content_list, list):
-            for item in content_list:
+            for item in content_list: # Iterate through items in 'content' list
                 if isinstance(item, dict):
+                    # Process based on 'type' key within each item
                     item_type = item.get("type")
-                    text = item.get("text", "")
+                    text = item.get("text", "") # Common field
+
                     if item_type == "paragraph":
                         markdown_parts.append(text)
                     elif item_type == "heading":
-                        level = item.get("level", 2)
+                        level = item.get("level", 2) # Default to level 2 if not specified
                         markdown_parts.append(f"{'#' * level} {text}")
-                    elif item_type == "thought_question":
-                        question = item.get("question", "")
-                        markdown_parts.append(f"> *Thought Question: {question}*")
-                    else:
+                    elif item_type == "list": # Handle lists if they appear
+                         list_items = item.get("items", [])
+                         md_list = "\n".join([f"- {li}" for li in list_items])
+                         markdown_parts.append(md_list)
+                    elif item_type == "thought_question": # Handle thought questions if they appear
+                         question = item.get("question", "")
+                         markdown_parts.append(f"> *Thought Question: {question}*")
+                    else: # Fallback for unknown dict types
                         if text:
                             markdown_parts.append(text)
-                elif isinstance(item, str):
+
+                elif isinstance(item, str): # Fallback if an item in the list is just a string
                     markdown_parts.append(item)
         else:
             logger.warning(
@@ -59,6 +75,7 @@ def format_exposition_to_markdown(exposition_data):
             )
             return ""
     elif isinstance(exposition_data, str):
+        logger.debug("DEBUG_FORMAT: Processing as plain string.") # DEBUG LOG
         logger.info("Exposition data is a plain string.")
         return exposition_data
     else:
@@ -84,12 +101,15 @@ def _fetch_lesson_data(syllabus_id, module, lesson_id):
         response = requests.get(
             f"{api_url}/lesson/{syllabus_id}/{module}/{lesson_id}",  # Use config value
             headers=headers,
-            timeout=30,
+            timeout=300,
         )
         logger.info(f"API response status: {response.status_code}")
 
         if response.ok:
             lesson_data = response.json()
+            # --- ADDED LOGGING ---
+            logger.info(f"Raw lesson data received from backend: {lesson_data}")
+            # --- END LOGGING ---
             logger.info("Successfully fetched lesson data.")
             return lesson_data
         else:
@@ -207,6 +227,7 @@ def lesson(syllabus_id, module, lesson_id):
 
         # Extract state and raw content
         lesson_state = backend_response.get("lesson_state")
+        # Use "content" key, which should now be correctly populated by the backend router
         raw_content = backend_response.get("content")
 
         if raw_content is None:

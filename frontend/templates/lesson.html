@@ -170,8 +170,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        // Add CSRF token header if needed by Flask-WTF
-                        // 'X-CSRFToken': '{{ csrf_token() }}' // Example if using Flask-WTF/CSRFProtect
+                        // CSRF token line removed
                     },
                     body: JSON.stringify({ message: userMessage })
                 });

@@ -1,5 +1,5 @@
 # backend/tests/routers/test_lesson_router.py
-
+# pylint: disable=missing-function-docstring,missing-module-docstring
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
 from fastapi.testclient import TestClient
@@ -9,40 +9,53 @@ from fastapi.testclient import TestClient
 # Need to make sure sys.path is correct for tests or use relative imports
 import sys
 import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
 
 from backend.main import app
 from backend.models import User
 from backend.services.lesson_service import LessonService
-from backend.dependencies import get_current_user # Import the dependency function
+from backend.dependencies import get_current_user  # Import the dependency function
+# Import the dependency getter function we need to override
+from backend.routers.lesson_router import get_lesson_service
 
 # Create a TestClient instance
 client = TestClient(app)
 
 # --- Fixtures and Mocks ---
 
+
 # Mock the dependency get_current_user
 @pytest.fixture(autouse=True)
 def override_get_current_user():
-    mock_user = User(user_id="test_user_id", email="test@example.com", name="Test User", password_hash="hashed")
+    mock_user = User(
+        user_id="test_user_id",
+        email="test@example.com",
+        name="Test User",
+        password_hash="hashed",
+    )
+
     def mock_dependency():
-        print("Using mock get_current_user") # Debug print
+        print("Using mock get_current_user")  # Debug print
         return mock_user
+
     app.dependency_overrides[get_current_user] = mock_dependency
-    print(f"Overriding get_current_user: {get_current_user} with {mock_dependency}") # Debug print
+    print(
+        f"Overriding get_current_user: {get_current_user} with {mock_dependency}"
+    )  # Debug print
     yield
     # Clean up overrides after test
-    print("Cleaning up dependency overrides") # Debug print
+    print("Cleaning up dependency overrides")  # Debug print
     app.dependency_overrides = {}
 
 
-# Import the dependency getter function we need to override
-from backend.routers.lesson_router import get_lesson_service
+
+
 
 # Mock the LessonService by overriding the dependency
 @pytest.fixture
 def mock_lesson_service():
-    print("Setting up mock_lesson_service override") # Debug print
+    print("Setting up mock_lesson_service override")  # Debug print
     # Create a MagicMock instance that adheres to the LessonService spec
     mock_service = MagicMock(spec=LessonService)
     # Configure async methods on the mock
@@ -55,25 +68,28 @@ def mock_lesson_service():
 
     # Define the override function
     def override_get_lesson_service():
-        print("Using mock get_lesson_service") # Debug print
+        print("Using mock get_lesson_service")  # Debug print
         return mock_service
 
     # Apply the override
     app.dependency_overrides[get_lesson_service] = override_get_lesson_service
-    print(f"Overriding get_lesson_service: {get_lesson_service} with {override_get_lesson_service}") # Debug print
+    print(
+        f"Overriding get_lesson_service: {get_lesson_service} with {override_get_lesson_service}"
+    )  # Debug print
 
-    yield mock_service # Yield the mock for use in tests
+    yield mock_service  # Yield the mock for use in tests
 
     # Clean up the override after the test
-    print("Cleaning up lesson_service dependency override") # Debug print
+    print("Cleaning up lesson_service dependency override")  # Debug print
     del app.dependency_overrides[get_lesson_service]
 
 
 # --- Test Cases ---
 
+#pylint: disable=redefined-outer-name
 def test_get_lesson_data_success(mock_lesson_service):
     """Test successful retrieval of lesson data and state."""
-    print("Running test_get_lesson_data_success") # Debug print
+    print("Running test_get_lesson_data_success")  # Debug print
     # Arrange
     syllabus_id = "syllabus1"
     module_index = 0
@@ -89,12 +105,12 @@ def test_get_lesson_data_success(mock_lesson_service):
         "lesson_state": mock_state,
         "is_new": False,
     }
-    print("Mock configured") # Debug print
+    print("Mock configured")  # Debug print
 
     # Act
-    print("Making GET request") # Debug print
+    print("Making GET request")  # Debug print
     response = client.get(f"/lesson/{syllabus_id}/{module_index}/{lesson_index}")
-    print(f"Response status: {response.status_code}") # Debug print
+    print(f"Response status: {response.status_code}")  # Debug print
     # print(f"Response JSON: {response.json()}") # Debug print
 
     # Assert
@@ -105,20 +121,23 @@ def test_get_lesson_data_success(mock_lesson_service):
     assert data["lesson_index"] == lesson_index
     assert data["content"] == mock_content
     assert data["lesson_state"] == mock_state
-    assert data["is_new"] == False
+    assert data["is_new"] is False
     mock_lesson_service.get_or_generate_lesson.assert_awaited_once_with(
         syllabus_id, module_index, lesson_index, "test_user_id"
     )
-    print("test_get_lesson_data_success finished") # Debug print
+    print("test_get_lesson_data_success finished")  # Debug print
+
 
 def test_get_lesson_data_not_found(mock_lesson_service):
     """Test retrieving a non-existent lesson."""
-    print("Running test_get_lesson_data_not_found") # Debug print
+    print("Running test_get_lesson_data_not_found")  # Debug print
     # Arrange
     syllabus_id = "syllabus_bad"
     module_index = 99
     lesson_index = 99
-    mock_lesson_service.get_or_generate_lesson.side_effect = ValueError("Lesson not found")
+    mock_lesson_service.get_or_generate_lesson.side_effect = ValueError(
+        "Lesson not found"
+    )
 
     # Act
     response = client.get(f"/lesson/{syllabus_id}/{module_index}/{lesson_index}")
@@ -126,13 +145,15 @@ def test_get_lesson_data_not_found(mock_lesson_service):
     # Assert
     assert response.status_code == 404
     assert "Lesson not found" in response.json()["detail"]
-    print("test_get_lesson_data_not_found finished") # Debug print
+    print("test_get_lesson_data_not_found finished")  # Debug print
+
 
 # --- Tests for POST /chat ---
 
+
 def test_handle_chat_message_success(mock_lesson_service):
     """Test successfully sending a chat message and getting a response."""
-    print("Running test_handle_chat_message_success") # Debug print
+    print("Running test_handle_chat_message_success")  # Debug print
     # Arrange
     syllabus_id = "syllabus1"
     module_index = 0
@@ -144,7 +165,7 @@ def test_handle_chat_message_success(mock_lesson_service):
     # Act
     response = client.post(
         f"/lesson/chat/{syllabus_id}/{module_index}/{lesson_index}",
-        json={"message": user_message}
+        json={"message": user_message},
     )
 
     # Assert
@@ -157,13 +178,14 @@ def test_handle_chat_message_success(mock_lesson_service):
         syllabus_id=syllabus_id,
         module_index=module_index,
         lesson_index=lesson_index,
-        user_message=user_message
+        user_message=user_message,
     )
-    print("test_handle_chat_message_success finished") # Debug print
+    print("test_handle_chat_message_success finished")  # Debug print
+
 
 def test_handle_chat_message_unauthenticated():
     """Test sending chat message without authentication."""
-    print("Running test_handle_chat_message_unauthenticated") # Debug print
+    print("Running test_handle_chat_message_unauthenticated")  # Debug print
     # Arrange
     # Override dependency to simulate no user
     app.dependency_overrides[get_current_user] = lambda: None
@@ -174,60 +196,67 @@ def test_handle_chat_message_unauthenticated():
     # Act
     response = client.post(
         f"/lesson/chat/{syllabus_id}/{module_index}/{lesson_index}",
-        json={"message": "test"}
+        json={"message": "test"},
     )
 
     # Assert
-    assert response.status_code == 401 # FastAPI default for failed dependency
+    assert response.status_code == 401  # FastAPI default for failed dependency
     # Detail might vary based on how get_current_user signals failure
     # assert "Authentication required" in response.json()["detail"] # Check if detail matches
 
     # Clean up override
     app.dependency_overrides = {}
-    print("test_handle_chat_message_unauthenticated finished") # Debug print
+    print("test_handle_chat_message_unauthenticated finished")  # Debug print
 
 
 def test_handle_chat_message_service_error(mock_lesson_service):
     """Test handling an error from the lesson service during chat."""
-    print("Running test_handle_chat_message_service_error") # Debug print
+    print("Running test_handle_chat_message_service_error")  # Debug print
     # Arrange
     syllabus_id = "syllabus1"
     module_index = 0
     lesson_index = 1
     user_message = "This will cause an error"
     # Simulate service layer returning an error structure
-    mock_lesson_service.handle_chat_turn.return_value = {"error": "AI processing failed"}
+    mock_lesson_service.handle_chat_turn.return_value = {
+        "error": "AI processing failed"
+    }
 
     # Act
     response = client.post(
         f"/lesson/chat/{syllabus_id}/{module_index}/{lesson_index}",
-        json={"message": user_message}
+        json={"message": user_message},
     )
 
     # Assert
-    assert response.status_code == 200 # Endpoint handles the error gracefully
+    assert response.status_code == 200  # Endpoint handles the error gracefully
     data = response.json()
     assert data["responses"] == []
     assert data["error"] == "AI processing failed"
-    print("test_handle_chat_message_service_error finished") # Debug print
+    print("test_handle_chat_message_service_error finished")  # Debug print
+
 
 def test_handle_chat_message_state_not_found(mock_lesson_service):
     """Test handling ValueError (e.g., state not found) from service."""
-    print("Running test_handle_chat_message_state_not_found") # Debug print
+    print("Running test_handle_chat_message_state_not_found")  # Debug print
     # Arrange
     syllabus_id = "syllabus1"
     module_index = 0
     lesson_index = 1
     user_message = "Where is my state?"
-    mock_lesson_service.handle_chat_turn.side_effect = ValueError("Lesson state not found")
+    mock_lesson_service.handle_chat_turn.side_effect = ValueError(
+        "Lesson state not found"
+    )
 
     # Act
     response = client.post(
         f"/lesson/chat/{syllabus_id}/{module_index}/{lesson_index}",
-        json={"message": user_message}
+        json={"message": user_message},
     )
 
     # Assert
-    assert response.status_code == 404 # Based on router's exception handling for ValueError
+    assert (
+        response.status_code == 404
+    )  # Based on router's exception handling for ValueError
     assert "Lesson state not found" in response.json()["detail"]
-    print("test_handle_chat_message_state_not_found finished") # Debug print
+    print("test_handle_chat_message_state_not_found finished")  # Debug print

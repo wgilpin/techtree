@@ -16,7 +16,6 @@ from dotenv import load_dotenv
 from langgraph.graph import StateGraph
 
 # from tinydb import TinyDB, Query
-from backend.services.sqlite_db import SQLiteDatabaseService
 
 # Load environment variables
 load_dotenv()
@@ -26,7 +25,7 @@ genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 model = genai.GenerativeModel(os.environ["GEMINI_MODEL"])
 
 # Import the shared database service instance
-from backend.dependencies import db_service as db # Import and alias as 'db'
+from backend.dependencies import db_service as db  # Import and alias as 'db'
 
 # Direct instantiation removed
 
@@ -509,23 +508,26 @@ class LessonAI:
 
         # Add options context for specific types
         q_type = question.get("type")
-        if q_type == 'multiple_choice' and question.get('options'):
-            options = question['options']
+        if q_type == "multiple_choice" and question.get("options"):
+            options = question["options"]
             options_str = ""
             if isinstance(options, dict):
-                options_str = "\n".join([f"- {key}) {value}" for key, value in options.items()])
+                options_str = "\n".join(
+                    [f"- {key}) {value}" for key, value in options.items()]
+                )
             elif isinstance(options, list):
-                 options_str = "\n".join([f"- {opt}" for opt in options])
+                options_str = "\n".join([f"- {opt}" for opt in options])
             prompt_context += f"\n\nOptions:\n{options_str}"
             prompt_context += "\nThe user should respond with the key/letter or the full text of the correct option."
-        elif q_type == 'true_false':
+        elif q_type == "true_false":
             prompt_context += "\n\nOptions:\n- True\n- False"
             prompt_context += "\nThe user should respond with 'True' or 'False'."
-        elif q_type == 'ordering' and question.get('items'):
-             items_list = "\n".join([f"- {item}" for item in question['items']])
-             prompt_context += f"\n\nItems to order:\n{items_list}"
-             prompt_context += "\nThe user should respond with the items in the correct order."
-
+        elif q_type == "ordering" and question.get("items"):
+            items_list = "\n".join([f"- {item}" for item in question["items"]])
+            prompt_context += f"\n\nItems to order:\n{items_list}"
+            prompt_context += (
+                "\nThe user should respond with the items in the correct order."
+            )
 
         prompt_context += f"""
 
@@ -559,7 +561,6 @@ class LessonAI:
         Respond ONLY with the JSON object.
         """
         # --- End Refined Prompt Section ---
-
 
         evaluation_result = None
         try:
@@ -659,6 +660,7 @@ class LessonAI:
         knowledge_level = state["knowledge_level"]
         user_id = state.get("user_id")
         from backend.logger import logger  # Ensure logger is available
+
         # Remove local import and instantiation; use module-level 'db' alias
 
         # Debug print
@@ -1007,179 +1009,6 @@ class LessonAI:
         if not module_title or not lesson_title:
             raise ValueError("Module title and lesson title are required")
 
-        # Find the lesson in the syllabus
-        lesson_found = False
-        for module in syllabus["content"]["modules"]:
-            if module["title"] == module_title:
-                for lesson in module["lessons"]:
-                    if lesson["title"] == lesson_title:
-                        lesson_found = True
-                        break
-                if lesson_found:
-                    break
-
-        if not lesson_found:
-            raise ValueError(
-                f"Lesson '{lesson_title}' not found in module '{module_title}'"
-            )
-
-        # Check if we already have generated content for this lesson
-        lesson_uid = f"{syllabus['syllabus_id']}_{module_title}_{lesson_title}"
-
-        # Use get_lesson_content to check for existing content
-        existing_content = db.get_lesson_by_id(
-            lesson_uid
-        )  # Changed to get_lesson_by_id
-
-        if existing_content:
-            return {
-                "generated_content": existing_content["content"],
-                "lesson_uid": lesson_uid,
-            }
-
-        # Read the system prompt
-        with open("backend/system_prompt.txt", "r", encoding="utf-8") as f:
-            system_prompt = f.read()
-
-        # Get user's previous performance if available
-        previous_performance = {}
-        if user_id:
-            # Query user_progress table for the user's performance
-            progress_query = """
-                SELECT * FROM user_progress
-                WHERE user_id = ?
-            """
-            progress_params = (user_id,)
-            user_progress = db.execute_query(progress_query, progress_params)
-
-            if user_progress:
-                # Convert SQLite row to dict and get performance data
-                progress_dict = dict(user_progress[0])
-                # Performance might be stored as JSON
-                if "performance" in progress_dict:
-                    try:
-                        previous_performance = json.loads(progress_dict["performance"])
-                    except json.JSONDecodeError:
-                        previous_performance = {}
-
-        # Construct the prompt for Gemini
-        prompt = f"""
-        {system_prompt}
-
-        ## Input Parameters
-        - topic: {syllabus['topic']}
-        - syllabus: {json.dumps(syllabus, indent=2)}
-        - lesson_name: {lesson_title}
-        - user_level: {knowledge_level}
-        - previous_performance: {json.dumps(previous_performance, indent=2)}
-        - time_constraint: 5 minutes
-
-        Please generate the lesson content following the output format specified in the system prompt.
-        """
-
-        response = call_with_retry(model.generate_content, prompt)
-        response_text = response.text
-
-        # Extract JSON from response
-        json_patterns = [
-            # Pattern for JSON in code blocks
-            r"```(?:json)?\s*({.*?})```",
-            # Pattern for JSON with outer braces
-            # pylint: disable=line-too-long
-            r'({[\s\S]*"exposition_content"[\s\S]*"thought_questions"[\s\S]*"active_exercises"[\s\S]*"knowledge_assessment"[\s\S]*"metadata"[\s\S]*})',
-            # Pattern for just the JSON object
-            r"({[\s\S]*})",
-        ]
-
-        json_str = None
-        for pattern in json_patterns:
-            json_match = re.search(pattern, response_text, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(1)
-                # Clean up the JSON string
-                json_str = re.sub(r"\\n", "", json_str)
-                json_str = re.sub(r"\\", "", json_str)
-                # Try to parse it
-                try:
-                    content = json.loads(json_str)
-                    # Validate the structure
-                    if all(
-                        key in content
-                        for key in [
-                            "exposition_content",
-                            "thought_questions",
-                            "active_exercises",
-                            "knowledge_assessment",
-                            "metadata",
-                        ]
-                    ):
-                        # Find module and lesson indices
-                        module_index = -1
-                        lesson_index = -1
-                        for i, module in enumerate(syllabus["content"]["modules"]):
-                            if module["title"] == module_title:
-                                module_index = i
-                                for j, lesson in enumerate(module["lessons"]):
-                                    if lesson["title"] == lesson_title:
-                                        lesson_index = j
-                                        break
-                            if lesson_index != -1:
-                                break
-
-                        if module_index == -1 or lesson_index == -1:
-                            raise ValueError(
-                                f"Lesson '{lesson_title}' not found in module '{module_title}'"
-                            )
-                        # Save the content to the SQLite database
-                        db.save_lesson_content(
-                            syllabus["syllabus_id"], module_index, lesson_index, content
-                        )  # Use syllabus_id
-
-                        return {"generated_content": content, "lesson_uid": lesson_uid}
-                except Exception as e:
-                    # Continue to the next pattern if this one fails
-                    print(f"Failed to parse JSON: {e}")
-
-        # If all patterns fail, create a basic structure and save it
-        print(f"Failed to parse JSON from response: {response_text[:200]}...")
-        basic_content = {
-            "exposition_content": f"# {lesson_title}\n\nThis is a placeholder for the lesson content.",
-            "thought_questions": [
-                "What do you think about this topic?",
-                "How might this apply to real-world scenarios?",
-            ],
-            "active_exercises": [
-                {
-                    "id": "ex1",
-                    "type": "scenario",
-                    "question": "Consider the following scenario...",
-                    "expected_solution": "The correct approach would be...",
-                    "hints": ["Think about...", "Consider..."],
-                    "explanation": "This works because...",
-                    "misconceptions": {
-                        "common_error_1": "This is incorrect because...",
-                        "common_error_2": "This approach fails because...",
-                    },
-                }
-            ],
-            "knowledge_assessment": [
-                {
-                    "id": "q1",
-                    "type": "multiple_choice",
-                    "question": "Which of the following best describes...?",
-                    "options": ["Option A", "Option B", "Option C", "Option D"],
-                    "correct_answer": "Option B",
-                    "explanation": "Option B is correct because...",
-                }
-            ],
-            "metadata": {
-                "tags": ["placeholder"],
-                "difficulty": 3,
-                "related_topics": ["Related Topic 1", "Related Topic 2"],
-                "prerequisites": ["Prerequisite 1"],
-            },
-        }
-
         # Find module and lesson indices
         module_index = -1
         lesson_index = -1
@@ -1194,14 +1023,169 @@ class LessonAI:
                 break
 
         if module_index == -1 or lesson_index == -1:
+            # This should ideally not happen if validation occurred earlier, but check just in case
             raise ValueError(
-                f"Lesson '{lesson_title}' not found in module '{module_title}'"
+                f"Lesson '{lesson_title}' not found in module '{module_title}' during index lookup."
             )
 
-        db.save_lesson_content(
-            syllabus["syllabus_id"], module_index, lesson_index, basic_content
-        )  # Use syllabus_id
-        return {"generated_content": basic_content, "lesson_uid": lesson_uid}
+        # Check if we already have generated content for this lesson using indices
+        syllabus_id = syllabus["syllabus_id"]
+        existing_content_data = db.get_lesson_content(
+            syllabus_id, module_index, lesson_index
+        )
+
+        if existing_content_data:
+            print(
+                f"Found existing content for syllabus {syllabus_id}, module {module_index}, lesson {lesson_index}"
+            )
+            # Assuming get_lesson_content returns the content dict directly or None
+            return {"generated_content": existing_content_data}
+        else:
+            print(
+                f"No existing content found for syllabus {syllabus_id}, module {module_index}, lesson {lesson_index}. Generating..."
+            )
+
+            # Read the system prompt
+            with open("backend/system_prompt.txt", "r", encoding="utf-8") as f:
+                system_prompt = f.read()
+
+            # Get user's previous performance if available
+            previous_performance = {}
+            if user_id:
+                # Query user_progress table for the user's performance
+                progress_query = """
+                    SELECT * FROM user_progress
+                    WHERE user_id = ?
+                """
+                progress_params = (user_id,)
+                user_progress = db.execute_query(progress_query, progress_params)
+
+                if user_progress:
+                    # Convert SQLite row to dict and get performance data
+                    progress_dict = dict(user_progress[0])
+                    # Performance might be stored as JSON
+                    if "performance" in progress_dict:
+                        try:
+                            previous_performance = json.loads(
+                                progress_dict["performance"]
+                            )
+                        except json.JSONDecodeError:
+                            previous_performance = {}
+
+            # Construct the prompt for Gemini
+            prompt = f"""
+            {system_prompt}
+
+            ## Input Parameters
+            - topic: {syllabus['topic']}
+            - syllabus: {json.dumps(syllabus, indent=2)}
+            - lesson_name: {lesson_title}
+            - user_level: {knowledge_level}
+            - previous_performance: {json.dumps(previous_performance, indent=2)}
+            - time_constraint: 5 minutes
+
+            Please generate the lesson content following the output format specified in the system prompt.
+            """
+
+            response = call_with_retry(model.generate_content, prompt)
+            response_text = response.text
+
+            # Extract JSON from response
+            json_patterns = [
+                r"```(?:json)?\s*({.*?})```",  # Code blocks
+                r'({[\s\S]*"exposition_content"[\s\S]*"thought_questions"[\s\S]*"active_exercises"[\s\S]*"knowledge_assessment"[\s\S]*"metadata"[\s\S]*})',  # Full structure
+                r"({[\s\S]*})",  # Any JSON object
+            ]
+
+            generated_content = None
+            json_str = None
+            for pattern in json_patterns:
+                json_match = re.search(pattern, response_text, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(1)
+                    # Clean up the JSON string
+                    json_str = re.sub(r"\\n", "", json_str)
+                    json_str = re.sub(r"\\", "", json_str)
+                    # --- DEBUG LOG ---
+                    print(
+                        f"DEBUG_JSON: Attempting to parse JSON string:\n{json_str}\n--- END JSON ---"
+                    )
+                    # --- END DEBUG LOG ---
+                    try:
+                        content_candidate = json.loads(json_str)
+                        # Validate the structure
+                        if all(
+                            key in content_candidate
+                            for key in [
+                                "exposition_content",
+                                "thought_questions",
+                                "active_exercises",
+                                "knowledge_assessment",
+                                "metadata",
+                            ]
+                        ):
+                            generated_content = content_candidate
+                            break  # Successfully parsed and validated
+                    except Exception as e:
+                        print(f"Failed to parse JSON with pattern '{pattern}': {e}")
+                        continue  # Try next pattern
+
+            # If JSON parsing failed or structure was invalid after trying all patterns
+            if generated_content is None:
+                print(
+                    f"Failed to parse valid JSON from response: {response_text[:200]}..."
+                )
+                generated_content = {
+                    "exposition_content": f"# {lesson_title}\n\nThis is a placeholder for the lesson content.",
+                    "thought_questions": [
+                        "What do you think about this topic?",
+                        "How might this apply to real-world scenarios?",
+                    ],
+                    "active_exercises": [
+                        {
+                            "id": "ex1",
+                            "type": "scenario",
+                            "question": "Consider the following scenario...",
+                            "expected_solution": "The correct approach would be...",
+                            "hints": ["Think about...", "Consider..."],
+                            "explanation": "This works because...",
+                            "misconceptions": {
+                                "common_error_1": "This is incorrect because...",
+                                "common_error_2": "This approach fails because...",
+                            },
+                        }
+                    ],
+                    "knowledge_assessment": [
+                        {
+                            "id": "q1",
+                            "type": "multiple_choice",
+                            "question": "Which of the following best describes...?",
+                            "options": ["Option A", "Option B", "Option C", "Option D"],
+                            "correct_answer": "Option B",
+                            "explanation": "Option B is correct because...",
+                        }
+                    ],
+                    "metadata": {
+                        "tags": ["placeholder"],
+                        "difficulty": 3,
+                        "related_topics": ["Related Topic 1", "Related Topic 2"],
+                        "prerequisites": ["Prerequisite 1"],
+                    },
+                }
+
+            # Save the newly generated (or placeholder) content
+            print(
+                f"Saving content for syllabus {syllabus_id}, module {module_index}, lesson {lesson_index}"
+            )
+            # --- DEBUG LOG ---
+            print(
+                f"DEBUG_SAVE: Content being saved: {json.dumps(generated_content, indent=2)}"
+            )
+            # --- END DEBUG LOG ---
+            db.save_lesson_content(
+                syllabus_id, module_index, lesson_index, generated_content
+            )
+            return {"generated_content": generated_content}
 
     def _evaluate_response(
         self, state: LessonState, response: str, question_id: str
@@ -1472,3 +1456,38 @@ class LessonAI:
         else:
             # Return all progress
             return {"all_progress": progress_data}
+
+    #     # return self.state
+    #     pass # Placeholder
+
+    # def get_lesson_content(self) -> Dict:
+    #     """Get or generate content for the current lesson."""
+    #     # This should likely just retrieve from self.state['generated_content']
+    #     # if initialization already happened.
+    #     if not self.state or not self.state.get('generated_content'):
+    #          raise ValueError("LessonAI not initialized or content not generated.")
+    #     # The old logic invoked the graph, which is incorrect now.
+    #     # return self.state["generated_content"]
+    #     pass # Placeholder
+
+    # def evaluate_response(self, response: str, question_id: str) -> Dict:
+    #     """Evaluate a user's response to a question."""
+    #     # This is now handled within the chat graph via _evaluate_chat_answer
+    #     # and process_chat_turn.
+    #     # if not self.state:
+    #     #     raise ValueError("LessonAI not initialized. Call initialize() first.")
+    #     # inputs = {**self.state, "response": response, "question_id": question_id} # Pass full state?
+    #     # self.state = self.chat_graph.invoke(inputs, {"current": "evaluate_chat_answer"}) # Invoke chat graph?
+    #     # return self.state.get("feedback") # Assuming feedback is stored
+    #     pass # Placeholder
+
+    # def save_progress(self) -> Dict:
+    #     """Save the user's progress."""
+    #     # Progress saving is likely better handled by the service layer after a turn.
+    #     # if not self.state:
+    #     #     raise ValueError("LessonAI not initialized. Call initialize() first.")
+    #     # self.state = self.chat_graph.invoke(self.state, {"current": "update_progress"}) # Invoke chat graph?
+    #     # return self.state.get("user_performance")
+    #     pass # Placeholder
+
+    # Removed get_user_progress method as it seemed misplaced in LessonAI

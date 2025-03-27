@@ -665,9 +665,11 @@ class SQLiteDatabaseService:
                     commit=True,
                 )
 
-            return content_id
+            return lesson_id
 
-        return self._transaction(_save_lesson_content_transaction)
+        # Execute the transaction and return its result (the lesson_id)
+        lesson_id = self._transaction(_save_lesson_content_transaction)
+        return lesson_id
 
     def get_lesson_content(self, syllabus_id, module_index, lesson_index):
         """
@@ -715,17 +717,11 @@ class SQLiteDatabaseService:
 
         if content:
             content_dict = dict(content)
-            content_json = json.loads(content_dict["content"])
-
-            result = {
-                "lesson_id": content_dict["content_id"],
-                "syllabus_id": syllabus_id,
-                "module_index": module_index,
-                "lesson_index": lesson_index,
-                "content": content_json,
-            }
-
-            return result
+            # Directly return the parsed JSON content from the 'content' column
+            return json.loads(content_dict["content"])
+        else:
+             # Explicitly return None if no content row is found
+             return None
 
         return None
 

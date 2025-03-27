@@ -9,7 +9,6 @@ from backend.ai.lessons.lessons_graph import model, call_with_retry
 from backend.ai.app import LessonAI
 from backend.services.sqlite_db import SQLiteDatabaseService
 from backend.services.syllabus_service import SyllabusService
-import json  # Added import
 from backend.logger import logger  # Import the configured logger
 
 
@@ -28,6 +27,74 @@ class LessonService:
         self.db_service = db_service
         self.syllabus_service = syllabus_service
 
+    def _initialize_lesson_state(
+        self,
+        topic: str,
+        level: str,
+        syllabus_id: str,
+        module_title: str,
+        lesson_title: str,
+        generated_content: Dict[str, Any],
+        user_id: Optional[str],
+        module_index: int,
+        lesson_index: int,
+        lesson_db_id: Optional[str] # Added lesson_db_id for consistency if needed later
+    ) -> Dict[str, Any]:
+        """Helper function to create and initialize lesson state."""
+        logger.info(f"Initializing lesson state for user {user_id}, lesson {syllabus_id}/{module_index}/{lesson_index}")
+
+        initial_state = {
+            "topic": topic,
+            "knowledge_level": level,
+            "syllabus_id": syllabus_id,
+            "lesson_title": lesson_title,
+            "module_title": module_title,
+            "generated_content": generated_content,
+            "user_id": user_id,
+            # Use lesson_db_id if available, otherwise construct UID. Consider standardizing.
+            "lesson_uid": str(lesson_db_id) if lesson_db_id else f"{syllabus_id}_{module_index}_{lesson_index}",
+            "conversation_history": [],
+            "current_interaction_mode": "chatting",
+            "current_exercise_index": -1,
+            "current_quiz_question_index": -1,
+            "user_responses": [],
+            "user_performance": {},
+        }
+
+        if not user_id: # No need to call AI or save state if no user
+             return initial_state
+
+        try:
+            # Pass the state to start_chat. Assume it modifies the state in-place or returns updated state.
+            # The actual implementation of start_chat is in LessonAI (backend/ai/app.py or lessons_graph.py)
+            # This TODO is removed here, but remains conceptually in LessonAI.
+            updated_state = self.lesson_ai.start_chat(initial_state.copy()) # Pass a copy if start_chat modifies
+            # If start_chat returns the updated state, use it. If it modifies in-place, initial_state is already updated (less safe).
+            # Assuming it returns the updated state for clarity:
+            initial_state = updated_state
+            logger.info(
+                "Called start_chat and potentially added initial AI welcome message to state."
+            )
+        except Exception as ai_err:
+            logger.error(
+                f"Failed to get initial AI message via start_chat: {ai_err}",
+                exc_info=True,
+            )
+            # Fallback logic if start_chat fails or doesn't add history
+            if (
+                "conversation_history" not in initial_state
+                or not initial_state.get("conversation_history") # Check if empty list too
+            ):
+                fallback_message = {
+                    "role": "assistant",
+                    "content": f"Welcome to the lesson on '{lesson_title}'! Let's begin.", # Simplified fallback
+                }
+                initial_state["conversation_history"] = [fallback_message]
+                initial_state["current_interaction_mode"] = "chatting" # Ensure mode is set
+                logger.warning("Added fallback welcome message as start_chat failed or returned no history.")
+
+        return initial_state
+
     async def get_or_generate_lesson(
         self,
         syllabus_id: str,
@@ -40,8 +107,10 @@ class LessonService:
         or generate new content and initialize state.
         """
         logger.info(
-            f"Getting/Generating lesson: syllabus={syllabus_id}, mod={module_index}, lesson={lesson_index}, user={user_id}"
+            f"Getting/Generating lesson: syllabus={syllabus_id}, mod={module_index},"
+            f" lesson={lesson_index}, user={user_id}"
         )
+
         syllabus = await self.syllabus_service.get_syllabus(syllabus_id)
         if not syllabus:
             logger.error(f"Syllabus not found: {syllabus_id}")
@@ -102,16 +171,13 @@ class LessonService:
 
         existing_lesson_content = None
         if lesson_db_id:
-            # TODO: Ensure get_lesson_by_id returns content correctly
-            lesson_data = self.db_service.get_lesson_by_id(
-                lesson_db_id
-            )  # This gets lesson table data, not content table
-            # Need to use get_lesson_content using syllabus_id, module_index, lesson_index
+            # Use get_lesson_content using syllabus_id, module_index, lesson_index
             content_data = self.db_service.get_lesson_content(
                 syllabus_id, module_index, lesson_index
             )
-            if content_data and "content" in content_data:
-                existing_lesson_content = content_data["content"]
+            # get_lesson_content now returns the content dict directly or None
+            if content_data:
+                existing_lesson_content = content_data # Assign directly
                 logger.info(
                     f"Found existing lesson content for lesson_id {lesson_db_id}"
                 )
@@ -124,73 +190,54 @@ class LessonService:
             if "level" not in existing_lesson_content:
                 existing_lesson_content["level"] = level
 
-            # If state wasn't loaded from progress, create a default initial state
-            if (
-                lesson_state is None and user_id
-            ):  # Only create default if user is logged in
+            # If state wasn't loaded from progress, create and initialize state using the helper
+            if lesson_state is None and user_id:
                 logger.warning(
-                    f"Content exists but no state found for user {user_id}. Creating default state."
+                    f"Content exists but no state found for user {user_id}. Initializing state."
                 )
-                # TODO: Refactor state initialization logic
-                # Need module title here
                 try:
-                    module_details_temp = (
-                        await self.syllabus_service.get_module_details(
-                            syllabus_id, module_index
-                        )
+                    # Fetch necessary details for state initialization
+                    module_details = await self.syllabus_service.get_module_details(
+                        syllabus_id, module_index
                     )
-                    module_title_temp = module_details_temp.get(
-                        "title", "Unknown Module"
+                    module_title = module_details.get("title", "Unknown Module")
+                    lesson_title = existing_lesson_content.get("metadata", {}).get(
+                        "title", "Unknown Lesson"
                     )
-                except ValueError:
-                    module_title_temp = "Unknown Module"
 
-                lesson_state = {
-                    "topic": topic,
-                    "knowledge_level": level,
-                    "syllabus_id": syllabus_id,
-                    "lesson_title": existing_lesson_content.get("metadata", {}).get(
-                        "title", "Unknown"
-                    ),
-                    "module_title": module_title_temp,
-                    "generated_content": existing_lesson_content,
-                    "user_id": user_id,
-                    "lesson_uid": f"{syllabus_id}_{module_index}_{lesson_index}",  # Or use lesson_db_id?
-                    "conversation_history": [],
-                    "current_interaction_mode": "chatting",
-                    "current_exercise_index": -1,
-                    "current_quiz_question_index": -1,
-                    "user_responses": [],
-                    "user_performance": {},
-                }
-                # Optionally get initial AI message here too
-                try:
-                    # TODO: Implement self.lesson_ai.start_chat
-                    # Placeholder: Manually add initial message
-                    initial_message = {
-                        "role": "assistant",
-                        "content": f"Welcome to the lesson on '{lesson_state['lesson_title']}'! You can ask questions, request an exercise, or start the quiz.",
-                    }
-                    lesson_state["conversation_history"].append(initial_message)
-                    logger.info("Added initial AI welcome message to default state.")
+                    # Call the helper function to initialize state
+                    lesson_state = self._initialize_lesson_state(
+                        topic=topic,
+                        level=level,
+                        syllabus_id=syllabus_id,
+                        module_title=module_title,
+                        lesson_title=lesson_title,
+                        generated_content=existing_lesson_content,
+                        user_id=user_id,
+                        module_index=module_index,
+                        lesson_index=lesson_index,
+                        lesson_db_id=lesson_db_id # Pass the db id
+                    )
 
-                    # Save this default state
+                    # Save the newly initialized state
                     state_json = json.dumps(lesson_state)
                     self.db_service.save_user_progress(
                         user_id=user_id,
                         syllabus_id=syllabus_id,
                         module_index=module_index,
                         lesson_index=lesson_index,
-                        status="in_progress",  # Start as in_progress
+                        status="in_progress",
                         lesson_state_json=state_json,
                     )
-                    logger.info(f"Saved default initial state for user {user_id}")
+                    logger.info(f"Saved initialized state for user {user_id}")
 
-                except Exception as ai_err:
+                except Exception as init_err:
                     logger.error(
-                        f"Failed to get/save initial AI message for default state: {ai_err}",
+                        f"Failed to initialize or save lesson state: {init_err}",
                         exc_info=True,
                     )
+                    # Decide how to handle this - maybe return error or proceed without state?
+                    # For now, proceed but lesson_state might remain None if error occurred before assignment
 
             return {
                 "lesson_id": lesson_db_id,  # Use the actual lesson PK
@@ -245,66 +292,40 @@ class LessonService:
             raise RuntimeError("Failed to generate lesson content") from gen_err
 
         # Save the generated content structure
-        # TODO: Ensure save_lesson_content returns the actual lesson_id PK
-        # This saves to lesson_content table, we need the lesson PK from lessons table
-        # Let's assume lesson_details contains the lesson_id PK
-        lesson_db_id = lesson_details.get("lesson_id")
-        if not lesson_db_id:
-            # This case shouldn't happen if get_lesson_details worked, but handle defensively
-            logger.error("Could not determine lesson_id PK after getting details.")
-            raise RuntimeError("Failed to determine lesson primary key.")
-
-        # Save content linked to the lesson_id PK
-        self.db_service.save_lesson_content(  # This method needs lesson_id PK, not indices
-            lesson_id=lesson_db_id,  # Pass the actual lesson_id PK
-            content=generated_content,
-            # Remove syllabus_id, module_index, lesson_index if not needed by save_lesson_content
-        )
-        logger.info(f"Saved new lesson content for lesson_id: {lesson_db_id}")
-
-        # Initialize conversational state
-        initial_lesson_state = {
-            "topic": topic,
-            "knowledge_level": level,
-            "syllabus_id": syllabus_id,  # Store ID instead of full syllabus
-            "lesson_title": lesson_title,
-            "module_title": module_title,
-            "generated_content": generated_content,  # Include the generated structure
-            "user_id": user_id,
-            "lesson_uid": f"{syllabus_id}_{module_index}_{lesson_index}",  # Consistent UID
-            "conversation_history": [],
-            "current_interaction_mode": "chatting",
-            "current_exercise_index": -1,
-            "current_quiz_question_index": -1,
-            "user_responses": [],
-            "user_performance": {},
-            # Add other necessary fields from LessonState TypedDict
-        }
-
-        # Get initial AI message using the new start_chat method
+        # Assume save_lesson_content will handle finding/creating the lesson entry,
+        # linking the content, and returning the actual lesson_id PK.
         try:
-            # Pass the state we've built so far (without history) to start_chat
-            initial_lesson_state = self.lesson_ai.start_chat(initial_lesson_state)
-            logger.info(
-                "Called start_chat and added initial AI welcome message to state."
+            lesson_db_id = self.db_service.save_lesson_content(
+                syllabus_id=syllabus_id,
+                module_index=module_index,
+                lesson_index=lesson_index,
+                content=generated_content,
             )
-        except Exception as ai_err:
-            logger.error(
-                f"Failed to get initial AI message via start_chat: {ai_err}",
-                exc_info=True,
-            )
-            # If start_chat fails, initial_lesson_state might not have history yet.
-            # Add a basic fallback message manually if needed, or proceed without.
-            if (
-                "conversation_history" not in initial_lesson_state
-                or not initial_lesson_state["conversation_history"]
-            ):
-                fallback_message = {
-                    "role": "assistant",
-                    "content": "Welcome! Let's start the lesson.",
-                }
-                initial_lesson_state["conversation_history"] = [fallback_message]
-                initial_lesson_state["current_interaction_mode"] = "chatting"
+            if not lesson_db_id:
+                 # If save_lesson_content doesn't return it or fails silently
+                 logger.error("save_lesson_content did not return a valid lesson_id.")
+                 raise RuntimeError("Failed to save lesson content or retrieve lesson ID.")
+            logger.info(f"Saved new lesson content, associated lesson_id: {lesson_db_id}")
+        except Exception as save_err:
+             logger.error(f"Failed to save lesson content: {save_err}", exc_info=True)
+             # Re-raise or handle as appropriate
+             raise RuntimeError("Database error saving lesson content") from save_err
+
+        # Now lesson_db_id should be valid for the rest of the function
+
+        # Initialize conversational state using the helper function
+        initial_lesson_state = self._initialize_lesson_state(
+            topic=topic,
+            level=level,
+            syllabus_id=syllabus_id,
+            module_title=module_title,
+            lesson_title=lesson_title,
+            generated_content=generated_content,
+            user_id=user_id,
+            module_index=module_index,
+            lesson_index=lesson_index,
+            lesson_db_id=lesson_db_id # Pass the db id
+        )
 
         # Save initial progress and state if user_id is provided
         if user_id:

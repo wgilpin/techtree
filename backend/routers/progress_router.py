@@ -1,19 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Response
-from pydantic import BaseModel
-from fastapi import APIRouter, Depends, HTTPException, status, Response
-from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
-from backend.services.sqlite_db import SQLiteDatabaseService
-from backend.models import User
-from fastapi import APIRouter, Depends, HTTPException, status, Response
 from pydantic import BaseModel
-from typing import List, Dict, Any, Optional
-from backend.services.sqlite_db import SQLiteDatabaseService
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 from backend.models import User
-# Import Depends and get_db, keep get_current_user
+# Import get_db and SQLiteDatabaseService
 from backend.dependencies import get_current_user, get_db
+from backend.services.sqlite_db import SQLiteDatabaseService
 from backend.logger import logger
-from fastapi import Depends # Ensure Depends is imported
 
 router = APIRouter()
 # Removed direct DB instantiation and print statement
@@ -50,7 +42,9 @@ class DetailedProgress(BaseModel):
 # Routes
 @router.get("/courses", response_model=List[CourseProgress])
 async def get_in_progress_courses(
-    current_user: User = Depends(get_current_user), response: Response = None
+    current_user: User = Depends(get_current_user),
+    db_service: SQLiteDatabaseService = Depends(get_db), # Inject db_service
+    response: Response = None
 ):
     """
     Get all courses in progress for the current user.
@@ -72,12 +66,16 @@ async def get_in_progress_courses(
 async def get_syllabus_progress(
     syllabus_id: str,
     current_user: User = Depends(get_current_user),
+    db_service: SQLiteDatabaseService = Depends(get_db), # Inject db_service
     response: Response = None,
 ):
     """
     Get detailed progress for a specific syllabus.
     """
-    logger.info(f"Entering get_syllabus_progress endpoint for syllabus_id: {syllabus_id}, user: {current_user.email}")
+    logger.info(
+        "Entering get_syllabus_progress endpoint for"
+        f"syllabus_id: {syllabus_id}, user: {current_user.email}")
+
     if current_user and current_user.user_id == "no-auth":
         response.headers["X-No-Auth"] = "true"
     try:
@@ -94,7 +92,9 @@ async def get_syllabus_progress(
 
 @router.get("/recent", response_model=List[Dict[str, Any]])
 async def get_recent_activity(
-    current_user: User = Depends(get_current_user), response: Response = None
+    current_user: User = Depends(get_current_user),
+    db_service: SQLiteDatabaseService = Depends(get_db), # Inject db_service
+    response: Response = None
 ):
     """
     Get recent activity for the current user.
@@ -168,7 +168,9 @@ async def get_recent_activity(
 
 @router.get("/summary", response_model=Dict[str, Any])
 async def get_progress_summary(
-    current_user: User = Depends(get_current_user), response: Response = None
+    current_user: User = Depends(get_current_user),
+    db_service: SQLiteDatabaseService = Depends(get_db), # Inject db_service
+    response: Response = None
 ):
     """
     Get summary statistics of user's learning progress.
