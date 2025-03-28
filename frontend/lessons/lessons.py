@@ -178,7 +178,6 @@ def _fetch_lesson_data(syllabus_id, module, lesson_id):
 
         if response.ok:
             lesson_data_dict = response.json()
-            logger.info(f"Raw lesson data received from backend: {lesson_data_dict}")
 
             # Validate the 'content' part using Pydantic
             raw_content_dict = lesson_data_dict.get("content")
@@ -339,8 +338,8 @@ def lesson(syllabus_id, module, lesson_id):
             )
 
         # Process the raw content (e.g., format exposition markdown)
-        # Pass raw_content directly, _process_lesson_content expects dict with 'content' key
-        processed_content = _process_lesson_content({"content": raw_content})
+        # Pass the full backend_response which contains the validated 'content_model'
+        processed_content = _process_lesson_content(backend_response)
         if processed_content is None:
             logger.error("Failed to process lesson content.")
             flash("An error occurred while processing the lesson content.")

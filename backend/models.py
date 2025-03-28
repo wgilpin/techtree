@@ -43,10 +43,10 @@ class Exercise(BaseModel):
     items: Optional[List[str]] = None # For ordering
     options: Optional[Union[Dict[str, str], List[str]]] = None # For MC
     expected_solution: Optional[str] = None
-    correct_answer: Optional[str] = None # Use alias if needed
+    correct_answer: Optional[Union[str, List[str]]] = None # Use alias if needed, allow list for ordering
     hints: Optional[List[str]] = None
     explanation: Optional[str] = None
-    misconceptions: Optional[Dict[str, str]] = None
+    misconceptions: Optional[List[Dict[str, str]]] = None # Allow list of misconceptions
     # Add any other exercise fields observed
 
 class AssessmentQuestion(BaseModel):
