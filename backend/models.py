@@ -34,29 +34,37 @@ class ExpositionContent(BaseModel):
      # Assuming it might be a string OR a structured list
      content: Optional[Union[str, List[ExpositionContentItem]]] = None
 
+class Option(BaseModel):
+    """Model for a single option in a multiple-choice question."""
+    id: str
+    text: str
+
 class Exercise(BaseModel):
     """Model representing a single active learning exercise within a lesson."""
-    id: str
+    id: str # LLM might not consistently provide this, make optional or generate later
     type: str
-    question: Optional[str] = None
-    instructions: Optional[str] = None # Use alias if needed
-    items: Optional[List[str]] = None # For ordering
-    options: Optional[Union[Dict[str, str], List[str]]] = None # For MC
-    expected_solution: Optional[str] = None
-    correct_answer: Optional[Union[str, List[str]]] = None # Use alias if needed, allow list for ordering
+    question: Optional[str] = None # Use instructions if question is missing
+    instructions: Optional[str] = None
+    items: Optional[List[str]] = None # For ordering exercises
+    options: Optional[List[Option]] = None # For multiple_choice
+    correct_answer_id: Optional[str] = None # For multiple_choice
+    expected_solution_format: Optional[str] = None # For non-MC
+    correct_answer: Optional[Union[str, List[str]]] = None # For non-MC or ordering
     hints: Optional[List[str]] = None
     explanation: Optional[str] = None
-    misconceptions: Optional[List[Dict[str, str]]] = None # Allow list of misconceptions
+    misconception_corrections: Optional[Dict[str, str]] = None # Map incorrect option ID to correction
     # Add any other exercise fields observed
 
 class AssessmentQuestion(BaseModel):
     """Model representing a single question in the knowledge assessment quiz."""
-    id: str
+    id: str # LLM might not consistently provide this, make optional or generate later
     type: str
-    question: str
-    options: Optional[Union[Dict[str, str], List[str]]] = None # For MC/TF
-    correct_answer: str # Should this be optional? LLM might not always provide it reliably. Let's keep required for now.
+    question_text: str # Renamed from 'question' to match prompt
+    options: Optional[List[Option]] = None # For multiple_choice/true_false
+    correct_answer_id: Optional[str] = None # For multiple_choice/true_false
+    correct_answer: Optional[str] = None # For short_answer
     explanation: Optional[str] = None
+    confidence_check: Optional[bool] = False # Added from prompt
     # Add any other assessment fields observed
 
 # Main model for the generated content

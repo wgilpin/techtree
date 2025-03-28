@@ -49,9 +49,12 @@
                             <div class="chat-message {{ message.role }}"> {# Add classes for styling #}
                                 <span class="message-role">{{ message.role|capitalize }}:</span>
                                 <div class="message-content">
-                                    {# Use markdown filter for assistant messages? Or assume pre-formatted? #}
-                                    {# Let's assume pre-formatted for now, maybe add markdown later #}
-                                    {{ message.content|safe }} {# Use safe if content might contain HTML #}
+                                    {# Apply markdownify filter ONLY to assistant messages #}
+                                    {% if message.role == 'assistant' %}
+                                        {{ message.content|markdownify|safe }}
+                                    {% else %}
+                                        {{ message.content|safe }} {# Keep user messages as they are (or apply escaping if needed) #}
+                                    {% endif %}
                                 </div>
                             </div>
                         {% endfor %}
@@ -93,6 +96,8 @@
 {% endblock %}
 
 {% block extra_js %}
+{# Add marked.js library from CDN #}
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const chatForm = document.getElementById('chat-form');
@@ -112,10 +117,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const contentDiv = document.createElement('div');
         contentDiv.classList.add('message-content');
-        // Basic sanitization or markdown rendering could happen here
-        // For now, treat as plain text or pre-formatted HTML (using innerHTML)
-        // Be cautious with innerHTML if content isn't trusted/sanitized server-side
-        contentDiv.innerHTML = content; // Assuming content might have basic HTML/markdown
+        // Render markdown for assistant messages, otherwise treat as text
+        if (role === 'assistant') {
+            // Use marked.parse() and disable gfm breaks for standard list behavior
+            // Enable gfm for tables, strikethrough etc.
+            contentDiv.innerHTML = marked.parse(content, { gfm: true, breaks: false });
+        } else {
+             // For user messages, set textContent to prevent potential XSS from user input
+             // If user messages could legitimately contain HTML, sanitize first.
+            contentDiv.textContent = content;
+        }
         messageDiv.appendChild(contentDiv);
 
         chatHistory.appendChild(messageDiv);

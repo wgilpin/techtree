@@ -42,10 +42,10 @@ class LessonService:
         syllabus_id: str,
         module_index: int,
         lesson_index: int
-    ) -> Tuple[Dict[str, Any], str]:
+    ) -> Tuple[GeneratedLessonContent, str]: # Return Pydantic object
         """
         Generates lesson content using the LLM, validates it, saves it to the DB,
-        and returns the content along with the lesson's database ID.
+        and returns the validated content object along with the lesson's database ID.
 
         Raises:
             RuntimeError: If content generation or saving fails.
@@ -97,7 +97,7 @@ class LessonService:
             r"({[\s\S]*})",
         ]
 
-        generated_content_dict: Optional[Dict] = None
+        generated_content_object: Optional[GeneratedLessonContent] = None # Store the object
         for pattern in json_patterns:
             json_match: Optional[re.Match] = re.search(pattern, response_text, re.DOTALL)
             if json_match:
@@ -114,7 +114,7 @@ class LessonService:
                             validated_model.topic = syllabus.get("topic", "Unknown Topic")
                         if not validated_model.level:
                             validated_model.level = knowledge_level
-                        generated_content_dict = validated_model.model_dump(mode='json')
+                        generated_content_object = validated_model # Store the object itself
                         logger.info("Successfully parsed and validated generated lesson content.")
                         break # Success
                     except ValidationError as ve:
@@ -123,23 +123,23 @@ class LessonService:
                 except json.JSONDecodeError as e:
                     logger.warning(f"JSON parsing failed for pattern {pattern}: {e}")
 
-        if generated_content_dict is None:
+        if generated_content_object is None: # Check the object
             logger.error(f"Failed to parse valid JSON content from LLM response: {response_text[:500]}...")
             raise RuntimeError("Failed to parse valid content structure from LLM.")
 
-        # Save the generated content structure
+        # Save the generated content structure (dump to JSON for DB)
         try:
             lesson_db_id = self.db_service.save_lesson_content(
                 syllabus_id=syllabus_id,
                 module_index=module_index,
                 lesson_index=lesson_index,
-                content=generated_content_dict,
+                content=generated_content_object.model_dump(mode='json'), # Dump here for DB
             )
             if not lesson_db_id:
                  logger.error("save_lesson_content did not return a valid lesson_id.")
                  raise RuntimeError("Failed to save lesson content or retrieve lesson ID.")
             logger.info(f"Saved new lesson content, associated lesson_id: {lesson_db_id}")
-            return generated_content_dict, str(lesson_db_id) # Return content and ID
+            return generated_content_object, str(lesson_db_id) # Return object and ID
         except Exception as save_err:
              logger.error(f"Failed to save lesson content: {save_err}", exc_info=True)
              raise RuntimeError("Database error saving lesson content") from save_err
@@ -152,7 +152,7 @@ class LessonService:
         syllabus_id: str,
         module_title: str,
         lesson_title: str,
-        generated_content: Dict[str, Any],
+        generated_content: GeneratedLessonContent, # Expect Pydantic object
         user_id: Optional[str],
         module_index: int,
         lesson_index: int,
@@ -167,7 +167,7 @@ class LessonService:
             "syllabus_id": syllabus_id, # Keep syllabus_id for context
             "lesson_title": lesson_title,
             "module_title": module_title,
-            "generated_content": generated_content,
+            "generated_content": generated_content, # Store the object directly
             "user_id": user_id,
             # Use lesson_db_id if available, otherwise construct UID. Consider standardizing.
             "lesson_uid": str(lesson_db_id) if lesson_db_id else f"{syllabus_id}_{module_index}_{lesson_index}",
@@ -255,7 +255,7 @@ class LessonService:
                 logger.info(f"No existing progress or state found for user {user_id}")
 
         # --- Check for Existing Lesson Content ---
-        existing_lesson_content = None
+        existing_lesson_content_obj: Optional[GeneratedLessonContent] = None # Store validated object
         lesson_db_id = None # Initialize lesson_db_id
 
         # Try to get lesson_db_id from progress first
@@ -277,22 +277,27 @@ class LessonService:
                  # lesson_db_id remains None
 
         # Now try fetching content using indices (as DB method expects this)
-        content_data = self.db_service.get_lesson_content(
+        content_data_dict = self.db_service.get_lesson_content( # This returns a dict
             syllabus_id, module_index, lesson_index
         )
-        if content_data:
-            existing_lesson_content = content_data # Assign directly
-            logger.info(
-                f"Found existing lesson content for {syllabus_id}/{module_index}/{lesson_index}"
-            )
+        if content_data_dict:
+            try:
+                # Validate the dict loaded from DB
+                existing_lesson_content_obj = GeneratedLessonContent.model_validate(content_data_dict)
+                logger.info(
+                    f"Found and validated existing lesson content for {syllabus_id}/{module_index}/{lesson_index}"
+                )
+            except ValidationError as ve:
+                logger.error(f"Failed to validate existing lesson content from DB: {ve}", exc_info=True)
+                # existing_lesson_content_obj remains None
 
-        # --- Return Existing Content & State (if found) ---
-        if existing_lesson_content:
-            # Ensure topic and level are in the content
-            if "topic" not in existing_lesson_content:
-                existing_lesson_content["topic"] = topic
-            if "level" not in existing_lesson_content:
-                existing_lesson_content["level"] = level
+        # --- Return Existing Content & State (if found and valid) ---
+        if existing_lesson_content_obj:
+            # Ensure topic and level are in the content object
+            if not existing_lesson_content_obj.topic:
+                existing_lesson_content_obj.topic = topic
+            if not existing_lesson_content_obj.level:
+                existing_lesson_content_obj.level = level
 
             # If state wasn't loaded from progress, create and initialize state using the helper
             if lesson_state is None and user_id:
@@ -306,9 +311,7 @@ class LessonService:
                     )
                     module_title = module_details.get("title", "Unknown Module")
                     # Get lesson title from content metadata if possible
-                    lesson_title = existing_lesson_content.get("metadata", {}).get(
-                        "title", "Unknown Lesson"
-                    )
+                    lesson_title = existing_lesson_content_obj.metadata.title if existing_lesson_content_obj.metadata else "Unknown Lesson"
 
                     # Call the helper function to initialize state
                     lesson_state = self._initialize_lesson_state(
@@ -317,7 +320,7 @@ class LessonService:
                         syllabus_id=syllabus_id,
                         module_title=module_title,
                         lesson_title=lesson_title,
-                        generated_content=existing_lesson_content,
+                        generated_content=existing_lesson_content_obj, # Pass the object
                         user_id=user_id,
                         module_index=module_index,
                         lesson_index=lesson_index,
@@ -325,7 +328,8 @@ class LessonService:
                     )
 
                     # Save the newly initialized state
-                    state_json = json.dumps(lesson_state)
+                    # Need to handle potential Pydantic objects within the state for JSON serialization
+                    state_json = json.dumps(lesson_state, default=lambda o: o.model_dump(mode='json') if isinstance(o, GeneratedLessonContent) else o)
                     self.db_service.save_user_progress(
                         user_id=user_id,
                         syllabus_id=syllabus_id,
@@ -344,19 +348,23 @@ class LessonService:
                     )
                     # Proceed but lesson_state might remain None
 
+            # Ensure the returned state also has the validated object if it was loaded separately
+            if lesson_state and not isinstance(lesson_state.get("generated_content"), GeneratedLessonContent):
+                 lesson_state["generated_content"] = existing_lesson_content_obj
+
             return {
                 "lesson_id": lesson_db_id,  # Use the actual lesson PK
                 "syllabus_id": syllabus_id,
                 "module_index": module_index,
                 "lesson_index": lesson_index,
-                "content": existing_lesson_content,  # The generated structure
+                "content": existing_lesson_content_obj,  # Return the validated object
                 "lesson_state": lesson_state,  # The conversational state (might be None if no user_id)
                 "is_new": False,
             }
 
         # --- Generate New Lesson Content & Initialize State ---
         logger.info(
-            "Existing lesson content not found. Generating new content and state."
+            "Existing lesson content not found or invalid. Generating new content and state."
         )
         try:
             module = await self.syllabus_service.get_module_details(
@@ -375,7 +383,7 @@ class LessonService:
 
         # Generate the base lesson content structure using the new helper
         try:
-            generated_content, lesson_db_id = await self._generate_and_save_lesson_content(
+            generated_content_obj, lesson_db_id = await self._generate_and_save_lesson_content( # Expect object
                  syllabus=syllabus,
                  module_title=module_title,
                  lesson_title=lesson_title,
@@ -397,7 +405,7 @@ class LessonService:
             syllabus_id=syllabus_id,
             module_title=module_title,
             lesson_title=lesson_title,
-            generated_content=generated_content,
+            generated_content=generated_content_obj, # Pass the object
             user_id=user_id,
             module_index=module_index,
             lesson_index=lesson_index,
@@ -407,7 +415,8 @@ class LessonService:
         # Save initial progress and state if user_id is provided
         if user_id:
             try:
-                state_json = json.dumps(initial_lesson_state)
+                # Need to handle potential Pydantic objects within the state for JSON serialization
+                state_json = json.dumps(initial_lesson_state, default=lambda o: o.model_dump(mode='json') if isinstance(o, GeneratedLessonContent) else o)
                 self.db_service.save_user_progress(
                     user_id=user_id,
                     syllabus_id=syllabus_id,
@@ -429,7 +438,7 @@ class LessonService:
             "syllabus_id": syllabus_id,
             "module_index": module_index,
             "lesson_index": lesson_index,
-            "content": generated_content,  # Return base structure
+            "content": generated_content_obj,  # Return validated object
             "lesson_state": initial_lesson_state,  # Return initial conversational state
             "is_new": True,
         }
@@ -474,23 +483,27 @@ class LessonService:
 
         current_lesson_state = progress_entry["lesson_state"]
 
-        # Ensure generated_content is loaded if missing (e.g., if state was somehow saved without it)
-        if not current_lesson_state.get("generated_content"):
+        # Ensure generated_content is loaded and is a Pydantic object
+        content_in_state = current_lesson_state.get("generated_content")
+        if not isinstance(content_in_state, GeneratedLessonContent):
             logger.warning(
-                "Lesson state missing 'generated_content'. Attempting to reload."
+                f"Lesson state 'generated_content' is not a Pydantic object (type: {type(content_in_state)}). Attempting to reload and validate."
             )
             try:
-                # Use indices to fetch content
-                content_data = self.db_service.get_lesson_content(
+                # Use indices to fetch content dict from DB
+                content_data_dict = self.db_service.get_lesson_content(
                     syllabus_id, module_index, lesson_index
                 )
-                if content_data:
-                    current_lesson_state["generated_content"] = content_data
+                if content_data_dict:
+                    # Validate the dict loaded from DB
+                    validated_content_obj = GeneratedLessonContent.model_validate(content_data_dict)
+                    current_lesson_state["generated_content"] = validated_content_obj # Replace dict with object
+                    logger.info("Successfully reloaded and validated generated_content.")
                 else:
                     raise ValueError("Failed to reload generated_content using indices.")
-            except Exception as load_err:
+            except (ValidationError, Exception) as load_err:
                 logger.error(
-                    f"Fatal error: Could not reload generated_content for state: {load_err}"
+                    f"Fatal error: Could not reload/validate generated_content for state: {load_err}", exc_info=True
                 )
                 raise ValueError("Failed to load necessary lesson content for chat.")
 
@@ -554,7 +567,8 @@ class LessonService:
 
         # 3. Serialize and save the updated state
         try:
-            updated_state_json = json.dumps(updated_lesson_state)
+            # Need to handle potential Pydantic objects within the state for JSON serialization
+            updated_state_json = json.dumps(updated_lesson_state, default=lambda o: o.model_dump(mode='json') if isinstance(o, GeneratedLessonContent) else o)
             current_status = "in_progress" # Default status during chat
             # Extract score if updated (assuming structure)
             current_score = updated_lesson_state.get("user_performance", {}).get("score")
@@ -570,7 +584,7 @@ class LessonService:
                 status=current_status,
                 score=current_score,
                 lesson_state_json=updated_state_json,
-                lesson_id=lesson_db_id # Pass lesson_id if available
+                # lesson_id=lesson_db_id # Removed: save_user_progress doesn't accept lesson_id
             )
             logger.info(f"Saved updated lesson state for user {user_id}")
         except Exception as db_err:

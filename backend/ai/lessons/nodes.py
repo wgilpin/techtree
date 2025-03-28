@@ -9,6 +9,8 @@ import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
+from pydantic import ValidationError
+
 from backend.ai.llm_utils import call_llm_with_json_parsing, call_with_retry
 from backend.ai.llm_utils import MODEL as llm_model
 from backend.ai.prompt_loader import load_prompt
@@ -20,6 +22,7 @@ from backend.models import (
     GeneratedLessonContent,
     IntentClassificationResult,
     LessonState,
+    Option, # Import Option model
 )
 
 
@@ -178,12 +181,25 @@ def generate_chat_response(state: LessonState) -> Dict[str, Any]:
     history: List[Dict[str, str]] = state.get("conversation_history", [])
     user_id: str = state.get("user_id", "unknown_user")
     lesson_title: str = state.get("lesson_title", "this lesson")
-    # Get the full exposition content
-    generated_content = state.get("generated_content")
+    # Get the full exposition content and ensure it's a Pydantic model
+    raw_generated_content: Optional[Union[Dict, GeneratedLessonContent]] = state.get(
+        "generated_content"
+    )
+    generated_content: Optional[GeneratedLessonContent] = state.get("generated_content") # Directly get the object
     exposition: Optional[str] = "No exposition available."
-    if generated_content:
+
+    # Validation is now handled in the service layer before state is passed to the graph.
+    # We can assume generated_content is either a valid object or None.
+    if not isinstance(generated_content, GeneratedLessonContent) and generated_content is not None:
+         logger.error(f"generate_chat_response received unexpected type for generated_content: {type(generated_content)}")
+         generated_content = None # Treat as None if type is wrong
+    elif generated_content is None:
+         logger.warning("generate_chat_response received None for generated_content.")
+
+    if generated_content and generated_content.exposition_content:
+        # Assuming exposition_content can be complex, convert to string representation
+        # Adjust this if a specific format (like markdown) is needed for the prompt
         exposition = str(generated_content.exposition_content)
-    # Cast to str for prompt
 
     logger.debug(
         f"Generating chat response for user {user_id} in lesson '{lesson_title}'"
@@ -242,9 +258,16 @@ def present_exercise(state: LessonState) -> Dict[str, Any]:
     """
     history: List[Dict[str, str]] = state.get("conversation_history", [])
     user_id: str = state.get("user_id", "unknown_user")
-    generated_content: Optional[GeneratedLessonContent] = state.get(
-        "generated_content"
-    )
+    generated_content: Optional[GeneratedLessonContent] = state.get("generated_content") # Directly get the object
+
+    # Validation is now handled in the service layer.
+    # Assume generated_content is a valid object or None.
+    if not isinstance(generated_content, GeneratedLessonContent) and generated_content is not None:
+         logger.error(f"present_exercise received unexpected type for generated_content: {type(generated_content)}")
+         generated_content = None # Treat as None if type is wrong
+    elif generated_content is None:
+         logger.warning("present_exercise received None for generated_content.")
+
     exercises: List[Exercise] = (
         generated_content.active_exercises if generated_content else []
     )
@@ -318,9 +341,16 @@ def present_quiz_question(state: LessonState) -> Dict[str, Any]:
     """
     history: List[Dict[str, str]] = state.get("conversation_history", [])
     user_id: str = state.get("user_id", "unknown_user")
-    generated_content: Optional[GeneratedLessonContent] = state.get(
-        "generated_content"
-    )
+    generated_content: Optional[GeneratedLessonContent] = state.get("generated_content") # Directly get the object
+
+    # Validation is now handled in the service layer.
+    # Assume generated_content is a valid object or None.
+    if not isinstance(generated_content, GeneratedLessonContent) and generated_content is not None:
+         logger.error(f"present_quiz_question received unexpected type for generated_content: {type(generated_content)}")
+         generated_content = None # Treat as None if type is wrong
+    elif generated_content is None:
+         logger.warning("present_quiz_question received None for generated_content.")
+
     questions: List[AssessmentQuestion] = (
         generated_content.knowledge_assessment if generated_content else []
     )
@@ -337,18 +367,18 @@ def present_quiz_question(state: LessonState) -> Dict[str, Any]:
     if 0 <= next_index < len(questions):
         question: AssessmentQuestion = questions[next_index]
         question_type: str = question.type
-        question_text: str = question.question
+        question_text: str = question.question_text # Use renamed attribute
 
         # Format options based on type
         options_lines: List[str] = []
         if question_type == "multiple_choice" and question.options:
-            options: Union[Dict[str, str], List[str]] = question.options
-            if isinstance(options, dict):
+            # Ensure options is a list of Option objects
+            if isinstance(question.options, list) and all(isinstance(opt, Option) for opt in question.options):
                 options_lines = [
-                    f"- {key}) {value}" for key, value in options.items()
+                    f"- {opt.id}) {opt.text}" for opt in question.options
                 ]
-            elif isinstance(options, list):  # Handle list options if necessary
-                options_lines = [f"- {opt}" for opt in options]
+            else:
+                logger.warning(f"MC question {question.id} has unexpected options format: {question.options}")
             # Add instruction for MC questions
             options_lines.append(
                 "\nPlease respond with the letter/key of your chosen answer (e.g., 'A')."
@@ -409,12 +439,21 @@ def evaluate_chat_answer(state: LessonState) -> Dict[str, Any]:
     mode: str = state.get("current_interaction_mode")
     history: List[Dict[str, str]] = state.get("conversation_history", [])
     user_id: str = state.get("user_id", "unknown_user")
-    generated_content: Optional[GeneratedLessonContent] = state.get(
-        "generated_content"
-    )
+    # raw_generated_content: Optional[Union[Dict, GeneratedLessonContent]] = state.get( # No longer needed
+    #     "generated_content"
+    # )
+    generated_content: Optional[GeneratedLessonContent] = state.get("generated_content") # Retrieve from state
     user_responses: List[Dict] = state.get(
         "user_responses", []
     )
+
+    # Validation is now handled in the service layer.
+    # Assume generated_content is a valid object or None.
+    if not isinstance(generated_content, GeneratedLessonContent) and generated_content is not None:
+         logger.error(f"evaluate_chat_answer received unexpected type for generated_content: {type(generated_content)}")
+         generated_content = None # Treat as None if type is wrong
+    elif generated_content is None:
+         logger.warning("evaluate_chat_answer received None for generated_content.")
 
     if not history or history[-1].get("role") != "user":
         logger.warning(
@@ -439,23 +478,56 @@ def evaluate_chat_answer(state: LessonState) -> Dict[str, Any]:
     question_id_str: str = "unknown"
 
     # Identify the question being answered
+    logger.debug(f"Evaluate: generated_content type: {type(generated_content)}, value: {str(generated_content)[:200]}...") # DEBUG LINE 1
     if generated_content:
+        logger.debug(f"Evaluate: Inside 'if generated_content'. Mode: {mode}") # DEBUG LINE 2
         if mode == "doing_exercise":
             question_type = "exercise"
             question_index = state.get("current_exercise_index", -1)
-            exercises: List[Exercise] = generated_content.active_exercises
-            if 0 <= question_index < len(exercises):
-                question = exercises[question_index]
-                question_id_str = question.id
+            logger.debug(f"Evaluate: Exercise index: {question_index}")
+            try:
+                exercises: List[Exercise] = generated_content.active_exercises
+                logger.debug(f"Evaluate: Found {len(exercises)} exercises.")
+                if 0 <= question_index < len(exercises):
+                    local_question = exercises[question_index] # Use temp variable
+                    local_question_id = local_question.id # Access id first
+                    question = local_question # Assign only after successful access
+                    question_id_str = local_question_id
+                    logger.debug(f"Evaluate: Successfully retrieved exercise: {question_id_str}")
+                else:
+                    logger.warning(f"Evaluate: Exercise index {question_index} out of bounds (len={len(exercises)})")
+            except AttributeError as e:
+                 logger.error(f"Evaluate: AttributeError accessing active_exercises or id: {e}", exc_info=True)
+            except IndexError as e: # Be specific about index errors
+                 logger.error(f"Evaluate: IndexError accessing exercise at index {question_index}: {e}", exc_info=True)
+            except Exception as e:
+                 logger.error(f"Evaluate: Unexpected error accessing exercise: {e}", exc_info=True)
+
         elif mode == "taking_quiz":
             question_type = "assessment"
             question_index = state.get("current_quiz_question_index", -1)
-            questions: List[AssessmentQuestion] = (
-                generated_content.knowledge_assessment
-            )
-            if 0 <= question_index < len(questions):
-                question = questions[question_index]
-                question_id_str = question.id
+            logger.debug(f"Evaluate: Quiz index: {question_index}")
+            try:
+                questions: List[AssessmentQuestion] = generated_content.knowledge_assessment
+                logger.debug(f"Evaluate: Found {len(questions)} questions.")
+                if 0 <= question_index < len(questions):
+                    local_question = questions[question_index] # Use temp variable
+                    local_question_id = local_question.id # Access id first
+                    question = local_question # Assign only after successful access
+                    question_id_str = local_question_id
+                    logger.debug(f"Evaluate: Successfully retrieved question: {question_id_str}")
+                else:
+                    logger.warning(f"Evaluate: Quiz index {question_index} out of bounds (len={len(questions)})")
+            except AttributeError as e:
+                 logger.error(f"Evaluate: AttributeError accessing knowledge_assessment or id: {e}", exc_info=True)
+            except IndexError as e: # Be specific about index errors
+                 logger.error(f"Evaluate: IndexError accessing question at index {question_index}: {e}", exc_info=True)
+            except Exception as e:
+                 logger.error(f"Evaluate: Unexpected error accessing question: {e}", exc_info=True)
+        else:
+             logger.warning(f"Evaluate: Unexpected mode '{mode}' when trying to find question.") # DEBUG LINE 15
+    else:
+        logger.warning("Evaluate: generated_content was None or False.") # DEBUG LINE 16
 
     if question is None:
         logger.error(
@@ -475,47 +547,55 @@ def evaluate_chat_answer(state: LessonState) -> Dict[str, Any]:
         }
 
     # Prepare prompt context
-    question_text: str = question.question or getattr(
-        question, "instructions", "N/A"
-    )  # Handle Exercise/AssessmentQuestion
-    expected_solution: str = (
-        getattr(question, "answer", None)  # Check for 'answer' if defined in models
-        or getattr(question, "expected_solution", None)
-        or question.correct_answer
-        or question.explanation
-        or "N/A"
-    )
-    prompt_context: str = f"Question/Instructions:\n{question_text}\n"
-    q_type: str = question.type
-    if q_type == "multiple_choice" and question.options:
-        options: Union[Dict[str, str], List[str]] = question.options
-        options_str: str = ""
-        if isinstance(options, dict):
-            options_str = "\n".join(
-                [f"- {key}) {value}" for key, value in options.items()]
-            )
-        elif isinstance(options, list):
-            options_str = "\n".join([f"- {opt}" for opt in options])
+    prompt_context: str = "" # Initialize prompt_context
+    try: # Add try block around context building
+        question_text: str = getattr(question, "question_text", None) or getattr(
+            question, "instructions", "N/A"
+        )
+
+        # Determine expected solution based on question type and available fields
+        expected_solution: str = "N/A"
+        if isinstance(question, Exercise):
+            expected_solution = getattr(question, "correct_answer", None) or getattr(question, "explanation", "N/A")
+        elif isinstance(question, AssessmentQuestion):
+            expected_solution = getattr(question, "correct_answer_id", None) or getattr(question, "correct_answer", None) or getattr(question, "explanation", "N/A")
+
+        prompt_context = f"Question/Instructions:\n{question_text}\n" # Assign initial part
+        q_type: str = question.type
+        if q_type == "multiple_choice" and question.options and isinstance(question.options, list):
+            # Safely format options only if it's a non-empty list of Option objects
+            valid_options = [opt for opt in question.options if isinstance(opt, Option)]
+            if valid_options:
+                options_str = "\n".join(
+                    [f"- {opt.id}) {opt.text}" for opt in valid_options]
+                )
+            else:
+                options_str = "[Options formatting error]"
+                logger.warning(f"MC question {getattr(question, 'id', 'unknown')} has invalid options format: {question.options}")
+            prompt_context += f"""
+                \nOptions:\n{options_str}\n\nThe user should respond with
+                the key/letter or the full text of the correct option."""
+        elif q_type == "true_false":
+            prompt_context += \
+                "\nOptions:\n- True\n- False\n\nThe user should respond with 'True' or 'False'."
+        elif q_type == "ordering" and getattr(
+            question, "items", None
+        ):
+            items_list: str = "\n".join([f"- {item}" for item in question.items])
+            prompt_context += f"""
+                        \nItems to order:\n{items_list}\n\n
+                        The user should respond with the items in the correct order."""
         prompt_context += f"""
-            \nOptions:\n{options_str}\n\nThe user should respond with
-            the key/letter or the full text of the correct option."""
-    elif q_type == "true_false":
-        prompt_context += \
-            "\nOptions:\n- True\n- False\n\nThe user should respond with 'True' or 'False'."
-    elif q_type == "ordering" and getattr(
-        question, "items", None
-    ):  # Check if 'items' exists (for Exercise)
-        items_list: str = "\n".join([f"- {item}" for item in question.items])
-        prompt_context += f"""
-                    \nItems to order:\n{items_list}\n\n
-                    The user should respond with the items in the correct order."""
-    prompt_context += f"""
-                \n\nExpected Answer/Solution Context (if available):\n
-                {expected_solution}\n\nUser's Answer:\n{user_answer}"""
+                    \n\nExpected Answer/Solution Context (if available):\n
+                    {expected_solution}\n\nUser's Answer:\n{user_answer}"""
+    except Exception as context_err: # Add except block
+        logger.error(f"Error building prompt context for evaluation: {context_err}", exc_info=True)
+        # Fallback context
+        prompt_context = f"Error building context. User Answer: {user_answer}"
 
     # Call LLM for evaluation
     evaluation_result_obj: Optional[EvaluationResult] = None
-    evaluation_result: Dict[str, Any]  # Define type for the dict version
+    evaluation_result: Dict[str, Any]
     try:
         prompt = load_prompt(
             "evaluate_answer",

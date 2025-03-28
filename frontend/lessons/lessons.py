@@ -34,6 +34,16 @@ logger = logging.getLogger(__name__)
 # Using url_prefix='/lesson' might simplify routes later, but let's keep it explicit for now
 lessons_bp = Blueprint("lessons", __name__, template_folder="../templates")
 
+
+# --- Custom Jinja Filter for Markdown ---
+@lessons_bp.app_template_filter("markdownify")
+def markdownify_filter(text):
+    """Converts markdown text to HTML."""
+    # Use the markdown library with desired extensions if needed
+    # e.g., markdown.markdown(text, extensions=['fenced_code', 'tables'])
+    return markdown.markdown(text)
+
+
 # API_URL is now accessed via current_app.config['API_URL']
 
 
