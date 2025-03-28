@@ -507,6 +507,51 @@ class LessonService:
             # Return an error message to the user
             return {"error": "Sorry, I encountered an error processing your message."}
 
+        # 2.5 Apply Adaptivity Rules (Example: Log consecutive incorrect answers)
+        try:
+            user_responses = updated_lesson_state.get("user_responses", [])
+            if len(user_responses) >= 2:
+                last_response = user_responses[-1]
+                prev_response = user_responses[-2]
+
+                # Check if both last responses were evaluations and incorrect
+                if "evaluation" in last_response and "evaluation" in prev_response:
+                    last_eval = last_response["evaluation"]
+                    prev_eval = prev_response["evaluation"]
+                    last_type = last_response.get("question_type")
+                    prev_type = prev_response.get("question_type")
+
+                    if (not last_eval.get("is_correct", True) and
+                        not prev_eval.get("is_correct", True) and
+                        last_type == prev_type and # Check if they are the same type (e.g., both exercises)
+                        last_type is not None): # Ensure type is known
+
+                        logger.warning(
+                            f"Adaptivity Alert: User {user_id} answered 2 consecutive "
+                            f"{last_type} questions incorrectly. "
+                            f"(Last Q: {last_response.get('question_id', 'unknown')}, "
+                            f"Prev Q: {prev_response.get('question_id', 'unknown')})"
+                        )
+                        # TODO: Implement more complex adaptivity logic here:
+                        # - Adjust difficulty (e.g., flag for easier questions next time)
+                        # - Suggest revisiting prerequisite topics
+                        # - Modify user_performance in state?
+                        # - Potentially alter the next step suggested by the AI?
+            elif user_responses: # Handle the case of only one response
+                 last_response = user_responses[-1]
+                 if "evaluation" in last_response:
+                    evaluation = last_response["evaluation"]
+                    if not evaluation.get("is_correct", True):
+                        logger.info(
+                            f"Adaptivity Check: Incorrect answer detected for user {user_id}, "
+                            f"question {last_response.get('question_id', 'unknown')}. "
+                            f"Score: {evaluation.get('score', 'N/A')}"
+                        )
+
+        except Exception as adapt_err:
+             logger.error(f"Error during adaptivity logic: {adapt_err}", exc_info=True)
+             # Continue even if adaptivity logic fails
+
         # 3. Serialize and save the updated state
         try:
             updated_state_json = json.dumps(updated_lesson_state)
@@ -556,224 +601,8 @@ class LessonService:
 
         return lesson
 
-    async def evaluate_exercise(
-        self,
-        lesson_id: str,
-        exercise_index: int,
-        user_answer: str,
-        user_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Evaluate a user's answer to an exercise in a lesson"""
-        lesson = await self.get_lesson_by_id(lesson_id)
-
-        if not lesson or "content" not in lesson:
-            raise ValueError(f"Invalid lesson with ID {lesson_id}")
-
-        content = lesson["content"]
-
-        # Determine the correct key for exercises and get the list
-        exercises_list = None
-        if "exercises" in content and isinstance(content.get("exercises"), list):
-            exercises_list = content["exercises"]
-            logger.debug(f"Using 'exercises' key for lesson {lesson_id}")
-        elif "active_exercises" in content and isinstance(
-            content.get("active_exercises"), list
-        ):
-            exercises_list = content["active_exercises"]
-            logger.debug(f"Using 'active_exercises' key for lesson {lesson_id}")
-        else:
-            logger.warning(
-                "Neither 'exercises' nor 'active_exercises' key found"
-                f" or valid list in content for lesson {lesson_id}"
-            )
-
-        # Check if exercises list is valid and index is within bounds
-        # Added check for exercises_list being None
-        if exercises_list is None or exercise_index >= len(exercises_list):
-            raise ValueError(
-                f"Exercise index {exercise_index} out of range or"
-                f" exercises not found/invalid for lesson {lesson_id}"
-            )
-
-        exercise = exercises_list[exercise_index]
-        # Log specific fields instead of the entire exercise data to avoid encoding issues
-        logger.debug(
-            f"Exercise index: {exercise_index}, type: {exercise.get('type', 'unknown')}"
-        )
-        logger.debug(f"Exercise ID: {exercise.get('id', 'unknown')}")
-
-        # Check for different possible field names that might contain the question text
-        instructions = exercise.get("instructions", None)
-        question = exercise.get("question", None)
-
-        logger.debug(f"Found 'instructions' field: {instructions is not None}")
-        logger.debug(f"Found 'question' field: {question is not None}")
-
-        # Use instructions if available, otherwise fall back to question
-        question_text = (
-            question
-            if question is not None
-            else (
-                instructions
-                if instructions is not None
-                else "Error: Question text not found."
-            )
-        )
-        logger.debug(f"Using question_text: '{question_text[:100]}...' (truncated)")
-
-        exercise_type = exercise.get("type", "open_ended")  # Determine type for prompt
-        user_answer_str = str(user_answer)  # Ensure user answer is a string
-
-        # Construct specific prompt content based on exercise type
-        prompt_content = ""
-        if exercise_type == "ordering":
-            # Ensure items are strings for joining
-            items_to_order = [str(item) for item in exercise.get("items", [])]
-            # Assuming correct_answer is stored as a list or string representing the sequence
-            correct_sequence = exercise.get("correct_answer", "N/A")
-            prompt_content = f"""
-Question: {question_text}
-
-Items to order:
-{chr(10).join([f'- {item}' for item in items_to_order])}
-
-Expected correct order: {correct_sequence}
-
-User's submitted order: {user_answer_str}
-
-Please evaluate if the user's submitted order matches the expected correct order.
-"""
-        else:
-            # For other types, look for different possible field names for the expected answer
-            expected_solution = (
-                exercise.get("answer")
-                or exercise.get("expected_solution")
-                or exercise.get("correct_answer")
-                or exercise.get("correct_answer_explanation", "N/A")
-            )
-
-            logger.debug(
-                f"Using expected_solution: '{str(expected_solution)[:100]}...' (truncated)"
-            )
-
-            prompt_content = f"""
-Question: {question_text}
-
-Expected solution or correct answer: {expected_solution}
-
-User's response: {user_answer_str}
-
-Please evaluate the user's response.
-"""
-
-        # Construct the full prompt for Gemini
-        prompt = f"""
-You are evaluating a user's response to a {exercise_type} exercise.
-
-{prompt_content}
-
-Provide your evaluation as a JSON object with the following structure:
-1. "score": A score between 0 (incorrect) and 1 (correct). For ordering, 1 if the order is exactly correct, 0 otherwise. For other types, grade appropriately.
-2. "feedback": A brief explanation of the evaluation (e.g., "Correct order", "Incorrect order", or feedback on partial correctness for other types).
-3. "explanation": An optional brief explanation of the correct answer, especially if the user was incorrect.
-4. "is_correct": A boolean (true if score is 1.0 for ordering, true if score >= 0.8 for other types, false otherwise).
-
-Example JSON format:
-{{
-  "score": 1.0,
-  "feedback": "The sequence is correct.",
-  "explanation": "The correct order is B, D, G, A, F, E, C because...",
-  "is_correct": true
-}}
-"""
-
-        # Call the Gemini model directly
-        try:
-            # Use call_with_retry and llm_model imported from llm_utils
-            evaluation_response = call_with_retry(llm_model.generate_content, prompt)
-            evaluation_text = evaluation_response.text
-            logger.debug(f"Raw evaluation response: {evaluation_text}")
-
-            # Extract JSON from response (using patterns from _evaluate_response)
-            json_patterns = [
-                r"```(?:json)?\s*({.*?})```",
-                r'({[\s\S]*"score"[\s\S]*"feedback"[\s\S]*"explanation"[\s\S]*"is_correct"[\s\S]*})',
-                r"({[\s\S]*})",
-            ]
-
-            evaluation_result = None
-            for pattern in json_patterns:
-                json_match = re.search(pattern, evaluation_text, re.DOTALL)
-                if json_match:
-                    json_str = json_match.group(1)
-                    # Basic cleanup
-                    json_str = re.sub(r"\\n", "", json_str)
-                    json_str = re.sub(r"\\", "", json_str)  # Be careful with this one
-                    try:
-                        evaluation_result = json.loads(json_str)
-                        # Basic validation
-                        if all(
-                            key in evaluation_result
-                            for key in ["score", "feedback", "is_correct"]
-                        ):
-                            # Ensure explanation is present, even if empty
-                            evaluation_result.setdefault("explanation", "")
-                            logger.debug(
-                                f"Parsed evaluation result: {evaluation_result}"
-                            )
-                            break  # Successfully parsed
-                    except json.JSONDecodeError as e:
-                        logger.warning(
-                            f"JSON parsing failed for pattern {pattern}: {e}"
-                        )
-                        logger.warning(f"Problematic JSON string: {json_str}")
-                        evaluation_result = None  # Reset on failure
-
-            if evaluation_result is None:
-                logger.error(
-                    f"Failed to parse evaluation JSON from response: {evaluation_text}"
-                )
-                # Provide a default error response
-                evaluation_result = {
-                    "score": 0.0,
-                    "feedback": "Sorry, I couldn't evaluate your answer at this time.",
-                    "explanation": "",
-                    "is_correct": False,
-                }
-
-        except Exception as e:
-            logger.error(f"Error during exercise evaluation: {e}", exc_info=True)
-            evaluation_result = {
-                "score": 0.0,
-                "feedback": "An error occurred during evaluation.",
-                "explanation": "",
-                "is_correct": False,
-            }
-
-        # If user_id is provided and this is the final exercise, mark the lesson as completed
-        if (
-            user_id
-            and exercises_list is not None
-            and exercise_index == len(exercises_list) - 1
-        ):  # Use exercises_list here
-            # Update user progress to completed
-            self.db_service.save_user_progress(
-                user_id=user_id,
-                syllabus_id=lesson["syllabus_id"],
-                module_index=lesson["module_index"],
-                lesson_index=lesson["lesson_index"],
-                status="completed",
-                score=evaluation_result.get("score", 0),  # Use score from parsed result
-                lesson_id=lesson_id # Pass lesson_id
-            )
-
-        # Return the structured evaluation result
-        return {
-            "is_correct": evaluation_result["is_correct"],
-            "score": evaluation_result["score"],
-            "feedback": evaluation_result["feedback"],
-            "explanation": evaluation_result["explanation"],
-        }
+    # Removed redundant evaluate_exercise method (lines 559-776).
+    # Evaluation is now handled within the graph via nodes.evaluate_chat_answer
 
     async def update_lesson_progress(
         self,

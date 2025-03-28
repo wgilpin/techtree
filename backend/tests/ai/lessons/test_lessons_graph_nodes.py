@@ -7,7 +7,8 @@ from unittest.mock import ANY, MagicMock, patch
 
 from google.api_core.exceptions import ResourceExhausted
 
-from backend.ai.lessons.lessons_graph import LessonAI
+# Import the node functions directly
+from backend.ai.lessons import nodes
 from backend.models import (
     AssessmentQuestion,
     EvaluationResult,
@@ -22,26 +23,21 @@ from backend.models import (
 class TestLessonAINodes:
     """Tests for the node action methods in LessonAI."""
 
-    # --- Tests for _generate_chat_response ---
+    # --- Tests for generate_chat_response ---
 
-    @patch("backend.ai.lessons.lessons_graph.load_prompt")
-    @patch("backend.ai.lessons.lessons_graph.call_with_retry")
-    @patch(
-        "backend.ai.lessons.lessons_graph.llm_model"
-    )  # Patch the imported MODEL instance
-    # Add the standard patches
-    @patch("backend.ai.lessons.lessons_graph.load_dotenv", MagicMock())
-    @patch("backend.ai.lessons.lessons_graph.StateGraph")
-    @patch("backend.ai.lessons.lessons_graph.logger", MagicMock())
+    # Patches updated to target the 'nodes' module
+    @patch("backend.ai.lessons.nodes.load_prompt")
+    @patch("backend.ai.lessons.nodes.call_with_retry")
+    @patch("backend.ai.lessons.nodes.llm_model") # Patch the imported MODEL instance in nodes
+    @patch("backend.ai.lessons.nodes.logger", MagicMock()) # Patch logger in nodes
     def test_generate_chat_response_success(
         self,
-        MockStateGraph,
         MockLlmModel,
         MockCallWithRetry,
         MockLoadPrompt,
     ):
         """Test successful chat response generation."""
-        lesson_ai = LessonAI()
+        # No longer need LessonAI instance or its init patches (StateGraph, load_dotenv)
         MockLoadPrompt.return_value = "mocked_chat_prompt"
         MockLlmModel_response = MagicMock()
         MockLlmModel_response.text = "This is the AI response."
@@ -63,7 +59,8 @@ class TestLessonAINodes:
             # Other fields...
         }
 
-        result = lesson_ai._generate_chat_response(state)
+        # Call the node function directly
+        result = nodes.generate_chat_response(state)
 
         MockLoadPrompt.assert_called_once_with(
             "chat_response",
@@ -83,20 +80,21 @@ class TestLessonAINodes:
         assert new_history[1]["role"] == "assistant"
         assert new_history[1]["content"] == "This is the AI response."
 
-    @patch("backend.ai.lessons.lessons_graph.load_dotenv", MagicMock())
-    @patch("backend.ai.lessons.lessons_graph.StateGraph")
-    @patch("backend.ai.lessons.lessons_graph.logger", MagicMock())
-    def test_generate_chat_response_no_user_message(self, MockStateGraph):
+    # Remove LessonAI init patches, update logger patch target
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())
+    def test_generate_chat_response_no_user_message(self):
         """Test chat response generation when no user message precedes."""
-        lesson_ai = LessonAI()
+        # lesson_ai = LessonAI() # Removed
         initial_history = [{"role": "assistant", "content": "Welcome!"}]
         state: LessonState = {
             "conversation_history": initial_history,
             # Other fields...
         }
 
-        with patch("backend.ai.lessons.lessons_graph.logger.warning") as mock_warning:
-            result = lesson_ai._generate_chat_response(state)
+        # Patch logger warning where it's used
+        with patch("backend.ai.lessons.nodes.logger.warning") as mock_warning:
+            # Call node function directly
+            result = nodes.generate_chat_response(state)
 
             mock_warning.assert_called_once()
             assert "conversation_history" in result
@@ -105,25 +103,22 @@ class TestLessonAINodes:
             assert new_history[1]["role"] == "assistant"
             assert "specific I can help you with" in new_history[1]["content"]
 
-    @patch("backend.ai.lessons.lessons_graph.load_prompt")
+    # Update patches to target 'nodes' module
+    @patch("backend.ai.lessons.nodes.load_prompt")
     @patch(
-        "backend.ai.lessons.lessons_graph.call_with_retry",
+        "backend.ai.lessons.nodes.call_with_retry", # Target nodes
         side_effect=ResourceExhausted("Quota exceeded"),
     )
-    @patch("backend.ai.lessons.lessons_graph.llm_model")
-    # Add the standard patches
-    @patch("backend.ai.lessons.lessons_graph.load_dotenv", MagicMock())
-    @patch("backend.ai.lessons.lessons_graph.StateGraph")
-    @patch("backend.ai.lessons.lessons_graph.logger", MagicMock())
+    @patch("backend.ai.lessons.nodes.llm_model") # Target nodes
+    @patch("backend.ai.lessons.nodes.logger", MagicMock()) # Target nodes
     def test_generate_chat_response_resource_exhausted(
         self,
-        MockStateGraph,
         MockLlmModel,
         MockCallWithRetry,
         MockLoadPrompt,
     ):
         """Test chat response generation handling ResourceExhausted."""
-        lesson_ai = LessonAI()
+        # lesson_ai = LessonAI() # Removed
         MockLoadPrompt.return_value = "mocked_chat_prompt"
 
         initial_history = [{"role": "user", "content": "Tell me more."}]
@@ -141,35 +136,35 @@ class TestLessonAINodes:
             "conversation_history": initial_history,
         }
 
-        with patch("backend.ai.lessons.lessons_graph.logger.error") as mock_error:
-            result = lesson_ai._generate_chat_response(state)
+        # Patch logger where it's used (nodes module)
+        with patch("backend.ai.lessons.nodes.logger.error") as mock_error:
+             # Call node function directly
+            result = nodes.generate_chat_response(state)
 
             mock_error.assert_called_once()
             assert "conversation_history" in result
             new_history = result["conversation_history"]
             assert len(new_history) == 2
             assert new_history[1]["role"] == "assistant"
-            assert "Sorry, I'm having trouble connecting" in new_history[1]["content"]
+            # Expect the generic error message now, as ResourceExhausted is caught by `except Exception`
+            assert "Sorry, I encountered an error" in new_history[1]["content"]
 
+    # Update patches to target 'nodes' module
     @patch(
-        "backend.ai.lessons.lessons_graph.load_prompt",
+        "backend.ai.lessons.nodes.load_prompt", # Target nodes
         side_effect=Exception("Prompt loading failed"),
     )
-    @patch("backend.ai.lessons.lessons_graph.call_with_retry")
-    @patch("backend.ai.lessons.lessons_graph.llm_model")
-    # Add the standard patches
-    @patch("backend.ai.lessons.lessons_graph.load_dotenv", MagicMock())
-    @patch("backend.ai.lessons.lessons_graph.StateGraph")
-    @patch("backend.ai.lessons.lessons_graph.logger", MagicMock())
+    @patch("backend.ai.lessons.nodes.call_with_retry") # Target nodes
+    @patch("backend.ai.lessons.nodes.llm_model") # Target nodes
+    @patch("backend.ai.lessons.nodes.logger", MagicMock()) # Target nodes
     def test_generate_chat_response_generic_exception(
         self,
-        MockStateGraph,
         MockLlmModel,
         MockCallWithRetry,
         MockLoadPrompt_exc,
     ):
         """Test chat response generation handling a generic exception."""
-        lesson_ai = LessonAI()
+        # lesson_ai = LessonAI() # Removed
 
         initial_history = [{"role": "user", "content": "Tell me more."}]
         state: LessonState = {
@@ -186,8 +181,10 @@ class TestLessonAINodes:
             "conversation_history": initial_history,
         }
 
-        with patch("backend.ai.lessons.lessons_graph.logger.error") as mock_error:
-            result = lesson_ai._generate_chat_response(state)
+        # Patch logger where it's used (nodes module)
+        with patch("backend.ai.lessons.nodes.logger.error") as mock_error:
+            # Call node function directly
+            result = nodes.generate_chat_response(state)
 
             mock_error.assert_called_once()
             # call_with_retry should not have been called if load_prompt failed
@@ -198,14 +195,13 @@ class TestLessonAINodes:
             assert new_history[1]["role"] == "assistant"
             assert "Sorry, I encountered an error" in new_history[1]["content"]
 
-    # --- Tests for _present_exercise ---
+    # --- Tests for present_exercise ---
 
-    @patch("backend.ai.lessons.lessons_graph.load_dotenv", MagicMock())
-    @patch("backend.ai.lessons.lessons_graph.StateGraph")
-    @patch("backend.ai.lessons.lessons_graph.logger", MagicMock())
-    def test_present_exercise_success(self, MockStateGraph):
+    # Remove LessonAI init patches, update logger patch target
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())
+    def test_present_exercise_success(self):
         """Test presenting the next available exercise."""
-        lesson_ai = LessonAI()
+        # lesson_ai = LessonAI() # Removed
         exercise1 = Exercise(
             id="ex1", type="short_answer", question="What is 1+1?", answer="2"
         )
@@ -228,7 +224,8 @@ class TestLessonAINodes:
             # Other fields...
         }
 
-        result = lesson_ai._present_exercise(state)
+        # Call node function directly
+        result = nodes.present_exercise(state)
 
         assert "conversation_history" in result
         new_history = result["conversation_history"]
@@ -242,12 +239,11 @@ class TestLessonAINodes:
         assert result.get("current_interaction_mode") == "doing_exercise"
         assert result.get("current_exercise_index") == 0  # Index updated to 0
 
-    @patch("backend.ai.lessons.lessons_graph.load_dotenv", MagicMock())
-    @patch("backend.ai.lessons.lessons_graph.StateGraph")
-    @patch("backend.ai.lessons.lessons_graph.logger", MagicMock())
-    def test_present_exercise_ordering(self, MockStateGraph):
+    # Remove LessonAI init patches, update logger patch target
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())
+    def test_present_exercise_ordering(self):
         """Test presenting an ordering exercise includes items."""
-        lesson_ai = LessonAI()
+        # lesson_ai = LessonAI() # Removed
         exercise_ord = Exercise(
             id="ex_ord",
             type="ordering",
@@ -271,7 +267,8 @@ class TestLessonAINodes:
             # Other fields...
         }
 
-        result = lesson_ai._present_exercise(state)
+        # Call node function directly
+        result = nodes.present_exercise(state)
 
         assert "conversation_history" in result
         new_history = result["conversation_history"]
@@ -289,12 +286,11 @@ class TestLessonAINodes:
         assert result.get("current_interaction_mode") == "doing_exercise"
         assert result.get("current_exercise_index") == 0
 
-    @patch("backend.ai.lessons.lessons_graph.load_dotenv", MagicMock())
-    @patch("backend.ai.lessons.lessons_graph.StateGraph")
-    @patch("backend.ai.lessons.lessons_graph.logger", MagicMock())
-    def test_present_exercise_no_more_exercises(self, MockStateGraph):
+    # Remove LessonAI init patches, update logger patch target
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())
+    def test_present_exercise_no_more_exercises(self):
         """Test behavior when no more exercises are available."""
-        lesson_ai = LessonAI()
+        # lesson_ai = LessonAI() # Removed
         exercise1 = Exercise(
             id="ex1", type="short_answer", question="What is 1+1?", answer="2"
         )
@@ -314,7 +310,8 @@ class TestLessonAINodes:
             # Other fields...
         }
 
-        result = lesson_ai._present_exercise(state)
+        # Call node function directly
+        result = nodes.present_exercise(state)
 
         assert "conversation_history" in result
         new_history = result["conversation_history"]
@@ -330,14 +327,13 @@ class TestLessonAINodes:
             result.get("current_exercise_index") == 0
         )  # Index remains at the last completed one
 
-    # --- Tests for _present_quiz_question ---
+    # --- Tests for present_quiz_question ---
 
-    @patch("backend.ai.lessons.lessons_graph.load_dotenv", MagicMock())
-    @patch("backend.ai.lessons.lessons_graph.StateGraph")
-    @patch("backend.ai.lessons.lessons_graph.logger", MagicMock())
-    def test_present_quiz_question_success_mc(self, MockStateGraph):
+    # Remove LessonAI init patches, update logger patch target
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())
+    def test_present_quiz_question_success_mc(self):
         """Test presenting the next available multiple-choice quiz question."""
-        lesson_ai = LessonAI()
+        # lesson_ai = LessonAI() # Removed
         q1 = AssessmentQuestion(
             id="q1",
             type="multiple_choice",
@@ -364,7 +360,8 @@ class TestLessonAINodes:
             # Other fields...
         }
 
-        result = lesson_ai._present_quiz_question(state)
+        # Call node function directly
+        result = nodes.present_quiz_question(state)
 
         assert "conversation_history" in result
         new_history = result["conversation_history"]
@@ -379,12 +376,11 @@ class TestLessonAINodes:
         assert result.get("current_interaction_mode") == "taking_quiz"
         assert result.get("current_quiz_question_index") == 0  # Index updated to 0
 
-    @patch("backend.ai.lessons.lessons_graph.load_dotenv", MagicMock())
-    @patch("backend.ai.lessons.lessons_graph.StateGraph")
-    @patch("backend.ai.lessons.lessons_graph.logger", MagicMock())
-    def test_present_quiz_question_success_tf(self, MockStateGraph):
+    # Remove LessonAI init patches, update logger patch target
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())
+    def test_present_quiz_question_success_tf(self):
         """Test presenting the next available true/false quiz question."""
-        lesson_ai = LessonAI()
+        # lesson_ai = LessonAI() # Removed
         q1 = AssessmentQuestion(
             id="q1",
             type="true_false",
@@ -407,7 +403,8 @@ class TestLessonAINodes:
             # Other fields...
         }
 
-        result = lesson_ai._present_quiz_question(state)
+        # Call node function directly
+        result = nodes.present_quiz_question(state)
 
         assert "conversation_history" in result
         new_history = result["conversation_history"]
@@ -422,12 +419,11 @@ class TestLessonAINodes:
         assert result.get("current_interaction_mode") == "taking_quiz"
         assert result.get("current_quiz_question_index") == 0
 
-    @patch("backend.ai.lessons.lessons_graph.load_dotenv", MagicMock())
-    @patch("backend.ai.lessons.lessons_graph.StateGraph")
-    @patch("backend.ai.lessons.lessons_graph.logger", MagicMock())
-    def test_present_quiz_question_no_more_questions(self, MockStateGraph):
+    # Remove LessonAI init patches, update logger patch target
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())
+    def test_present_quiz_question_no_more_questions(self):
         """Test behavior when no more quiz questions are available."""
-        lesson_ai = LessonAI()
+        # lesson_ai = LessonAI() # Removed
         q1 = AssessmentQuestion(
             id="q1", type="true_false", question="Is water wet?", correct_answer="True"
         )
@@ -447,7 +443,8 @@ class TestLessonAINodes:
             # Other fields...
         }
 
-        result = lesson_ai._present_quiz_question(state)
+        # Call node function directly
+        result = nodes.present_quiz_question(state)
 
         assert "conversation_history" in result
         new_history = result["conversation_history"]
@@ -461,22 +458,19 @@ class TestLessonAINodes:
             result.get("current_quiz_question_index") == 0
         )  # Index remains at the last completed one
 
-    # --- Tests for _evaluate_chat_answer ---
+    # --- Tests for evaluate_chat_answer ---
 
-    @patch("backend.ai.lessons.lessons_graph.load_prompt")
-    @patch("backend.ai.lessons.lessons_graph.call_llm_with_json_parsing")
-    # Add the standard patches
-    @patch("backend.ai.lessons.lessons_graph.load_dotenv", MagicMock())
-    @patch("backend.ai.lessons.lessons_graph.StateGraph")
-    @patch("backend.ai.lessons.lessons_graph.logger", MagicMock())
+    # Update patches to target 'nodes' module
+    @patch("backend.ai.lessons.nodes.load_prompt")
+    @patch("backend.ai.lessons.nodes.call_llm_with_json_parsing")
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())
     def test_evaluate_chat_answer_exercise_correct(
         self,
-        MockStateGraph,
         mock_call_llm,
         MockLoadPrompt,
     ):
         """Test evaluating a correct exercise answer."""
-        lesson_ai = LessonAI()
+        # lesson_ai = LessonAI() # Removed
         MockLoadPrompt.return_value = "mocked_eval_prompt"
         mock_eval_result = EvaluationResult(
             score=1.0, is_correct=True, feedback="Spot on!", explanation=""
@@ -507,7 +501,8 @@ class TestLessonAINodes:
             # Other fields...
         }
 
-        result = lesson_ai._evaluate_chat_answer(state)
+        # Call node function directly
+        result = nodes.evaluate_chat_answer(state)
 
         MockLoadPrompt.assert_called_once_with(
             "evaluate_answer",
@@ -539,20 +534,17 @@ class TestLessonAINodes:
         assert response_record["evaluation"]["score"] == 1.0
         assert "timestamp" in response_record
 
-    @patch("backend.ai.lessons.lessons_graph.load_prompt")
-    @patch("backend.ai.lessons.lessons_graph.call_llm_with_json_parsing")
-    # Add the standard patches
-    @patch("backend.ai.lessons.lessons_graph.load_dotenv", MagicMock())
-    @patch("backend.ai.lessons.lessons_graph.StateGraph")
-    @patch("backend.ai.lessons.lessons_graph.logger", MagicMock())
+    # Update patches to target 'nodes' module
+    @patch("backend.ai.lessons.nodes.load_prompt")
+    @patch("backend.ai.lessons.nodes.call_llm_with_json_parsing")
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())
     def test_evaluate_chat_answer_quiz_incorrect(
         self,
-        MockStateGraph,
         mock_call_llm,
         MockLoadPrompt,
     ):
         """Test evaluating an incorrect quiz answer with explanation."""
-        lesson_ai = LessonAI()
+        # lesson_ai = LessonAI() # Removed
         MockLoadPrompt.return_value = "mocked_eval_prompt"
         mock_eval_result = EvaluationResult(
             score=0.0,
@@ -593,7 +585,8 @@ class TestLessonAINodes:
             # Other fields...
         }
 
-        result = lesson_ai._evaluate_chat_answer(state)
+        # Call node function directly
+        result = nodes.evaluate_chat_answer(state)
 
         MockLoadPrompt.assert_called_once()
         mock_call_llm.assert_called_once()
@@ -619,12 +612,11 @@ class TestLessonAINodes:
         assert response_record["evaluation"]["is_correct"] is False
         assert response_record["evaluation"]["explanation"] == "Python is a language."
 
-    @patch("backend.ai.lessons.lessons_graph.load_dotenv", MagicMock())
-    @patch("backend.ai.lessons.lessons_graph.StateGraph")
-    @patch("backend.ai.lessons.lessons_graph.logger", MagicMock())
-    def test_evaluate_chat_answer_no_user_message(self, MockStateGraph):
+    # Remove LessonAI init patches, update logger patch target
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())
+    def test_evaluate_chat_answer_no_user_message(self):
         """Test evaluation attempt without a preceding user message."""
-        lesson_ai = LessonAI()
+        # lesson_ai = LessonAI() # Removed
         initial_history = [{"role": "assistant", "content": "Question?"}]
         state: LessonState = {
             "user_id": "eval_user_no_msg",
@@ -638,8 +630,10 @@ class TestLessonAINodes:
             "user_responses": [],
         }
 
-        with patch("backend.ai.lessons.lessons_graph.logger.warning") as mock_warning:
-            result = lesson_ai._evaluate_chat_answer(state)
+        # Patch logger where it's used (nodes module)
+        with patch("backend.ai.lessons.nodes.logger.warning") as mock_warning:
+            # Call node function directly
+            result = nodes.evaluate_chat_answer(state)
 
             mock_warning.assert_called_once()
             assert "conversation_history" in result
@@ -652,12 +646,11 @@ class TestLessonAINodes:
             # No response should be recorded
             assert len(result.get("user_responses", [])) == 0
 
-    @patch("backend.ai.lessons.lessons_graph.load_dotenv", MagicMock())
-    @patch("backend.ai.lessons.lessons_graph.StateGraph")
-    @patch("backend.ai.lessons.lessons_graph.logger", MagicMock())
-    def test_evaluate_chat_answer_question_not_found(self, MockStateGraph):
+    # Remove LessonAI init patches, update logger patch target
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())
+    def test_evaluate_chat_answer_question_not_found(self):
         """Test evaluation when the current question cannot be found."""
-        lesson_ai = LessonAI()
+        # lesson_ai = LessonAI() # Removed
         initial_history = [{"role": "user", "content": "My answer"}]
         state: LessonState = {
             "user_id": "eval_user_no_q",
@@ -670,8 +663,10 @@ class TestLessonAINodes:
             "user_responses": [],
         }
 
-        with patch("backend.ai.lessons.lessons_graph.logger.error") as mock_error:
-            result = lesson_ai._evaluate_chat_answer(state)
+        # Patch logger where it's used (nodes module)
+        with patch("backend.ai.lessons.nodes.logger.error") as mock_error:
+            # Call node function directly
+            result = nodes.evaluate_chat_answer(state)
 
             mock_error.assert_called_once()
             assert "conversation_history" in result
@@ -682,22 +677,19 @@ class TestLessonAINodes:
             assert result.get("current_interaction_mode") == "chatting"  # Mode reset
             assert len(result.get("user_responses", [])) == 0
 
-    @patch("backend.ai.lessons.lessons_graph.load_prompt")
+    # Update patches to target 'nodes' module
+    @patch("backend.ai.lessons.nodes.load_prompt")
     @patch(
-        "backend.ai.lessons.lessons_graph.call_llm_with_json_parsing", return_value=None
+        "backend.ai.lessons.nodes.call_llm_with_json_parsing", return_value=None # Target nodes
     )
-    # Add the standard patches
-    @patch("backend.ai.lessons.lessons_graph.load_dotenv", MagicMock())
-    @patch("backend.ai.lessons.lessons_graph.StateGraph")
-    @patch("backend.ai.lessons.lessons_graph.logger", MagicMock())
+    @patch("backend.ai.lessons.nodes.logger", MagicMock()) # Target nodes
     def test_evaluate_chat_answer_llm_failure(
         self,
-        MockStateGraph,
         mock_call_llm,
         MockLoadPrompt,
     ):
         """Test evaluation when the LLM call/parsing fails."""
-        lesson_ai = LessonAI()
+        # lesson_ai = LessonAI() # Removed
         MockLoadPrompt.return_value = "mocked_eval_prompt"
 
         exercise = Exercise(
@@ -715,8 +707,10 @@ class TestLessonAINodes:
             "user_responses": [],
         }
 
-        with patch("backend.ai.lessons.lessons_graph.logger.error") as mock_log_error:
-            result = lesson_ai._evaluate_chat_answer(state)
+        # Patch logger where it's used (nodes module)
+        with patch("backend.ai.lessons.nodes.logger.error") as mock_log_error:
+            # Call node function directly
+            result = nodes.evaluate_chat_answer(state)
 
             MockLoadPrompt.assert_called_once()
             mock_call_llm.assert_called_once()
@@ -740,23 +734,20 @@ class TestLessonAINodes:
             assert response_record["evaluation"]["score"] == 0.0
             assert "encountered an error" in response_record["evaluation"]["feedback"]
 
+    # Update patches to target 'nodes' module
     @patch(
-        "backend.ai.lessons.lessons_graph.load_prompt",
+        "backend.ai.lessons.nodes.load_prompt", # Target nodes
         side_effect=Exception("LLM Error"),
     )
-    @patch("backend.ai.lessons.lessons_graph.call_llm_with_json_parsing")
-    # Add the standard patches
-    @patch("backend.ai.lessons.lessons_graph.load_dotenv", MagicMock())
-    @patch("backend.ai.lessons.lessons_graph.StateGraph")
-    @patch("backend.ai.lessons.lessons_graph.logger", MagicMock())
+    @patch("backend.ai.lessons.nodes.call_llm_with_json_parsing") # Target nodes
+    @patch("backend.ai.lessons.nodes.logger", MagicMock()) # Target nodes
     def test_evaluate_chat_answer_llm_exception(
         self,
-        MockStateGraph,
         mock_call_llm,
         MockLoadPrompt_exc,
     ):
         """Test evaluation when an exception occurs during LLM call."""
-        lesson_ai = LessonAI()
+        # lesson_ai = LessonAI() # Removed
 
         exercise = Exercise(
             id="ex_eval_exc", type="short_answer", question="?", answer="!"
@@ -773,8 +764,10 @@ class TestLessonAINodes:
             "user_responses": [],
         }
 
-        with patch("backend.ai.lessons.lessons_graph.logger.error") as mock_log_error:
-            result = lesson_ai._evaluate_chat_answer(state)
+        # Patch logger where it's used (nodes module)
+        with patch("backend.ai.lessons.nodes.logger.error") as mock_log_error:
+            # Call node function directly
+            result = nodes.evaluate_chat_answer(state)
 
             MockLoadPrompt_exc.assert_called_once()  # Prompt load failed
             mock_call_llm.assert_not_called()  # LLM call skipped

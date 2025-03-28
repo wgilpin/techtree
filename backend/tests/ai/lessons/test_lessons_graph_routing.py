@@ -8,48 +8,49 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from backend.models import IntentClassificationResult, LessonState
-from backend.ai.lessons.lessons_graph import LessonAI
+# Import the nodes module instead of LessonAI for direct function calls
+from backend.ai.lessons import nodes
 
 
 class TestLessonAIRouting:
-    """Tests for the routing logic (_route_message_logic) in LessonAI."""
+    """Tests for the routing logic (nodes.route_message_logic)."""
 
-    @patch("backend.ai.lessons.lessons_graph.load_dotenv", MagicMock())
-    @patch("backend.ai.lessons.lessons_graph.StateGraph")
-    @patch("backend.ai.lessons.lessons_graph.logger", MagicMock())
+    # Remove LessonAI init patches, update logger patch target
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())
     @pytest.mark.parametrize("mode", ["doing_exercise", "taking_quiz"])
-    def test_route_message_logic_evaluation_mode(self, MockStateGraph, mode):
+    def test_route_message_logic_evaluation_mode(self, mode):
         """Test routing when mode requires evaluation."""
-        lesson_ai = LessonAI()  # Instantiation needed to access the method
+        # lesson_ai = LessonAI() # Removed
         state: LessonState = {
             "current_interaction_mode": mode,
             "conversation_history": [{"role": "user", "content": "My answer"}],
             # Other state fields...
         }
-        route = lesson_ai._route_message_logic(state)
+        # Call node function directly
+        route = nodes.route_message_logic(state)
         assert route == "evaluate_chat_answer"
 
-    @patch("backend.ai.lessons.lessons_graph.load_dotenv", MagicMock())
-    @patch("backend.ai.lessons.lessons_graph.StateGraph")
-    @patch("backend.ai.lessons.lessons_graph.logger", MagicMock())
-    def test_route_message_logic_chatting_no_user_message(self, MockStateGraph):
+    # Remove LessonAI init patches, update logger patch target
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())
+    def test_route_message_logic_chatting_no_user_message(self):
         """Test routing in chatting mode with no preceding user message."""
-        lesson_ai = LessonAI()
+        # lesson_ai = LessonAI() # Removed
         state: LessonState = {
             "current_interaction_mode": "chatting",
             "conversation_history": [{"role": "assistant", "content": "Hi there!"}],
             # Other state fields...
         }
-        with patch("backend.ai.lessons.lessons_graph.logger.warning") as mock_warning:
-            route = lesson_ai._route_message_logic(state)
+        # Patch logger where it's used (nodes module)
+        with patch("backend.ai.lessons.nodes.logger.warning") as mock_warning:
+            # Call node function directly
+            route = nodes.route_message_logic(state)
             assert route == "generate_chat_response"
             mock_warning.assert_called_once()
 
-    @patch("backend.ai.lessons.lessons_graph.load_prompt")
-    @patch("backend.ai.lessons.lessons_graph.call_llm_with_json_parsing")
-    @patch("backend.ai.lessons.lessons_graph.load_dotenv", MagicMock())
-    @patch("backend.ai.lessons.lessons_graph.StateGraph")
-    @patch("backend.ai.lessons.lessons_graph.logger", MagicMock())
+    # Update patches to target 'nodes' module
+    @patch("backend.ai.lessons.nodes.load_prompt")
+    @patch("backend.ai.lessons.nodes.call_llm_with_json_parsing")
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())
     @pytest.mark.parametrize(
         "intent, expected_route",
         [
@@ -60,11 +61,12 @@ class TestLessonAIRouting:
             ("unknown_intent", "generate_chat_response"),  # Test default for unknown
         ],
     )
+    # Removed MockStateGraph from parameters
     def test_route_message_logic_chatting_intent_classification(
-        self, MockStateGraph, mock_call_llm, MockLoadPrompt, intent, expected_route
+        self, mock_call_llm, MockLoadPrompt, intent, expected_route
     ):
         """Test routing based on LLM intent classification."""
-        lesson_ai = LessonAI()
+        # lesson_ai = LessonAI() # Removed
         MockLoadPrompt.return_value = "mocked_prompt"
         mock_call_llm.return_value = IntentClassificationResult(intent=intent)
 
@@ -78,7 +80,8 @@ class TestLessonAIRouting:
             # Other state fields...
         }
 
-        route = lesson_ai._route_message_logic(state)
+        # Call node function directly
+        route = nodes.route_message_logic(state)
 
         MockLoadPrompt.assert_called_once_with(
             "intent_classification",
@@ -94,22 +97,22 @@ class TestLessonAIRouting:
             # Reset mock for the second call check
             mock_call_llm.reset_mock()
             mock_call_llm.return_value = IntentClassificationResult(intent=intent)
+            # Patch logger warning where it's used (nodes module)
             with patch(
-                "backend.ai.lessons.lessons_graph.logger.warning"
+                "backend.ai.lessons.nodes.logger.warning"
             ) as mock_warning:
-                lesson_ai._route_message_logic(state)  # Call again to check warning
+                nodes.route_message_logic(state)  # Call again to check warning
                 mock_warning.assert_called_once()
 
-    @patch("backend.ai.lessons.lessons_graph.load_prompt")
-    @patch("backend.ai.lessons.lessons_graph.call_llm_with_json_parsing")
-    @patch("backend.ai.lessons.lessons_graph.load_dotenv", MagicMock())
-    @patch("backend.ai.lessons.lessons_graph.StateGraph")
-    @patch("backend.ai.lessons.lessons_graph.logger", MagicMock())
+    # Update patches to target 'nodes' module
+    @patch("backend.ai.lessons.nodes.load_prompt")
+    @patch("backend.ai.lessons.nodes.call_llm_with_json_parsing")
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())
     def test_route_message_logic_chatting_intent_failure(
-        self, MockStateGraph, mock_call_llm, MockLoadPrompt
+        self, mock_call_llm, MockLoadPrompt
     ):
         """Test routing default when intent classification fails."""
-        lesson_ai = LessonAI()
+        # lesson_ai = LessonAI() # Removed
         MockLoadPrompt.return_value = "mocked_prompt"
         mock_call_llm.return_value = None  # Simulate LLM/parsing failure
 
@@ -122,26 +125,27 @@ class TestLessonAIRouting:
             "user_id": "test_user",
             # Other state fields...
         }
-        with patch("backend.ai.lessons.lessons_graph.logger.warning") as mock_warning:
-            route = lesson_ai._route_message_logic(state)
+        # Patch logger where it's used (nodes module)
+        with patch("backend.ai.lessons.nodes.logger.warning") as mock_warning:
+            # Call node function directly
+            route = nodes.route_message_logic(state)
             assert route == "generate_chat_response"  # Default route
             mock_warning.assert_called_once()
 
+    # Update patches to target 'nodes' module
     @patch(
-        "backend.ai.lessons.lessons_graph.load_prompt",
+        "backend.ai.lessons.nodes.load_prompt", # Target nodes
         side_effect=Exception("LLM Error"),
     )
     @patch(
-        "backend.ai.lessons.lessons_graph.call_llm_with_json_parsing"
+        "backend.ai.lessons.nodes.call_llm_with_json_parsing" # Target nodes
     )  # Need to patch this even if not called
-    @patch("backend.ai.lessons.lessons_graph.load_dotenv", MagicMock())
-    @patch("backend.ai.lessons.lessons_graph.StateGraph")
-    @patch("backend.ai.lessons.lessons_graph.logger", MagicMock())
+    @patch("backend.ai.lessons.nodes.logger", MagicMock()) # Target nodes
     def test_route_message_logic_chatting_intent_exception(
-        self, MockStateGraph, mock_call_llm, MockLoadPrompt_exc
+        self, mock_call_llm, MockLoadPrompt_exc
     ):
         """Test routing default when an exception occurs during intent classification."""
-        lesson_ai = LessonAI()
+        # lesson_ai = LessonAI() # Removed
 
         state: LessonState = {
             "current_interaction_mode": "chatting",
@@ -152,25 +156,28 @@ class TestLessonAIRouting:
             "user_id": "test_user",
             # Other state fields...
         }
-        with patch("backend.ai.lessons.lessons_graph.logger.error") as mock_error:
-            route = lesson_ai._route_message_logic(state)
+        # Patch logger where it's used (nodes module)
+        with patch("backend.ai.lessons.nodes.logger.error") as mock_error:
+            # Call node function directly
+            route = nodes.route_message_logic(state)
             assert route == "generate_chat_response"  # Default route
             mock_error.assert_called_once()
             mock_call_llm.assert_not_called()  # Ensure LLM call was skipped
 
-    @patch("backend.ai.lessons.lessons_graph.load_dotenv", MagicMock())
-    @patch("backend.ai.lessons.lessons_graph.StateGraph")
-    @patch("backend.ai.lessons.lessons_graph.logger", MagicMock())
-    def test_route_message_logic_unexpected_mode(self, MockStateGraph):
+    # Remove LessonAI init patches, update logger patch target
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())
+    def test_route_message_logic_unexpected_mode(self):
         """Test routing default for an unexpected interaction mode."""
-        lesson_ai = LessonAI()
+        # lesson_ai = LessonAI() # Removed
         state: LessonState = {
             "current_interaction_mode": "unexpected_mode",
             "conversation_history": [{"role": "user", "content": "My answer"}],
             "user_id": "test_user",
             # Other state fields...
         }
-        with patch("backend.ai.lessons.lessons_graph.logger.warning") as mock_warning:
-            route = lesson_ai._route_message_logic(state)
+        # Patch logger where it's used (nodes module)
+        with patch("backend.ai.lessons.nodes.logger.warning") as mock_warning:
+            # Call node function directly
+            route = nodes.route_message_logic(state)
             assert route == "generate_chat_response"
             mock_warning.assert_called_once()

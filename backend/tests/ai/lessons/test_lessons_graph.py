@@ -108,28 +108,14 @@ class TestLessonAICore:
             "errors": [],
         }
 
-        with patch("backend.ai.lessons.lessons_graph.logger.warning") as mock_warning:
+        # Patch the logger where it's used (in the nodes module)
+        with patch("backend.ai.lessons.nodes.logger.warning") as mock_warning:
             final_state = lesson_ai.start_chat(initial_state)
             assert final_state == initial_state
             mock_warning.assert_called_once()  # Check warning was logged
 
-    # --- New tests for placeholders and process_chat_turn ---
-
-    def test_process_user_message_placeholder(self, mock_state_graph):
-        """Test the _process_user_message placeholder node."""
-        lesson_ai = LessonAI()
-        # This node doesn't really use the state currently
-        result = lesson_ai._process_user_message({})
-        # pylint: disable=use-implicit-booleaness-not-comparison
-        assert result == {}  # Placeholder returns empty dict
-
-    def test_update_progress_placeholder(self, mock_state_graph):
-        """Test the _update_progress placeholder node."""
-        lesson_ai = LessonAI()
-        # This node doesn't really use the state currently
-        result = lesson_ai._update_progress({})
-        # pylint: disable=use-implicit-booleaness-not-comparison
-        assert result == {}  # Placeholder returns empty dict
+    # --- Tests removed for _process_user_message and _update_progress placeholders ---
+    # These methods no longer exist on LessonAI after refactoring.
 
     def test_process_chat_turn_success(self, mock_state_graph):
         """Test the main process_chat_turn method."""
