@@ -42,9 +42,10 @@ class LessonAI:
         # Add nodes for the chat turn using functions from nodes.py
         workflow.add_node("process_user_message", nodes.process_user_message)
         workflow.add_node("generate_chat_response", nodes.generate_chat_response)
-        workflow.add_node("present_exercise", nodes.present_exercise)
-        workflow.add_node("present_quiz_question", nodes.present_quiz_question)
-        workflow.add_node("evaluate_chat_answer", nodes.evaluate_chat_answer)
+        # Add new generation nodes
+        workflow.add_node("generate_new_exercise", nodes.generate_new_exercise)
+        workflow.add_node("generate_new_assessment_question", nodes.generate_new_assessment_question)
+        workflow.add_node("evaluate_chat_answer", nodes.evaluate_chat_answer) # This function exists in nodes.py
         workflow.add_node(
             "update_progress", nodes.update_progress
         )  # Node to potentially save state
@@ -58,8 +59,8 @@ class LessonAI:
             nodes.route_message_logic,  # Use the imported routing function
             {
                 "generate_chat_response": "generate_chat_response",
-                "present_exercise": "present_exercise",
-                "present_quiz_question": "present_quiz_question",
+                "generate_new_exercise": "generate_new_exercise", # Updated route
+                "generate_new_assessment_question": "generate_new_assessment_question", # Updated route
                 # Route directly if mode requires evaluation
                 "evaluate_chat_answer": "evaluate_chat_answer",
             },
@@ -67,8 +68,8 @@ class LessonAI:
 
         # Edges leading to update_progress (and potentially loop or end)
         workflow.add_edge("generate_chat_response", "update_progress")
-        workflow.add_edge("present_exercise", "update_progress")
-        workflow.add_edge("present_quiz_question", "update_progress")
+        workflow.add_edge("generate_new_exercise", "update_progress") # Added edge for new node
+        workflow.add_edge("generate_new_assessment_question", "update_progress") # Added edge for new node
         workflow.add_edge("evaluate_chat_answer", "update_progress")
 
         # End the turn after updating progress

@@ -6,8 +6,9 @@ and operate on the LessonState.
 """
 
 import json
+import uuid # For generating fallback IDs
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, Tuple # Added Tuple
 
 from pydantic import ValidationError
 
@@ -141,9 +142,11 @@ def route_message_logic(state: LessonState) -> str:
 
                 # 3. Route Based on Intent
                 if intent == "request_exercise":
-                    return "present_exercise"
+                    logger.debug("Routing to generate_new_exercise")
+                    return "generate_new_exercise" # Route to the new generation node
                 elif intent == "request_quiz":
-                    return "present_quiz_question"
+                    logger.debug("Routing to generate_new_assessment_question")
+                    return "generate_new_assessment_question" # Route to the new generation node
                 elif intent == "ask_question" or intent == "other_chat":
                     return "generate_chat_response"
                 else:
@@ -251,186 +254,6 @@ def generate_chat_response(state: LessonState) -> Dict[str, Any]:
     return {"conversation_history": updated_history}
 
 
-def present_exercise(state: LessonState) -> Dict[str, Any]:
-    """
-    Presents the next exercise to the user via chat and updates state.
-    Corresponds to the _present_exercise node logic.
-    """
-    history: List[Dict[str, str]] = state.get("conversation_history", [])
-    user_id: str = state.get("user_id", "unknown_user")
-    generated_content: Optional[GeneratedLessonContent] = state.get("generated_content") # Directly get the object
-
-    # Validation is now handled in the service layer.
-    # Assume generated_content is a valid object or None.
-    if not isinstance(generated_content, GeneratedLessonContent) and generated_content is not None:
-         logger.error(f"present_exercise received unexpected type for generated_content: {type(generated_content)}")
-         generated_content = None # Treat as None if type is wrong
-    elif generated_content is None:
-         logger.warning("present_exercise received None for generated_content.")
-
-    exercises: List[Exercise] = (
-        generated_content.active_exercises if generated_content else []
-    )
-
-    # Get current index and increment
-    current_index: int = state.get("current_exercise_index", -1)
-    next_index: int = current_index + 1
-
-    logger.debug(
-        f"Presenting exercise for user {user_id}. "
-        f"Current index: {current_index}, attempting next: {next_index}"
-    )
-
-    if 0 <= next_index < len(exercises):
-        exercise: Exercise = exercises[next_index]
-        exercise_type: str = exercise.type
-        question_text: str = (
-            exercise.question
-            or exercise.instructions
-            or "No instructions provided."
-        )
-
-        # Format the message content
-        message_parts: List[str] = [
-            f"Alright, let's try exercise {next_index + 1}!",
-            f"**Type:** {exercise_type.replace('_', ' ').capitalize()}",
-            f"**Instructions:**\n{question_text}",
-        ]
-
-        # Add items for ordering exercises
-        if exercise_type == "ordering" and exercise.items:
-            items_list: str = "\n".join([f"- {item}" for item in exercise.items])
-            message_parts.append(f"\n**Items to order:**\n{items_list}")
-
-        message_parts.append("\nPlease provide your answer.")
-        ai_response_content: str = "\n\n".join(message_parts)
-
-        ai_message: Dict[str, str] = {
-            "role": "assistant",
-            "content": ai_response_content,
-        }
-        updated_history: List[Dict[str, str]] = history + [ai_message]
-
-        logger.info(f"Presented exercise {next_index} to user {user_id}")
-
-        return {
-            "conversation_history": updated_history,
-            "current_interaction_mode": "doing_exercise",
-            "current_exercise_index": next_index,  # Update index
-        }
-    else:
-        # No more exercises
-        logger.info(f"No more exercises available for user {user_id}")
-        ai_response_content = """
-            Great job, you've completed all the exercises for this lesson!
-            What would you like to do next? (e.g., ask questions, take the quiz)"""
-        ai_message = {"role": "assistant", "content": ai_response_content}
-        updated_history = history + [ai_message]
-
-        return {
-            "conversation_history": updated_history,
-            "current_interaction_mode": "chatting",
-            "current_exercise_index": current_index,  # Preserve the current index
-        }
-
-
-def present_quiz_question(state: LessonState) -> Dict[str, Any]:
-    """
-    Presents the next quiz question to the user via chat and updates state.
-    Corresponds to the _present_quiz_question node logic.
-    """
-    history: List[Dict[str, str]] = state.get("conversation_history", [])
-    user_id: str = state.get("user_id", "unknown_user")
-    generated_content: Optional[GeneratedLessonContent] = state.get("generated_content") # Directly get the object
-
-    # Validation is now handled in the service layer.
-    # Assume generated_content is a valid object or None.
-    if not isinstance(generated_content, GeneratedLessonContent) and generated_content is not None:
-         logger.error(f"present_quiz_question received unexpected type for generated_content: {type(generated_content)}")
-         generated_content = None # Treat as None if type is wrong
-    elif generated_content is None:
-         logger.warning("present_quiz_question received None for generated_content.")
-
-    questions: List[AssessmentQuestion] = (
-        generated_content.knowledge_assessment if generated_content else []
-    )
-
-    # Get current index and increment
-    current_index: int = state.get("current_quiz_question_index", -1)
-    next_index: int = current_index + 1
-
-    logger.debug(
-        f"Presenting quiz question for user {user_id}. "
-        f"Current index: {current_index}, attempting next: {next_index}"
-    )
-
-    if 0 <= next_index < len(questions):
-        question: AssessmentQuestion = questions[next_index]
-        question_type: str = question.type
-        question_text: str = question.question_text # Use renamed attribute
-
-        # Format options based on type
-        options_lines: List[str] = []
-        if question_type == "multiple_choice" and question.options:
-            # Ensure options is a list of Option objects
-            if isinstance(question.options, list) and all(isinstance(opt, Option) for opt in question.options):
-                options_lines = [
-                    f"- {opt.id}) {opt.text}" for opt in question.options
-                ]
-            else:
-                logger.warning(f"MC question {question.id} has unexpected options format: {question.options}")
-            # Add instruction for MC questions
-            options_lines.append(
-                "\nPlease respond with the letter/key of your chosen answer (e.g., 'A')."
-            )
-        elif question_type == "true_false":
-            options_lines = [
-                "- True",
-                "- False",
-                "\nPlease respond with 'True' or 'False'.",
-            ]
-
-        options_text: str = "\n".join(options_lines)
-
-        # Format the message content
-        message_parts: List[str] = [
-            f"Okay, here's quiz question {next_index + 1}:",
-            f"{question_text}",
-        ]
-        if options_text:
-            message_parts.append(f"\n{options_text}")
-
-        ai_response_content: str = "\n\n".join(message_parts)
-
-        ai_message: Dict[str, str] = {
-            "role": "assistant",
-            "content": ai_response_content,
-        }
-        updated_history: List[Dict[str, str]] = history + [ai_message]
-
-        logger.info(f"Presented quiz question {next_index} to user {user_id}")
-
-        return {
-            "conversation_history": updated_history,
-            "current_interaction_mode": "taking_quiz",
-            "current_quiz_question_index": next_index,  # Update index
-        }
-    else:
-        # No more quiz questions
-        logger.info(f"No more quiz questions available for user {user_id}")
-        # TODO: Calculate and present final score? (Handled by LessonService now)
-        ai_response_content = """
-            You've completed the quiz for this lesson! What would you like to do now?"""
-        ai_message = {"role": "assistant", "content": ai_response_content}
-        updated_history = history + [ai_message]
-
-        return {
-            "conversation_history": updated_history,
-            "current_interaction_mode": "chatting",  # Reset mode
-            "current_quiz_question_index": current_index,  # Preserve the current index
-        }
-
-
 def evaluate_chat_answer(state: LessonState) -> Dict[str, Any]:
     """
     Evaluates a user's answer provided in the chat using an LLM.
@@ -476,63 +299,48 @@ def evaluate_chat_answer(state: LessonState) -> Dict[str, Any]:
     question_type: Optional[str] = None
     question_index: int = -1
     question_id_str: str = "unknown"
+    current_exercise_id: Optional[str] = None
+    current_assessment_question_id: Optional[str] = None
 
-    # Identify the question being answered
-    logger.debug(f"Evaluate: generated_content type: {type(generated_content)}, value: {str(generated_content)[:200]}...") # DEBUG LINE 1
-    if generated_content:
-        logger.debug(f"Evaluate: Inside 'if generated_content'. Mode: {mode}") # DEBUG LINE 2
-        if mode == "doing_exercise":
-            question_type = "exercise"
-            question_index = state.get("current_exercise_index", -1)
-            logger.debug(f"Evaluate: Exercise index: {question_index}")
-            try:
-                exercises: List[Exercise] = generated_content.active_exercises
-                logger.debug(f"Evaluate: Found {len(exercises)} exercises.")
-                if 0 <= question_index < len(exercises):
-                    local_question = exercises[question_index] # Use temp variable
-                    local_question_id = local_question.id # Access id first
-                    question = local_question # Assign only after successful access
-                    question_id_str = local_question_id
-                    logger.debug(f"Evaluate: Successfully retrieved exercise: {question_id_str}")
-                else:
-                    logger.warning(f"Evaluate: Exercise index {question_index} out of bounds (len={len(exercises)})")
-            except AttributeError as e:
-                 logger.error(f"Evaluate: AttributeError accessing active_exercises or id: {e}", exc_info=True)
-            except IndexError as e: # Be specific about index errors
-                 logger.error(f"Evaluate: IndexError accessing exercise at index {question_index}: {e}", exc_info=True)
-            except Exception as e:
-                 logger.error(f"Evaluate: Unexpected error accessing exercise: {e}", exc_info=True)
-
-        elif mode == "taking_quiz":
-            question_type = "assessment"
-            question_index = state.get("current_quiz_question_index", -1)
-            logger.debug(f"Evaluate: Quiz index: {question_index}")
-            try:
-                questions: List[AssessmentQuestion] = generated_content.knowledge_assessment
-                logger.debug(f"Evaluate: Found {len(questions)} questions.")
-                if 0 <= question_index < len(questions):
-                    local_question = questions[question_index] # Use temp variable
-                    local_question_id = local_question.id # Access id first
-                    question = local_question # Assign only after successful access
-                    question_id_str = local_question_id
-                    logger.debug(f"Evaluate: Successfully retrieved question: {question_id_str}")
-                else:
-                    logger.warning(f"Evaluate: Quiz index {question_index} out of bounds (len={len(questions)})")
-            except AttributeError as e:
-                 logger.error(f"Evaluate: AttributeError accessing knowledge_assessment or id: {e}", exc_info=True)
-            except IndexError as e: # Be specific about index errors
-                 logger.error(f"Evaluate: IndexError accessing question at index {question_index}: {e}", exc_info=True)
-            except Exception as e:
-                 logger.error(f"Evaluate: Unexpected error accessing question: {e}", exc_info=True)
+    # Identify the question being answered using ID from state
+    if mode == "doing_exercise":
+        question_type = "exercise"
+        current_exercise_id = state.get("current_exercise_id")
+        if current_exercise_id:
+            logger.debug(f"Evaluate: Looking for exercise with ID: {current_exercise_id}")
+            generated_exercises: List[Exercise] = state.get("generated_exercises", [])
+            # Find the exercise by ID
+            question = next((ex for ex in generated_exercises if ex.id == current_exercise_id), None)
+            if question:
+                question_id_str = question.id
+                logger.debug(f"Evaluate: Found exercise by ID: {question_id_str}")
+            else:
+                 logger.warning(f"Evaluate: Exercise with ID {current_exercise_id} not found in state list.")
         else:
-             logger.warning(f"Evaluate: Unexpected mode '{mode}' when trying to find question.") # DEBUG LINE 15
+            logger.warning("Evaluate: Mode is 'doing_exercise' but 'current_exercise_id' is missing from state.")
+
+    elif mode == "taking_quiz":
+        question_type = "assessment"
+        current_assessment_question_id = state.get("current_assessment_question_id")
+        if current_assessment_question_id:
+            logger.debug(f"Evaluate: Looking for assessment question with ID: {current_assessment_question_id}")
+            generated_questions: List[AssessmentQuestion] = state.get("generated_assessment_questions", [])
+            # Find the question by ID
+            question = next((q for q in generated_questions if q.id == current_assessment_question_id), None)
+            if question:
+                question_id_str = question.id
+                logger.debug(f"Evaluate: Found assessment question by ID: {question_id_str}")
+            else:
+                logger.warning(f"Evaluate: Assessment question with ID {current_assessment_question_id} not found in state list.")
+        else:
+            logger.warning("Evaluate: Mode is 'taking_quiz' but 'current_assessment_question_id' is missing from state.")
     else:
-        logger.warning("Evaluate: generated_content was None or False.") # DEBUG LINE 16
+        logger.warning(f"Evaluate: Unexpected mode '{mode}' when trying to find question.")
 
     if question is None:
         logger.error(
-            "Could not find question for evaluation. "
-            f"Mode: {mode}, Index: {question_index}, User: {user_id}"
+            "Could not find question for evaluation using ID. "
+            f"Mode: {mode}, ExerciseID: {current_exercise_id}, QuestionID: {current_assessment_question_id}, User: {user_id}"
         )
         ai_message = {
             "role": "assistant",
@@ -683,6 +491,263 @@ def evaluate_chat_answer(state: LessonState) -> Dict[str, Any]:
         "current_interaction_mode": next_mode, # Default transition
         "user_responses": updated_user_responses,
     }
+
+
+async def generate_new_exercise(state: LessonState) -> Tuple[LessonState, Optional[Exercise]]:
+    """
+    Generates a new, unique exercise based on lesson context and presents it.
+    """
+    logger.info("Attempting to generate a new exercise.")
+    history: List[Dict[str, str]] = state.get("conversation_history", [])
+    user_id: str = state.get("user_id", "unknown_user")
+
+    # --- 1. Extract Context ---
+    topic: str = state.get("topic", "Unknown Topic")
+    lesson_title: str = state.get("lesson_title", "Unknown Lesson")
+    user_level: str = state.get("knowledge_level", "beginner")
+    syllabus: Optional[Dict] = state.get("syllabus") # For context
+    generated_content: Optional[GeneratedLessonContent] = state.get("generated_content")
+    existing_exercise_ids: List[str] = state.get("generated_exercise_ids", [])
+
+    # Basic validation
+    if not generated_content or not generated_content.exposition_content:
+        logger.error(f"Cannot generate exercise: Missing exposition content for user {user_id}.")
+        # Add error message to state? Or just return None?
+        state["error_message"] = "Sorry, I couldn't generate an exercise because the lesson content is missing."
+        # Return original state and None for the exercise
+        return state, None
+
+    # Create exposition summary (simple string for now)
+    exposition_summary = str(generated_content.exposition_content)[:1000] # Limit length
+
+    # Create syllabus context (simplified - maybe just module/lesson titles?)
+    syllabus_context = f"Module: {state.get('module_title', 'N/A')}, Lesson: {lesson_title}"
+    # TODO: Potentially add more syllabus context if needed by the prompt
+
+    # --- 2. Call LLM ---
+    new_exercise: Optional[Exercise] = None
+    try:
+        prompt = load_prompt(
+            "generate_exercises", # Use the new prompt file name
+            topic=topic,
+            lesson_title=lesson_title,
+            user_level=user_level,
+            exposition_summary=exposition_summary,
+            syllabus_context=syllabus_context,
+            existing_exercise_descriptions_json=json.dumps(existing_exercise_ids) # Pass existing IDs
+        )
+
+        # Use call_llm_with_json_parsing to get a validated Exercise object
+        # Making this async as call_llm_with_json_parsing might be async
+        new_exercise = await call_llm_with_json_parsing(
+            prompt, validation_model=Exercise, max_retries=2 # Allow fewer retries for generation
+        )
+
+    except Exception as e:
+        logger.error(f"LLM call/parsing failed during exercise generation: {e}", exc_info=True)
+        # Fall through, new_exercise will be None
+
+    # --- 3. Process Result & Update State ---
+    if new_exercise and isinstance(new_exercise, Exercise):
+        # Ensure the exercise has an ID
+        if not new_exercise.id:
+            new_exercise.id = f"ex_{uuid.uuid4().hex[:6]}" # Generate a fallback ID
+            logger.warning(f"Generated exercise lacked ID, assigned fallback: {new_exercise.id}")
+
+        # Check if ID already exists (LLM might ignore novelty constraint)
+        if new_exercise.id in existing_exercise_ids:
+            logger.warning(f"LLM generated an exercise with a duplicate ID ({new_exercise.id}). Discarding.")
+            # Add message indicating failure to generate a *new* one
+            ai_message = {
+                "role": "assistant",
+                "content": "Sorry, I couldn't come up with a new exercise right now. Would you like to try again or ask something else?"
+            }
+            state["conversation_history"] = history + [ai_message]
+            state["current_interaction_mode"] = "chatting"
+            return state, None # Return original state and None exercise
+
+        logger.info(f"Successfully generated new exercise with ID: {new_exercise.id}")
+
+        # Update state lists
+        updated_exercises = state.get("generated_exercises", []) + [new_exercise]
+        updated_exercise_ids = existing_exercise_ids + [new_exercise.id]
+
+        # Format presentation message
+        exercise_type: str = new_exercise.type
+        question_text: str = (
+            new_exercise.question
+            or new_exercise.instructions
+            or "No instructions provided."
+        )
+        message_parts: List[str] = [
+            f"Okay, here's a new exercise for you!",
+            f"**Type:** {exercise_type.replace('_', ' ').capitalize()}",
+            f"**Instructions:**\n{question_text}",
+        ]
+        # Add items for ordering exercises
+        if exercise_type == "ordering" and new_exercise.items:
+            items_list: str = "\n".join([f"- {item}" for item in new_exercise.items])
+            message_parts.append(f"\n**Items to order:**\n{items_list}")
+        # Add options for multiple choice
+        elif exercise_type == "multiple_choice" and new_exercise.options:
+             options_str = "\n".join([f"- {opt.id}) {opt.text}" for opt in new_exercise.options])
+             message_parts.append(f"\n**Options:**\n{options_str}")
+             message_parts.append("\nPlease respond with the letter/key of your chosen answer (e.g., 'A').")
+        else:
+             message_parts.append("\nPlease provide your answer.")
+
+        ai_response_content: str = "\n\n".join(message_parts)
+        ai_message: Dict[str, str] = {
+            "role": "assistant",
+            "content": ai_response_content,
+        }
+
+        # Update state dictionary
+        state["generated_exercises"] = updated_exercises
+        state["generated_exercise_ids"] = updated_exercise_ids
+        state["conversation_history"] = history + [ai_message]
+        state["current_interaction_mode"] = "doing_exercise"
+        # We need a way to track *which* exercise is being answered now.
+        # Let's add a temporary field, maybe 'current_exercise_id'?
+        state["current_exercise_id"] = new_exercise.id # Track the ID of the presented exercise
+        state["error_message"] = None # Clear any previous error
+
+        return state, new_exercise
+
+    else:
+        # Handle LLM failure or invalid JSON
+        logger.error(f"Failed to generate or validate a new exercise for user {user_id}.")
+        ai_message = {
+            "role": "assistant",
+            "content": "Sorry, I wasn't able to generate an exercise right now. Please try again later or ask me a question."
+        }
+        state["conversation_history"] = history + [ai_message]
+        state["current_interaction_mode"] = "chatting"
+        state["error_message"] = "Failed to generate exercise." # Store error state
+
+        return state, None # Return original state and None exercise
+
+
+async def generate_new_assessment_question(state: LessonState) -> Tuple[LessonState, Optional[AssessmentQuestion]]:
+    """
+    Generates a new, unique assessment question based on lesson context and presents it.
+    """
+    logger.info("Attempting to generate a new assessment question.")
+    history: List[Dict[str, str]] = state.get("conversation_history", [])
+    user_id: str = state.get("user_id", "unknown_user")
+
+    # --- 1. Extract Context ---
+    topic: str = state.get("topic", "Unknown Topic")
+    lesson_title: str = state.get("lesson_title", "Unknown Lesson")
+    user_level: str = state.get("knowledge_level", "beginner")
+    syllabus: Optional[Dict] = state.get("syllabus")
+    generated_content: Optional[GeneratedLessonContent] = state.get("generated_content")
+    existing_question_ids: List[str] = state.get("generated_assessment_question_ids", [])
+
+    # Basic validation
+    if not generated_content or not generated_content.exposition_content:
+        logger.error(f"Cannot generate assessment question: Missing exposition content for user {user_id}.")
+        state["error_message"] = "Sorry, I couldn't generate a question because the lesson content is missing."
+        return state, None
+
+    exposition_summary = str(generated_content.exposition_content)[:1000]
+    syllabus_context = f"Module: {state.get('module_title', 'N/A')}, Lesson: {lesson_title}"
+    # TODO: Add more syllabus context if needed
+
+    # --- 2. Call LLM ---
+    new_question: Optional[AssessmentQuestion] = None
+    try:
+        prompt = load_prompt(
+            "generate_assessment", # Use the assessment prompt
+            topic=topic,
+            lesson_title=lesson_title,
+            user_level=user_level,
+            exposition_summary=exposition_summary,
+            syllabus_context=syllabus_context,
+            existing_question_descriptions_json=json.dumps(existing_question_ids) # Pass existing IDs
+        )
+
+        # Use call_llm_with_json_parsing for validation
+        # Making this async as call_llm_with_json_parsing might be async
+        new_question = await call_llm_with_json_parsing(
+            prompt, validation_model=AssessmentQuestion, max_retries=2
+        )
+
+    except Exception as e:
+        logger.error(f"LLM call/parsing failed during assessment question generation: {e}", exc_info=True)
+
+    # --- 3. Process Result & Update State ---
+    if new_question and isinstance(new_question, AssessmentQuestion):
+        if not new_question.id:
+            new_question.id = f"quiz_{uuid.uuid4().hex[:6]}"
+            logger.warning(f"Generated assessment question lacked ID, assigned fallback: {new_question.id}")
+
+        if new_question.id in existing_question_ids:
+            logger.warning(f"LLM generated an assessment question with a duplicate ID ({new_question.id}). Discarding.")
+            ai_message = {
+                "role": "assistant",
+                "content": "Sorry, I couldn't come up with a new assessment question right now. Would you like to try again or ask something else?"
+            }
+            state["conversation_history"] = history + [ai_message]
+            state["current_interaction_mode"] = "chatting"
+            return state, None
+
+        logger.info(f"Successfully generated new assessment question with ID: {new_question.id}")
+
+        # Update state lists
+        updated_questions = state.get("generated_assessment_questions", []) + [new_question]
+        updated_question_ids = existing_question_ids + [new_question.id]
+
+        # Format presentation message
+        question_type: str = new_question.type
+        question_text: str = new_question.question_text
+        message_parts: List[str] = [
+            f"Okay, here's an assessment question for you:",
+            f"{question_text}",
+        ]
+        options_lines: List[str] = []
+        if question_type == "multiple_choice" and new_question.options:
+            options_lines = [f"- {opt.id}) {opt.text}" for opt in new_question.options]
+            options_lines.append("\nPlease respond with the letter/key of your chosen answer (e.g., 'A').")
+        elif question_type == "true_false":
+            options_lines = ["- True", "- False", "\nPlease respond with 'True' or 'False'."]
+
+        if options_lines:
+             options_text: str = "\n".join(options_lines)
+             message_parts.append(f"\n{options_text}")
+        else: # Short answer
+             message_parts.append("\nPlease provide your answer.")
+
+
+        ai_response_content: str = "\n\n".join(message_parts)
+        ai_message: Dict[str, str] = {
+            "role": "assistant",
+            "content": ai_response_content,
+        }
+
+        # Update state dictionary
+        state["generated_assessment_questions"] = updated_questions
+        state["generated_assessment_question_ids"] = updated_question_ids
+        state["conversation_history"] = history + [ai_message]
+        state["current_interaction_mode"] = "taking_quiz"
+        # Add field to track current question ID
+        state["current_assessment_question_id"] = new_question.id
+        state["error_message"] = None
+
+        return state, new_question
+
+    else:
+        # Handle LLM failure or invalid JSON
+        logger.error(f"Failed to generate or validate a new assessment question for user {user_id}.")
+        ai_message = {
+            "role": "assistant",
+            "content": "Sorry, I wasn't able to generate an assessment question right now. Please try again later or ask me a question."
+        }
+        state["conversation_history"] = history + [ai_message]
+        state["current_interaction_mode"] = "chatting"
+        state["error_message"] = "Failed to generate assessment question."
+
+        return state, None
 
 
 def update_progress(state: LessonState) -> Dict[str, Any]:

@@ -9,7 +9,8 @@ from pydantic import BaseModel
 
 from backend.dependencies import get_current_user, get_db
 from backend.logger import logger
-from backend.models import User, GeneratedLessonContent # Import GeneratedLessonContent
+# Add Exercise and AssessmentQuestion to imports
+from backend.models import User, GeneratedLessonContent, Exercise, AssessmentQuestion
 from backend.routers.syllabus_router import get_syllabus_service
 from backend.services.lesson_service import LessonService
 from backend.services.sqlite_db import SQLiteDatabaseService
@@ -66,6 +67,16 @@ class LessonDataResponse(BaseModel):
     content: Optional[GeneratedLessonContent]  # Use the specific Pydantic model
     lesson_state: Optional[Dict[str, Any]]  # Conversational state (Keep as dict for now)
     is_new: bool
+
+
+# Add response models for new endpoints
+class ExerciseResponse(BaseModel):
+    exercise: Optional[Exercise]
+    error: Optional[str] = None
+
+class AssessmentQuestionResponse(BaseModel):
+    question: Optional[AssessmentQuestion]
+    error: Optional[str] = None
 
 
 # Existing models (ensure they are still here or adjust if needed)
@@ -247,6 +258,111 @@ async def handle_chat_message(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing chat message: {str(e)}",
+        ) from e
+
+
+# Add new POST endpoint for generating exercises
+@router.post(
+    "/exercise/{syllabus_id}/{module_index}/{lesson_index}", response_model=ExerciseResponse
+)
+async def generate_exercise(
+    syllabus_id: str,
+    module_index: int,
+    lesson_index: int,
+    current_user: User = Depends(get_current_user),  # Require authentication
+    lesson_service: LessonService = Depends(get_lesson_service),
+):
+    """
+    Generates a new exercise for the specified lesson on demand.
+    """
+    if not current_user or current_user.user_id == "no-auth":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required to generate exercises.",
+        )
+
+    logger.info(
+        "Entering generate_exercise for syllabus: "
+        f"{syllabus_id}, mod: {module_index}, "
+        f"lesson: {lesson_index}, user: {current_user.user_id}"
+    )
+
+    try:
+        new_exercise = await lesson_service.generate_exercise_for_lesson(
+            user_id=current_user.user_id,
+            syllabus_id=syllabus_id,
+            module_index=module_index,
+            lesson_index=lesson_index,
+        )
+        if new_exercise:
+            return ExerciseResponse(exercise=new_exercise)
+        else:
+            # If service returns None, it means generation failed gracefully
+            return ExerciseResponse(exercise=None, error="Failed to generate a new exercise.")
+
+    except ValueError as e: # Catch errors like "Lesson state not found"
+        logger.error(f"Value error in generate_exercise: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except RuntimeError as e: # Catch errors from generation itself
+         logger.error(f"Runtime error in generate_exercise: {e}", exc_info=True)
+         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+    except Exception as e:
+        logger.error(f"Unexpected error in generate_exercise: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error generating exercise: {str(e)}",
+        ) from e
+
+
+# Add new POST endpoint for generating assessment questions
+@router.post(
+    "/assessment/{syllabus_id}/{module_index}/{lesson_index}", response_model=AssessmentQuestionResponse
+)
+async def generate_assessment_question(
+    syllabus_id: str,
+    module_index: int,
+    lesson_index: int,
+    current_user: User = Depends(get_current_user),  # Require authentication
+    lesson_service: LessonService = Depends(get_lesson_service),
+):
+    """
+    Generates a new assessment question for the specified lesson on demand.
+    """
+    if not current_user or current_user.user_id == "no-auth":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required to generate assessment questions.",
+        )
+
+    logger.info(
+        "Entering generate_assessment_question for syllabus: "
+        f"{syllabus_id}, mod: {module_index}, "
+        f"lesson: {lesson_index}, user: {current_user.user_id}"
+    )
+
+    try:
+        new_question = await lesson_service.generate_assessment_question_for_lesson(
+            user_id=current_user.user_id,
+            syllabus_id=syllabus_id,
+            module_index=module_index,
+            lesson_index=lesson_index,
+        )
+        if new_question:
+            return AssessmentQuestionResponse(question=new_question)
+        else:
+            return AssessmentQuestionResponse(question=None, error="Failed to generate a new assessment question.")
+
+    except ValueError as e:
+        logger.error(f"Value error in generate_assessment_question: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except RuntimeError as e:
+         logger.error(f"Runtime error in generate_assessment_question: {e}", exc_info=True)
+         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+    except Exception as e:
+        logger.error(f"Unexpected error in generate_assessment_question: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error generating assessment question: {str(e)}",
         ) from e
 
 

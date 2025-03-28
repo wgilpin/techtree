@@ -23,25 +23,7 @@ You are the content generation engine for The Tech Tree, an adaptive learning pl
 - Avoid questions that would be better covered in one of the other sections of the syllabus
 - Include 1-2 thought-provoking questions throughout the exposition to maintain engagement
 
-### 2. Active Learning Exercises
-- Generate 3-5 interactive exercises that test understanding, not memorization
-- Include at least one scenario-based problem
-- For technical topics, include application-focused exercises
-- Create exercises with varying difficulty levels
-- For each exercise, provide:
-  * Clear instructions
-  * Expected solution format
-  * Hints (progressive if possible)
-  * Detailed explanation for correct answers
-  * Common misconception corrections for likely wrong answers
-
-### 3. Knowledge Assessment
-- Create a brief assessment (2-3 questions) covering key concepts
-- Design questions to identify specific knowledge gaps
-- Include confidence check (how confident is the user in their understanding)
-- Provide adaptive feedback based on response patterns
-
-### 4. Metadata
+### 2. Metadata
 - Generate tags for this lesson content to aid in search and categorization
 - Estimate difficulty level of the content (1-5 scale)
 - Suggest related topics for further exploration
@@ -58,6 +40,4 @@ You are the content generation engine for The Tech Tree, an adaptive learning pl
 Return a structured JSON object with the following sections:
 - exposition_content
 - thought_questions
-- active_exercises (array)
-- knowledge_assessment (array)
 - metadata

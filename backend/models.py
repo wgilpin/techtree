@@ -76,8 +76,6 @@ class GeneratedLessonContent(BaseModel):
     # but ideally the LLM should always provide it.
     exposition_content: Optional[Union[str, ExpositionContent, Dict[str, Any]]] = None
     # thought_questions: List[str] # This seems to be part of exposition now based on ExpositionContentItem
-    active_exercises: List[Exercise] = Field(default_factory=list) # Use default_factory for lists
-    knowledge_assessment: List[AssessmentQuestion] = Field(default_factory=list) # Use default_factory for lists
     metadata: Optional[Metadata] = None # Make metadata optional initially
 
 # --- LLM Interaction Models ---
@@ -114,5 +112,10 @@ class LessonState(TypedDict):
     current_interaction_mode: str  # e.g., 'chatting', 'doing_exercise', 'taking_quiz'
     current_exercise_index: Optional[int]
     current_quiz_question_index: Optional[int]
+    # Fields for on-demand generated items
+    generated_exercises: Optional[List[Exercise]]
+    generated_assessment_questions: Optional[List[AssessmentQuestion]]
+    generated_exercise_ids: Optional[List[str]] # To track generated items and prevent repeats
+    generated_assessment_question_ids: Optional[List[str]] # To track generated items and prevent repeats
     # Potentially add fields for error handling or feedback messages
     error_message: Optional[str] = None

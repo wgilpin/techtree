@@ -13,7 +13,8 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
 
 from backend.main import app
-from backend.models import User
+# Import Exercise and AssessmentQuestion for response validation
+from backend.models import User, GeneratedLessonContent, Exercise, AssessmentQuestion
 from backend.services.lesson_service import LessonService
 from backend.dependencies import get_current_user  # Import the dependency function
 # Import the dependency getter function we need to override
@@ -65,6 +66,10 @@ def mock_lesson_service():
     mock_service.get_lesson_by_id = AsyncMock()
     mock_service.evaluate_exercise = AsyncMock()
     mock_service.update_lesson_progress = AsyncMock()
+    # Add mocks for the new service methods
+    mock_service.generate_exercise_for_lesson = AsyncMock()
+    mock_service.generate_assessment_question_for_lesson = AsyncMock()
+
 
     # Define the override function
     def override_get_lesson_service():
@@ -94,7 +99,7 @@ def test_get_lesson_data_success(mock_lesson_service):
     syllabus_id = "syllabus1"
     module_index = 0
     lesson_index = 1
-    # Define mock_content matching the GeneratedLessonContent structure
+    # Define mock_content matching the Updated GeneratedLessonContent structure
     mock_content = {
         "topic": None, # Assuming topic/level might be None if not set
         "level": None,
@@ -109,8 +114,8 @@ def test_get_lesson_data_success(mock_lesson_service):
                 }
             ]
         },
-        "active_exercises": [], # Default empty list
-        "knowledge_assessment": [], # Default empty list
+        # "active_exercises": [], # Removed
+        # "knowledge_assessment": [], # Removed
         "metadata": { # Match Metadata structure
             "title": "Test Lesson",
             "tags": None,
@@ -286,3 +291,169 @@ def test_handle_chat_message_state_not_found(mock_lesson_service):
     )  # Based on router's exception handling for ValueError
     assert "Lesson state not found" in response.json()["detail"]
     print("test_handle_chat_message_state_not_found finished")  # Debug print
+
+# --- Tests for POST /exercise/{syllabus_id}/{module_index}/{lesson_index} ---
+
+def test_generate_exercise_success(mock_lesson_service):
+    """Test successfully generating an exercise."""
+    print("Running test_generate_exercise_success")
+    # Arrange
+    syllabus_id = "syllabus1"
+    module_index = 0
+    lesson_index = 1
+    mock_exercise = Exercise(id="ex_gen_1", type="short_answer", instructions="Generated Q")
+    mock_lesson_service.generate_exercise_for_lesson.return_value = mock_exercise
+
+    # Act
+    response = client.post(f"/lesson/exercise/{syllabus_id}/{module_index}/{lesson_index}")
+
+    # Assert
+    assert response.status_code == 200
+    data = response.json()
+    assert data["error"] is None
+    assert data["exercise"]["id"] == "ex_gen_1"
+    assert data["exercise"]["instructions"] == "Generated Q"
+    mock_lesson_service.generate_exercise_for_lesson.assert_awaited_once_with(
+        user_id="test_user_id",
+        syllabus_id=syllabus_id,
+        module_index=module_index,
+        lesson_index=lesson_index,
+    )
+    print("test_generate_exercise_success finished")
+
+def test_generate_exercise_unauthenticated():
+    """Test generating exercise without authentication."""
+    print("Running test_generate_exercise_unauthenticated")
+    # Arrange
+    app.dependency_overrides[get_current_user] = lambda: None # Simulate no user
+    syllabus_id = "syllabus1"
+    module_index = 0
+    lesson_index = 1
+
+    # Act
+    response = client.post(f"/lesson/exercise/{syllabus_id}/{module_index}/{lesson_index}")
+
+    # Assert
+    assert response.status_code == 401
+    assert "Authentication required" in response.json()["detail"]
+
+    # Clean up override
+    app.dependency_overrides = {}
+    print("test_generate_exercise_unauthenticated finished")
+
+def test_generate_exercise_not_found(mock_lesson_service):
+    """Test generating exercise when lesson state is not found."""
+    print("Running test_generate_exercise_not_found")
+    # Arrange
+    syllabus_id = "syllabus_bad"
+    module_index = 99
+    lesson_index = 99
+    mock_lesson_service.generate_exercise_for_lesson.side_effect = ValueError("Lesson state not found")
+
+    # Act
+    response = client.post(f"/lesson/exercise/{syllabus_id}/{module_index}/{lesson_index}")
+
+    # Assert
+    assert response.status_code == 404
+    assert "Lesson state not found" in response.json()["detail"]
+    print("test_generate_exercise_not_found finished")
+
+def test_generate_exercise_runtime_error(mock_lesson_service):
+    """Test generating exercise when the service raises a runtime error."""
+    print("Running test_generate_exercise_runtime_error")
+    # Arrange
+    syllabus_id = "syllabus1"
+    module_index = 0
+    lesson_index = 1
+    mock_lesson_service.generate_exercise_for_lesson.side_effect = RuntimeError("LLM generation failed")
+
+    # Act
+    response = client.post(f"/lesson/exercise/{syllabus_id}/{module_index}/{lesson_index}")
+
+    # Assert
+    assert response.status_code == 500
+    assert "LLM generation failed" in response.json()["detail"]
+    print("test_generate_exercise_runtime_error finished")
+
+# --- Tests for POST /assessment/{syllabus_id}/{module_index}/{lesson_index} ---
+
+def test_generate_assessment_question_success(mock_lesson_service):
+    """Test successfully generating an assessment question."""
+    print("Running test_generate_assessment_question_success")
+    # Arrange
+    syllabus_id = "syllabus1"
+    module_index = 0
+    lesson_index = 1
+    mock_question = AssessmentQuestion(id="q_gen_1", type="true_false", question_text="Generated Q?")
+    mock_lesson_service.generate_assessment_question_for_lesson.return_value = mock_question
+
+    # Act
+    response = client.post(f"/lesson/assessment/{syllabus_id}/{module_index}/{lesson_index}")
+
+    # Assert
+    assert response.status_code == 200
+    data = response.json()
+    assert data["error"] is None
+    assert data["question"]["id"] == "q_gen_1"
+    assert data["question"]["question_text"] == "Generated Q?"
+    mock_lesson_service.generate_assessment_question_for_lesson.assert_awaited_once_with(
+        user_id="test_user_id",
+        syllabus_id=syllabus_id,
+        module_index=module_index,
+        lesson_index=lesson_index,
+    )
+    print("test_generate_assessment_question_success finished")
+
+def test_generate_assessment_question_unauthenticated():
+    """Test generating assessment question without authentication."""
+    print("Running test_generate_assessment_question_unauthenticated")
+    # Arrange
+    app.dependency_overrides[get_current_user] = lambda: None # Simulate no user
+    syllabus_id = "syllabus1"
+    module_index = 0
+    lesson_index = 1
+
+    # Act
+    response = client.post(f"/lesson/assessment/{syllabus_id}/{module_index}/{lesson_index}")
+
+    # Assert
+    assert response.status_code == 401
+    assert "Authentication required" in response.json()["detail"]
+
+    # Clean up override
+    app.dependency_overrides = {}
+    print("test_generate_assessment_question_unauthenticated finished")
+
+def test_generate_assessment_question_not_found(mock_lesson_service):
+    """Test generating assessment question when lesson state is not found."""
+    print("Running test_generate_assessment_question_not_found")
+    # Arrange
+    syllabus_id = "syllabus_bad"
+    module_index = 99
+    lesson_index = 99
+    mock_lesson_service.generate_assessment_question_for_lesson.side_effect = ValueError("Lesson state not found")
+
+    # Act
+    response = client.post(f"/lesson/assessment/{syllabus_id}/{module_index}/{lesson_index}")
+
+    # Assert
+    assert response.status_code == 404
+    assert "Lesson state not found" in response.json()["detail"]
+    print("test_generate_assessment_question_not_found finished")
+
+def test_generate_assessment_question_runtime_error(mock_lesson_service):
+    """Test generating assessment question when the service raises a runtime error."""
+    print("Running test_generate_assessment_question_runtime_error")
+    # Arrange
+    syllabus_id = "syllabus1"
+    module_index = 0
+    lesson_index = 1
+    mock_lesson_service.generate_assessment_question_for_lesson.side_effect = RuntimeError("LLM generation failed")
+
+    # Act
+    response = client.post(f"/lesson/assessment/{syllabus_id}/{module_index}/{lesson_index}")
+
+    # Assert
+    assert response.status_code == 500
+    assert "LLM generation failed" in response.json()["detail"]
+    print("test_generate_assessment_question_runtime_error finished")

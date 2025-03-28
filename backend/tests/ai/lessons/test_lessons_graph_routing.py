@@ -54,8 +54,8 @@ class TestLessonAIRouting:
     @pytest.mark.parametrize(
         "intent, expected_route",
         [
-            ("request_exercise", "present_exercise"),
-            ("request_quiz", "present_quiz_question"),
+            ("request_exercise", "generate_new_exercise"), # Updated expected route
+            ("request_quiz", "generate_new_assessment_question"), # Updated expected route
             ("ask_question", "generate_chat_response"),
             ("other_chat", "generate_chat_response"),
             ("unknown_intent", "generate_chat_response"),  # Test default for unknown

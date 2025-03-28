@@ -1,0 +1,9 @@
+When generating Python code, please apply these functional programming principles where practical:
+
+Pure Functions: Ensure functions avoid side effects and their output depends only on explicit inputs.
+Immutability: Avoid in-place modification of data structures; create and return new data structures with changes.
+Declarative Style: Prefer list comprehensions, generator expressions, map, filter, functools.reduce over explicit loops.
+Higher-Order Functions: Leverage passing functions as arguments or returning functions if it aids abstraction.
+Side Effect Isolation: Keep I/O or state modifications separate from core logic functions.
+
+After making changes, run the tests using pytest and if tests fail, fix the issues until the test pass.

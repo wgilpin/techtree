@@ -68,9 +68,24 @@
                     <div id="chat-thinking-indicator" style="display: none;">
                          <span class="spinner"></span> Thinking...
                     </div>
+                    {# Add buttons for on-demand generation #}
+                    <div class="on-demand-buttons" style="margin-top: 1em; display: flex; gap: 10px;">
+                        <button id="generate-exercise-btn" type="button" class="nav-button">Generate Exercise</button>
+                        <button id="generate-assessment-btn" type="button" class="nav-button">Generate Assessment Question</button>
+                    </div>
                 </form>
             </div>
             {# --- END Chat Interface Section --- #}
+
+            {# --- Placeholder for Dynamic Exercises --- #}
+            <div id="dynamic-exercises" class="content-section dynamic-content">
+                {# Exercises will be inserted here by JavaScript #}
+            </div>
+
+            {# --- Placeholder for Dynamic Assessment Questions --- #}
+            <div id="dynamic-assessment" class="content-section dynamic-content">
+                {# Assessment questions will be inserted here by JavaScript #}
+            </div>
 
             {# Remove old exercises and summary sections #}
 
@@ -104,6 +119,16 @@ document.addEventListener('DOMContentLoaded', function() {
     const messageInput = document.getElementById('chat-message-input');
     const chatHistory = document.getElementById('chat-history');
     const thinkingIndicator = document.getElementById('chat-thinking-indicator');
+    const generateExerciseBtn = document.getElementById('generate-exercise-btn');
+    const generateAssessmentBtn = document.getElementById('generate-assessment-btn');
+    const dynamicExercisesDiv = document.getElementById('dynamic-exercises');
+    const dynamicAssessmentDiv = document.getElementById('dynamic-assessment');
+    // Add a loading indicator specific to on-demand generation
+    const onDemandThinkingIndicator = document.createElement('div');
+    onDemandThinkingIndicator.innerHTML = '<span class="spinner"></span> Generating...';
+    onDemandThinkingIndicator.style.display = 'none';
+    onDemandThinkingIndicator.style.marginLeft = '10px';
+
 
     // --- Helper Functions ---
     function appendMessage(role, content) {
@@ -140,6 +165,71 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    // Helper to render an exercise
+    function renderExercise(exercise) {
+        const exerciseContainer = document.createElement('div');
+        exerciseContainer.classList.add('exercise-item', 'content-section'); // Add classes for styling
+        exerciseContainer.id = `exercise-${exercise.id}`; // Add unique ID
+
+        let contentHTML = `<h3>Exercise (${exercise.type.replace('_', ' ')})</h3>`;
+        contentHTML += `<p><strong>Instructions:</strong> ${exercise.instructions || exercise.question || 'N/A'}</p>`;
+
+        if (exercise.type === 'multiple_choice' && exercise.options) {
+            contentHTML += '<ul>';
+            exercise.options.forEach(opt => {
+                contentHTML += `<li><strong>${opt.id})</strong> ${opt.text}</li>`;
+            });
+            contentHTML += '</ul>';
+            contentHTML += '<p><small><em>Submit your answer (e.g., "A") in the chat below.</em></small></p>';
+        } else if (exercise.type === 'ordering' && exercise.items) {
+             contentHTML += '<p><strong>Items to order:</strong></p><ul>';
+             exercise.items.forEach(item => {
+                 contentHTML += `<li>${item}</li>`;
+             });
+             contentHTML += '</ul>';
+             contentHTML += '<p><small><em>Submit your ordered list (e.g., "Item B, Item A, Item C") in the chat below.</em></small></p>';
+        } else {
+             contentHTML += '<p><small><em>Submit your answer in the chat below.</em></small></p>';
+        }
+
+        // Optionally add hints if needed later
+        // if (exercise.hints && exercise.hints.length > 0) { ... }
+
+        exerciseContainer.innerHTML = contentHTML;
+        dynamicExercisesDiv.appendChild(exerciseContainer);
+        exerciseContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+     // Helper to render an assessment question
+    function renderAssessmentQuestion(question) {
+        const questionContainer = document.createElement('div');
+        questionContainer.classList.add('assessment-item', 'content-section');
+        questionContainer.id = `assessment-${question.id}`;
+
+        let contentHTML = `<h3>Assessment Question (${question.type.replace('_', ' ')})</h3>`;
+        contentHTML += `<p>${question.question_text || 'N/A'}</p>`;
+
+        if ((question.type === 'multiple_choice' || question.type === 'true_false') && question.options) {
+            contentHTML += '<ul>';
+            question.options.forEach(opt => {
+                contentHTML += `<li><strong>${opt.id})</strong> ${opt.text}</li>`;
+            });
+            contentHTML += '</ul>';
+             if (question.type === 'multiple_choice') {
+                 contentHTML += '<p><small><em>Submit your answer (e.g., "A") in the chat below.</em></small></p>';
+             } else { // true_false
+                 contentHTML += '<p><small><em>Submit your answer ("True" or "False") in the chat below.</em></small></p>';
+             }
+        } else { // short_answer
+             contentHTML += '<p><small><em>Submit your answer in the chat below.</em></small></p>';
+        }
+
+        questionContainer.innerHTML = contentHTML;
+        dynamicAssessmentDiv.appendChild(questionContainer);
+        questionContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+
     // --- Event Listener for Form Submission ---
     if (chatForm) {
         chatForm.addEventListener('submit', async function(event) {
@@ -164,10 +254,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 // --- Get necessary IDs/indices ---
                 // These should be passed from the Flask template into the JS context
                 const syllabusId = "{{ syllabus_id }}";
-                const moduleIndex = parseInt("{{ lesson_data.module_index }}");
-                const lessonIndex = parseInt("{{ lesson_data.lesson_index }}");
+                const moduleIndex = parseInt("{{ lesson_data.module_index if lesson_data else '-1' }}");
+                const lessonIndex = parseInt("{{ lesson_data.lesson_index if lesson_data else '-1' }}");
 
-                if (isNaN(moduleIndex) || isNaN(lessonIndex) || !syllabusId) {
+
+                if (isNaN(moduleIndex) || moduleIndex < 0 || isNaN(lessonIndex) || lessonIndex < 0 || !syllabusId) {
                      console.error("Missing necessary lesson identifiers in template:", {syllabusId, moduleIndex, lessonIndex});
                      throw new Error("Missing necessary lesson identifiers.");
                 }
@@ -226,6 +317,80 @@ document.addEventListener('DOMContentLoaded', function() {
                 messageInput.focus(); // Set focus back to input
                 scrollChatToBottom(); // Scroll again after adding AI response
             }
+        });
+    }
+
+    // --- Event Listeners for On-Demand Buttons ---
+    async function handleGenerateClick(button, url, renderFunction, placeholderDiv) {
+        button.disabled = true;
+        // Insert thinking indicator next to the button that was clicked
+        button.parentNode.insertBefore(onDemandThinkingIndicator, button.nextSibling);
+        onDemandThinkingIndicator.style.display = 'inline-block';
+
+        try {
+            const syllabusId = "{{ syllabus_id }}";
+            // Ensure lesson_data exists before accessing its properties
+            const moduleIndex = parseInt("{{ lesson_data.module_index if lesson_data else '-1' }}");
+            const lessonIndex = parseInt("{{ lesson_data.lesson_index if lesson_data else '-1' }}");
+
+            if (isNaN(moduleIndex) || moduleIndex < 0 || isNaN(lessonIndex) || lessonIndex < 0 || !syllabusId) {
+                 console.error("Missing necessary lesson identifiers for on-demand generation.");
+                 throw new Error("Missing necessary lesson identifiers.");
+            }
+
+            const fullUrl = `/lesson${url}/${syllabusId}/${moduleIndex}/${lessonIndex}`; // Construct full URL
+
+            const response = await fetch(fullUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                // No body needed for these POST requests
+            });
+
+            if (!response.ok) {
+                let errorMsg = `Error: ${response.statusText}`;
+                try {
+                    const errorData = await response.json();
+                    errorMsg = errorData.detail || errorData.error || errorMsg;
+                } catch (e) { /* Ignore */ }
+                throw new Error(errorMsg);
+            }
+
+            const result = await response.json();
+
+            if (result.error) {
+                appendMessage('assistant', `Error generating item: ${result.error}`);
+            } else if (result.exercise) {
+                renderExercise(result.exercise);
+                // Optionally add a message to chat confirming generation
+                appendMessage('assistant', 'Generated a new exercise for you! See below and respond in the chat.');
+            } else if (result.question) {
+                renderAssessmentQuestion(result.question);
+                appendMessage('assistant', 'Generated a new assessment question for you! See below and respond in the chat.');
+            } else {
+                 appendMessage('assistant', 'Sorry, could not generate the item.');
+            }
+
+        } catch (error) {
+            console.error('Error generating on-demand item:', error);
+            appendMessage('assistant', `Sorry, an error occurred: ${error.message}.`);
+        } finally {
+            button.disabled = false;
+            onDemandThinkingIndicator.remove(); // Remove indicator
+            scrollChatToBottom(); // Scroll chat in case error messages were added
+        }
+    }
+
+    if (generateExerciseBtn) {
+        generateExerciseBtn.addEventListener('click', () => {
+            // Pass the placeholder div for the indicator
+            handleGenerateClick(generateExerciseBtn, '/exercise', renderExercise, dynamicExercisesDiv);
+        });
+    }
+
+    if (generateAssessmentBtn) {
+        generateAssessmentBtn.addEventListener('click', () => {
+             // Pass the placeholder div for the indicator
+             handleGenerateClick(generateAssessmentBtn, '/assessment', renderAssessmentQuestion, dynamicAssessmentDiv);
         });
     }
 
