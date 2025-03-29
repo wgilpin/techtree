@@ -43,7 +43,7 @@ class LessonExpositionService:
 
     async def _generate_and_save_exposition(
         self,
-        syllabus: Dict,
+        syllabus: Dict, # Expects dict matching SyllabusResponse structure
         lesson_title: str,
         knowledge_level: str,
         syllabus_id: str,
@@ -55,7 +55,7 @@ class LessonExpositionService:
         and returns the validated content object along with the lesson's database ID.
 
         Args:
-            syllabus: The syllabus dictionary.
+            syllabus: The syllabus dictionary (matching SyllabusResponse).
             lesson_title: The title of the lesson.
             knowledge_level: The target knowledge level.
             syllabus_id: The ID of the syllabus.
@@ -79,10 +79,12 @@ class LessonExpositionService:
         response_text: str
         try:
             # Load and format the prompt
+            # Use syllabus topic directly from the syllabus dict
             prompt = load_prompt(
                 "generate_lesson_content",  # Assuming this prompt generates only exposition
                 topic=syllabus.get("topic", "Unknown Topic"),
-                syllabus_json=json.dumps(syllabus, indent=2),
+                # Pass the modules part of the syllabus for context
+                syllabus_json=json.dumps({"modules": syllabus.get("modules", [])}, indent=2),
                 lesson_name=lesson_title,
                 user_level=knowledge_level,
                 previous_performance_json=json.dumps(previous_performance, indent=2),
@@ -199,10 +201,10 @@ class LessonExpositionService:
                 )
                 # Try to get the lesson_db_id associated with this content
                 try:
-                    lesson_details = await self.syllabus_service.get_lesson_details(
+                    # Use get_lesson_id which directly returns the PK
+                    retrieved_id = self.db_service.get_lesson_id(
                         syllabus_id, module_index, lesson_index
                     )
-                    retrieved_id = lesson_details.get("lesson_id")
                     if isinstance(retrieved_id, int):
                         lesson_db_id = retrieved_id
                         logger.debug(
@@ -213,14 +215,10 @@ class LessonExpositionService:
                             "Content found, but failed to look up valid "
                             f"lesson_id via indices. Retrieved: {retrieved_id}"
                         )
-                except ValueError as e:
-                    logger.error(
-                        f"Content found, but error looking up lesson_id via indices: {e}"
-                    )
                 except Exception as e:
                     logger.error(
-                        f"Unexpected error during index lookup for lesson_id: {e}",
-                        exc_info=True,
+                        f"Content found, but error looking up lesson_id via indices: {e}",
+                        exc_info=True
                     )
 
             except ValidationError as ve:
@@ -235,7 +233,8 @@ class LessonExpositionService:
             # Ensure topic and level are populated if missing (e.g., from older data)
             if not existing_content_obj.topic or not existing_content_obj.level:
                 try:
-                    syllabus = await self.syllabus_service.get_syllabus(syllabus_id)
+                    # Use the correct method to get syllabus details by ID
+                    syllabus = await self.syllabus_service.get_syllabus_by_id(syllabus_id) # CORRECTED
                     if syllabus:
                         if not existing_content_obj.topic:
                             existing_content_obj.topic = syllabus.get(
@@ -257,15 +256,18 @@ class LessonExpositionService:
             "Existing lesson exposition not found, invalid, or missing ID. Generating new content."
         )
         try:
-            syllabus = await self.syllabus_service.get_syllabus(syllabus_id)
+            # Use the correct method to get syllabus details by ID
+            syllabus = await self.syllabus_service.get_syllabus_by_id(syllabus_id) # CORRECTED
             if not syllabus:
                 logger.error(f"Syllabus not found for generation: {syllabus_id}")
                 raise ValueError(f"Syllabus {syllabus_id} not found.")
 
+            # get_lesson_details requires syllabus_id, module_index, lesson_index
             lesson_details = await self.syllabus_service.get_lesson_details(
                 syllabus_id, module_index, lesson_index
             )
             lesson_title = lesson_details.get("title", "Unknown Lesson")
+            # Syllabus dict from get_syllabus_by_id has level at top level
             knowledge_level = syllabus.get("level", "beginner")
 
         except ValueError as e:
@@ -279,7 +281,7 @@ class LessonExpositionService:
         try:
             generated_content_obj, new_lesson_db_id = (
                 await self._generate_and_save_exposition(
-                    syllabus=syllabus,
+                    syllabus=syllabus, # Pass the fetched syllabus dict
                     lesson_title=lesson_title,
                     knowledge_level=knowledge_level,
                     syllabus_id=syllabus_id,
@@ -312,9 +314,10 @@ class LessonExpositionService:
         logger.debug(f"Attempting to fetch lesson content for lesson_id: {lesson_id}")
         # TODO: Verify/add self.db_service.get_lesson_content_by_id(lesson_id)
         # Assuming it exists for now and returns a dict similar to get_lesson_content
-        content_data_dict = self.db_service.get_lesson_content_by_id(
+        # Need a method in db_service: get_lesson_content_by_lesson_pk(lesson_id)
+        content_data_dict = self.db_service.get_lesson_content_by_lesson_pk(
             lesson_id
-        )  # Hypothetical method
+        )  # ASSUMING this method exists or needs creation
 
         if not content_data_dict:
             logger.warning(f"No lesson content found for lesson_id: {lesson_id}")

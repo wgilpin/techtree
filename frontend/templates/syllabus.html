@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}{{ topic }} Syllabus - TechTree{% endblock %}
+{% block title %}{{ syllabus.topic if syllabus else 'Syllabus' }} Syllabus - TechTree{% endblock %}
 
 {% block content %}
 <div class="syllabus-container">
@@ -13,45 +13,44 @@
     {% else %}
         <div class="syllabus-header">
             <div class="syllabus-title">
-                <h1>{{ syllabus['content']['topic'] }}</h1>
-                <span class="level-badge">{{ syllabus['content']['level'] }}</span>
+                {# Access topic and level directly from syllabus #}
+                <h1>{{ syllabus['topic'] }}</h1>
+                <span class="level-badge">{{ syllabus['level'] }}</span>
             </div>
-            <div class="syllabus-meta">
-                <div class="meta-item">
-                    <span class="meta-label">Duration:</span>
-                    <span class="meta-value">{{ syllabus['content']['duration'] }}</span>
-                </div>
-            </div>
-            <div class="syllabus-description">
-                <h2>Learning Objectives</h2>
-                <ul class="objectives-list">
-                    {% for objective in syllabus['content']['learning_objectives'] %}
-                        <li>{{ objective }}</li>
-                    {% endfor %}
-                </ul>
-            </div>
+            {# Removed duration and learning objectives as they are not in the current SyllabusResponse #}
         </div>
 
         <div class="modules-container">
-            {% for module in syllabus['content']['modules'] %}
+            {# Access modules directly from syllabus #}
+            {% for module in syllabus['modules'] %}
+                {# Capture the outer loop index (module index) #}
+                {% set module_index = loop.index0 %}
                 <div class="module-card">
-                    <!-- Debug: {{ module }} -->
+                    <!-- Debug: Module ID: {{ module.module_id }}, Title: {{ module.title }}, Index: {{ module_index }} -->
                     <div class="module-header">
                         <h2>Module {{ loop.index }}: {{ module['title'] }}</h2>
                     </div>
 
                     <div class="lessons-list">
-                        {% for lesson in module['lessons'] %}
-                            <div class="lesson-item">
-                                <div class="lesson-info">
-                                    <span class="lesson-number">Lesson {{ loop.index }}</span>
-                                    <h3 class="lesson-title">{{ lesson['title'] }}</h3>
+                        {# Access lessons from module['content']['lessons'] #}
+                        {% if module.content and module.content.lessons %}
+                            {% for lesson in module['content']['lessons'] %}
+                                <div class="lesson-item">
+                                    <div class="lesson-info">
+                                        <span class="lesson-number">Lesson {{ loop.index }}</span>
+                                        <h3 class="lesson-title">{{ lesson['title'] }}</h3>
+                                        {# Optionally display lesson summary if available #}
+                                        {# <p class="lesson-summary">{{ lesson.summary }}</p> #}
+                                    </div>
+                                    {# Link uses captured module_index and inner loop index (lesson index) #}
+                                    <a href="{{ url_for('lessons.lesson', syllabus_id=syllabus['syllabus_id'], module=module_index, lesson_id=loop.index0) }}" class="lesson-button">
+                                        Start Lesson
+                                    </a>
                                 </div>
-                                <a href="{{ url_for('lessons.lesson', syllabus_id=syllabus['syllabus_id'], module=loop.index0, lesson_id=loop.index0) }}" class="lesson-button">
-                                    Start Lesson
-                                </a>
-                            </div>
-                        {% endfor %}
+                            {% endfor %}
+                        {% else %}
+                             <p>No lessons found in this module's content.</p>
+                        {% endif %}
                     </div>
                 </div>
             {% endfor %}
@@ -66,9 +65,11 @@
     document.addEventListener('DOMContentLoaded', function() {
         const loadingState = document.querySelector('.loading-state');
         if (loadingState) {
+            // Only reload if we are actually showing the loading state
+            console.log("In loading state, setting timeout to reload.");
             setTimeout(function() {
                 window.location.reload();
-            }, 5000);
+            }, 7000); // Increased timeout slightly
         }
     });
 </script>

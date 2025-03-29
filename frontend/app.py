@@ -63,7 +63,6 @@ logger.info(f"Backend API URL set to: {app.config['API_URL']}")
 
 # Authentication decorator moved to frontend.auth.auth
 
-
 # --- Core App Routes ---
 
 
@@ -101,25 +100,46 @@ def dashboard():
     Fetches in-progress courses from the backend API and displays them.
     Requires the user to be logged in.
     """
+    courses_list = [] # Default to empty list
     try:
-        # Get in-progress courses
-        api_url = current_app.config["API_URL"]  # Get URL from app config
+        api_url = current_app.config["API_URL"]
         headers = {"Authorization": f"Bearer {session['user']['access_token']}"}
         response = requests.get(
             f"{api_url}/progress/courses", headers=headers, timeout=30
         )
+        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
 
-        if response.ok:
-            courses = response.json()
-            return render_template(
-                "dashboard.html", user=session["user"], courses=courses
-            )
-        flash("Failed to load courses. Please try again later.")
-        return render_template("dashboard.html", user=session["user"], courses=[])
-    except requests.RequestException as e:
-        logger.error(f"Dashboard error: {str(e)}")
-        flash(f"Error: {str(e)}")
-        return render_template("dashboard.html", user=session["user"], courses=[])
+        response_data = response.json()
+        # Extract the list of courses from the 'courses' key
+        courses_list = response_data.get("courses", [])
+
+    except requests.exceptions.HTTPError as http_err:
+        # Handle specific HTTP errors (like 401 Unauthorized, 500 Internal Server Error)
+        error_detail = "Failed to load courses."
+        try:
+            # Try to get a more specific error message from the backend response
+            error_json = http_err.response.json()
+            error_detail = error_json.get("detail", error_detail)
+        except (ValueError, AttributeError):
+             # If response is not JSON or doesn't have 'detail'
+             error_detail = f"{error_detail} Status: {http_err.response.status_code}"
+        logger.error(f"Dashboard HTTP error fetching courses: {error_detail}")
+        flash(error_detail, "error")
+
+    except requests.exceptions.RequestException as req_err:
+        # Handle other request errors (connection, timeout, etc.)
+        logger.error(f"Dashboard request error fetching courses: {req_err}", exc_info=True)
+        flash(f"Error communicating with the server: {req_err}", "error")
+
+    except Exception as e:
+        # Catch any other unexpected errors
+        logger.exception(f"Unexpected error on dashboard: {e}")
+        flash("An unexpected error occurred while loading the dashboard.", "error")
+
+    # Always render the template, passing the (potentially empty) courses_list
+    return render_template(
+        "dashboard.html", user=session["user"], courses=courses_list
+    )
 
 
 # Onboarding routes moved to frontend.onboarding.onboarding blueprint

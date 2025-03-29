@@ -66,7 +66,7 @@ async def generate_syllabus(
     request_body: SyllabusRequest,
     # db_service removed - assuming SyllabusService handles its DB dependency
     syllabus_service: SyllabusService = Depends(get_syllabus_service),
-    # current_user: User = Depends(get_current_user) # Uncomment if auth is needed
+    current_user: User = Depends(get_current_user) # Ensure user is authenticated
 ):
     """
     Generates a new syllabus based on the topic and level.
@@ -78,7 +78,7 @@ async def generate_syllabus(
         extra={
             "topic": request_body.topic,
             "level": request_body.level,
-            "user_id": request_body.user_id,
+            "user_id": current_user.user_id, # Use authenticated user ID
         },
     )
     try:
@@ -86,7 +86,7 @@ async def generate_syllabus(
         syllabus_data = await syllabus_service.get_or_generate_syllabus(
             topic=request_body.topic,
             level=request_body.level,
-            user_id=request_body.user_id,
+            user_id=current_user.user_id, # Pass authenticated user ID
         )
 
         # Ideally, syllabus_service returns a Pydantic model or raises specific
@@ -134,14 +134,16 @@ async def get_syllabus_by_id(
     syllabus_id: str,
     # db_service removed
     syllabus_service: SyllabusService = Depends(get_syllabus_service),
-    # current_user: User = Depends(get_current_user) # Uncomment if auth needed
+    current_user: User = Depends(get_current_user) # Ensure user is authenticated
 ):
     """
     Retrieves a specific syllabus by its unique ID.
     """
-    logger.info(f"Retrieving syllabus with ID: {syllabus_id}")
+    logger.info(f"Retrieving syllabus with ID: {syllabus_id} for user: {current_user.user_id}")
     try:
         # Await the service call assuming it might involve I/O
+        # Note: get_syllabus_by_id in service doesn't currently use user_id,
+        # but keeping current_user dependency for consistency/future use.
         syllabus_data = await syllabus_service.get_syllabus_by_id(syllabus_id)
 
         if syllabus_data is None:
@@ -160,6 +162,57 @@ async def get_syllabus_by_id(
     except Exception as e: # Catch unexpected errors
         logger.error(
             f"Unexpected error retrieving syllabus {syllabus_id}: {e}", exc_info=True
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal server error occurred while retrieving the syllabus.",
+        ) from e
+
+# --- NEW ROUTE ---
+@router.get(
+    "/topic/{topic}/level/{level}",
+    response_model=SyllabusResponse, # Assuming we return the full syllabus
+    summary="Get syllabus by topic and level",
+    description="Retrieves a specific syllabus by its topic and level, considering the logged-in user.",
+    responses={
+        status.HTTP_404_NOT_FOUND: {"description": "Syllabus not found for this topic/level"},
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+    }
+)
+async def get_syllabus_by_topic_level(
+    topic: str,
+    level: str,
+    syllabus_service: SyllabusService = Depends(get_syllabus_service),
+    current_user: User = Depends(get_current_user) # UNCOMMENTED: Ensure user is authenticated
+):
+    """
+    Retrieves a specific syllabus by its topic and level for the current user.
+    """
+    logger.info(f"Retrieving syllabus for topic: {topic}, level: {level}, user: {current_user.user_id}")
+    try:
+        # Pass the authenticated user's ID to the service method
+        syllabus_data = await syllabus_service.get_syllabus_by_topic_level(
+            topic=topic,
+            level=level,
+            user_id=current_user.user_id # ADDED: Pass user_id
+        )
+
+        if syllabus_data is None:
+            logger.warning(f"Syllabus not found for topic '{topic}', level '{level}', user '{current_user.user_id}'.")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Syllabus not found for topic '{topic}', level '{level}'.",
+            )
+
+        # Validate and return the syllabus data
+        return SyllabusResponse(**syllabus_data)
+
+    except HTTPException as http_exc:
+        raise http_exc
+    except Exception as e:
+        logger.error(
+            f"Unexpected error retrieving syllabus for topic {topic}, level {level}, user {current_user.user_id}: {e}",
+            exc_info=True
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
