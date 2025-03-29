@@ -60,7 +60,7 @@ def login():
         try:
             api_url = current_app.config['API_URL']
             response = requests.post(
-                f"{api_url}/auth/login", # Use config value
+                f"{api_url}/auth/token", # CORRECTED: Changed /login to /token
                 data={"username": email, "password": password},
                 timeout=30,
             )
@@ -78,7 +78,13 @@ def login():
                 # If in another blueprint, use 'blueprint_name.dashboard'.
                 return redirect(url_for("dashboard"))
             else:
-                error = "Invalid credentials. Please try again."
+                # Try to get more specific error from backend if available
+                try:
+                    detail = response.json().get("detail", "Invalid credentials.")
+                    error = f"Login failed: {detail}"
+                except requests.exceptions.JSONDecodeError:
+                    error = f"Login failed: Status {response.status_code}"
+
         except requests.RequestException as e:
             logger.error(f"Login error: {str(e)}")
             error = f"Login error: {str(e)}"
