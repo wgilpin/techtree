@@ -1,7 +1,5 @@
 """fastApi router for authentication"""
 
-import os
-import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -45,7 +43,7 @@ async def register_user(
     user_data: UserCreate,
     # Use get_db_service for dependency injection
     db_service: SQLiteDatabaseService = Depends(get_db_service)
-):
+) -> Token:
     """
     Registers a new user.
     Hashes the password and stores the user in the database.
@@ -86,7 +84,7 @@ async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(),
     # Use get_db_service for dependency injection
     db_service: SQLiteDatabaseService = Depends(get_db_service)
-):
+) -> Token:
     """
     Authenticates a user using email (username) and password.
     Returns an access token upon successful authentication.
@@ -118,7 +116,7 @@ async def login_for_access_token(
 
 
 @router.get("/users/me", response_model=UserResponse)
-async def read_users_me(current_user: User = Depends(get_current_user)):
+async def read_users_me(current_user: User = Depends(get_current_user)) -> UserResponse:
     """
     Returns the information for the currently authenticated user.
     """

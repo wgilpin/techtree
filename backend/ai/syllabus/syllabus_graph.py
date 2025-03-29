@@ -6,8 +6,11 @@ import copy
 import uuid
 import traceback
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Optional, cast, Any, Union # Added cast, Any, Union
+from backend.ai.syllabus.state import SyllabusState
+
 from functools import partial
+import logging # Added logging
 
 from langgraph.graph import StateGraph
 
@@ -19,6 +22,9 @@ from .config import (
     MODEL as llm_model,
     TAVILY as tavily_client,
 )  # Import configured clients
+
+# Add logger
+logger = logging.getLogger(__name__)
 
 
 class SyllabusAI:
@@ -82,15 +88,17 @@ class SyllabusAI:
 
     def initialize(
         self, topic: str, knowledge_level: str, user_id: Optional[str] = None
-    ) -> Dict:
+    ) -> Dict[str, Optional[str]]: # Revert: Returns a status dict, not the full state
         """Initializes the internal state for a new run."""
         # Use the node function directly to create the initial state dict
-        self.state = nodes.initialize_state(
+        # Cast the result to SyllabusState
+        initial_state_dict = nodes.initialize_state(
             None,  # Pass None for state as it's initialization
             topic=topic,
             knowledge_level=knowledge_level,
             user_id=user_id,
         )
+        self.state = cast(SyllabusState, initial_state_dict)
         print(
             f"SyllabusAI initialized: Topic='{topic}', Level='{knowledge_level}', User={user_id}"
         )
@@ -101,7 +109,7 @@ class SyllabusAI:
             "user_id": user_id,
         }
 
-    def get_or_create_syllabus(self) -> Dict:
+    def get_or_create_syllabus(self) -> SyllabusState:
         """Retrieves an existing syllabus or orchestrates the creation of a new one."""
         if not self.state:
             raise ValueError("Agent not initialized. Call initialize() first.")
@@ -117,11 +125,22 @@ class SyllabusAI:
                 node_name = list(step.keys())[0]
                 print(f"Graph Step: {node_name}")
                 # Accumulate all updates from the steps
-                final_state_updates.update(step[node_name])
+                # Ensure the update value is a dictionary
+                update_value = step[node_name]
+                if isinstance(update_value, dict):
+                    final_state_updates.update(update_value)
+                else:
+                    logger.warning(f"Ignoring non-dict update from node '{node_name}': {update_value}")
 
-            # Apply accumulated updates to the internal state
-            if final_state_updates:
-                self.state.update(final_state_updates)
+
+            # Apply accumulated updates to the internal state carefully
+            if final_state_updates and self.state:
+                for key, value in final_state_updates.items():
+                    if key in SyllabusState.__annotations__:
+                        # Mypy might still complain about direct assignment, but it's safer than .update()
+                        self.state[key] = value # type: ignore
+                    else:
+                        logger.warning(f"Ignoring unexpected key '{key}' from graph execution update.")
 
         except Exception as e:
             print(f"Error during graph execution in get_or_create_syllabus: {e}")
@@ -138,14 +157,15 @@ class SyllabusAI:
                 "Error: Graph execution finished but no valid syllabus found in state."
             )
             # Attempt to provide more context if available
-            if self.state.get("error_generating"):
+            if self.state and self.state.get("error_generating"):
                 print("Generation fallback structure was used but might be invalid.")
             raise RuntimeError("Failed to get or create a valid syllabus.")
 
         print(f"Syllabus get/create finished. Result UID: {syllabus.get('uid', 'N/A')}")
-        return syllabus  # Return the syllabus from the final state
+        # Cast to SyllabusState to satisfy mypy
+        return cast(SyllabusState, syllabus)
 
-    def update_syllabus(self, feedback: str) -> Dict:
+    def update_syllabus(self, feedback: str) -> SyllabusState:
         """Updates the current syllabus based on user feedback."""
         if not self.state:
             raise ValueError("Agent not initialized.")
@@ -159,7 +179,14 @@ class SyllabusAI:
 
         # Call the update node function directly, passing current state and feedback
         update_result = nodes.update_syllabus(self.state, feedback, self.llm_model)
-        self.state.update(update_result)  # Update internal state with results
+
+        # Update internal state with results carefully
+        if self.state:
+            for key, value in update_result.items():
+                if key in SyllabusState.__annotations__:
+                    self.state[key] = value # type: ignore
+                else:
+                    logger.warning(f"Ignoring unexpected key '{key}' from update_syllabus node result.")
 
         # Return the syllabus currently in state
         # (which might be the updated one or original if update failed)
@@ -171,9 +198,10 @@ class SyllabusAI:
             raise RuntimeError("Syllabus became invalid after update attempt.")
 
         print(f"Syllabus update finished. Result UID: {syllabus.get('uid', 'N/A')}")
-        return syllabus
+        # Cast to SyllabusState to satisfy mypy
+        return cast(SyllabusState, syllabus)
 
-    def save_syllabus(self) -> Dict:
+    def save_syllabus(self) -> Dict[str, Optional[str]]:
         """Saves the current syllabus in the state to the database."""
         if not self.state:
             raise ValueError("Agent not initialized")
@@ -205,8 +233,11 @@ class SyllabusAI:
         # Update state with any potential changes from saving (like UID, timestamps)
         if save_result.get("syllabus_saved"):
             # Selectively update state fields returned by save_syllabus
-            state_updates = {k: v for k, v in save_result.items() if k in self.state}
-            self.state.update(state_updates)
+            state_updates = {k: v for k, v in save_result.items() if k in SyllabusState.__annotations__} # Check keys
+            if self.state:
+                for key, value in state_updates.items():
+                     self.state[key] = value # type: ignore
+
             print(
                 f"Syllabus save finished. Saved UID: {save_result.get('saved_uid', 'N/A')}"
             )
@@ -215,7 +246,7 @@ class SyllabusAI:
             print("Syllabus save failed.")
             return {"status": "failed"}
 
-    def get_syllabus(self) -> Dict:
+    def get_syllabus(self) -> Optional[Dict[str, Any]]:
         """Returns the current syllabus dictionary held in the agent's state."""
         if not self.state:
             raise ValueError("Agent not initialized")
@@ -224,9 +255,10 @@ class SyllabusAI:
         )
         if not syllabus:
             raise ValueError("No syllabus loaded in the current state.")
-        return syllabus
+        # Ensure we return a dict, not potentially a Pydantic model if state changes
+        return dict(syllabus)
 
-    def clone_syllabus_for_user(self, user_id: str) -> Dict:
+    def clone_syllabus_for_user(self, user_id: str) -> Dict[str, Any]:
         """Clones the current syllabus in the state for a specific user."""
         if not self.state:
             raise ValueError("Agent not initialized")
@@ -274,24 +306,31 @@ class SyllabusAI:
         user_syllabus["parent_uid"] = parent_uid
         print(f"Setting parent UID for clone {new_uid} to {parent_uid}")
 
-        # Separate content for saving
-        content_to_save = {
-            k: user_syllabus.get(k)
-            for k in ["topic", "level", "duration", "learning_objectives", "modules"]
-        }
+        # Separate content for saving (ensure required keys are present)
+        content_to_save = {}
+        required_keys = ["topic", "level", "duration", "learning_objectives", "modules"]
+        for k in required_keys:
+            if k in user_syllabus:
+                content_to_save[k] = user_syllabus[k]
+            else:
+                # Handle missing keys if necessary, e.g., provide defaults or raise error
+                logger.warning(f"Missing key '{k}' in syllabus content during clone save preparation.")
+                # For now, let's allow it to proceed, save_syllabus might handle defaults
+                content_to_save[k] = None # Or some default
+
+        # Ensure topic and level are definitely in content_to_save for the DB call
+        if "topic" not in content_to_save or "level" not in content_to_save:
+             raise ValueError("Topic or level missing in content prepared for saving clone.")
+
 
         try:
             # Save the new user-specific syllabus using the db_service method
+            # REMOVED extra arguments: is_master, parent_uid, uid, created_at, updated_at
             saved_id = self.db_service.save_syllabus(
-                topic=user_syllabus["topic"],
-                level=user_syllabus["level"],
-                content=content_to_save,
+                topic=content_to_save["topic"],
+                level=content_to_save["level"],
+                content=content_to_save, # Pass the prepared content dict
                 user_id=user_id,
-                is_master=False,
-                parent_uid=parent_uid,
-                uid=new_uid,
-                created_at=now,
-                updated_at=now,
                 user_entered_topic=user_syllabus["user_entered_topic"],
             )
 
@@ -323,7 +362,7 @@ class SyllabusAI:
             traceback.print_exc()
             raise RuntimeError("Failed to save cloned syllabus.") from e
 
-    def delete_syllabus(self) -> Dict:
+    def delete_syllabus(self) -> Dict[str, Union[bool, str]]:
         """Deletes the syllabus corresponding to the current state from the database."""
         if not self.state:
             raise ValueError("Agent not initialized")
@@ -339,8 +378,13 @@ class SyllabusAI:
             f"Attempting deletion: Topic='{topic}', Level='{knowledge_level}', User={user_id}"
         )
         try:
-            deleted = self.db_service.delete_syllabus(topic, knowledge_level, user_id)
+            # TODO: Implement delete_syllabus in SQLiteDatabaseService if needed.
+            # deleted = self.db_service.delete_syllabus(topic, knowledge_level, user_id)
+            deleted = False # Assume deletion failed as method doesn't exist
+            logger.warning("Syllabus deletion is not implemented in SQLiteDatabaseService.")
+
             if deleted:
+                # This block will likely not be reached until delete_syllabus is implemented
                 print("Syllabus deleted successfully from DB.")
                 # Clear syllabus from state after deletion
                 self.state["existing_syllabus"] = None
@@ -352,9 +396,10 @@ class SyllabusAI:
                 # Keep topic, level, user_id etc. as they defined what was deleted
                 return {"syllabus_deleted": True}
             else:
-                print("Syllabus not found in DB for deletion.")
-                return {"syllabus_deleted": False, "reason": "Not found"}
+                # Adjust message since the method doesn't exist
+                print("Syllabus deletion not performed (method not implemented).")
+                return {"syllabus_deleted": False, "reason": "Not implemented"}
         except Exception as e:
-            print(f"Error deleting syllabus from DB: {e}")
+            print(f"Error during attempted syllabus deletion: {e}")
             traceback.print_exc()
             return {"syllabus_deleted": False, "error": str(e)}

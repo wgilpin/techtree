@@ -3,7 +3,6 @@ Migration script to add the lesson_id column and index to the user_progress tabl
 and backfill existing rows.
 """
 import sqlite3
-import os
 from pathlib import Path
 
 DB_NAME = "techtree.db"

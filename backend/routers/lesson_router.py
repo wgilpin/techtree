@@ -96,7 +96,7 @@ async def get_lesson_data(
     lesson_index: int,
     current_user: Optional[User] = Depends(get_current_user),
     interaction_service: LessonInteractionService = Depends(get_interaction_service),
-):
+) -> LessonDataResponse:
     """
     Retrieves or generates lesson data, including static content and user state.
 
@@ -153,7 +153,7 @@ async def handle_chat_message(
     request_body: ChatMessageRequest,
     current_user: User = Depends(get_current_user),
     interaction_service: LessonInteractionService = Depends(get_interaction_service),
-):
+) -> ChatTurnResponse:
     """
     Processes one turn of a user's chat conversation within a specific lesson.
 
@@ -225,7 +225,7 @@ async def generate_exercise(
     lesson_index: int,
     current_user: User = Depends(get_current_user),
     interaction_service: LessonInteractionService = Depends(get_interaction_service),
-):
+) -> ExerciseResponse:
     """
     Generates a new, unique exercise for the specified lesson on demand.
 
@@ -297,7 +297,7 @@ async def generate_assessment_question(
     lesson_index: int,
     current_user: User = Depends(get_current_user),
     interaction_service: LessonInteractionService = Depends(get_interaction_service),
-):
+) -> AssessmentQuestionResponse:
     """
     Generates a new, unique assessment question for the specified lesson on demand.
 
@@ -367,7 +367,7 @@ async def generate_assessment_question(
 async def get_lesson_exposition_by_id(
     lesson_id: int,
     exposition_service: LessonExpositionService = Depends(get_exposition_service),
-):
+) -> LessonExpositionResponse:
     """
     Retrieves the static exposition content for a lesson using its database ID.
 
@@ -428,7 +428,7 @@ async def update_lesson_progress(
     progress: ProgressUpdate,
     current_user: User = Depends(get_current_user),
     interaction_service: LessonInteractionService = Depends(get_interaction_service),
-):
+) -> ProgressResponse:
     """
     Updates the progress status for a specific lesson for the authenticated user.
 

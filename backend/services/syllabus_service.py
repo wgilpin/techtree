@@ -5,8 +5,8 @@ Coordinates between the database service and the Syllabus AI component
 to create, retrieve, and manage syllabus data.
 """
 
-import logging  # Import logging
-from typing import Any, Dict, Optional
+import logging
+from typing import Any, Dict, Optional, cast # Added cast
 
 from backend.ai.app import SyllabusAI
 from backend.services.sqlite_db import SQLiteDatabaseService
@@ -23,7 +23,6 @@ class SyllabusService:
     underlying database and AI components related to syllabi.
     """
 
-    # Require db_service and add type hint
     def __init__(self, db_service: SQLiteDatabaseService):
         """
         Initializes the SyllabusService.
@@ -31,9 +30,7 @@ class SyllabusService:
         Args:
             db_service: An instance of SQLiteDatabaseService for database access.
         """
-        # Pass db_service to SyllabusAI constructor
         self.syllabus_ai = SyllabusAI(db_service=db_service)
-        # Remove fallback
         self.db_service = db_service
 
     async def get_or_generate_syllabus(
@@ -62,31 +59,23 @@ class SyllabusService:
             logger.info(
                 f"Syllabus not found for topic='{topic}', level='{level}', user_id='{user_id}'. Generating new one."
             )
-            # If not found, create a new one
-            # create_syllabus needs to return data matching SyllabusResponse
             result = await self.create_syllabus(topic, level, user_id)
-            # Ensure create_syllabus returns the correct structure
-            return result  # Assuming create_syllabus returns the correct structure
+            return result
 
         logger.info(
             f"Found existing syllabus for topic='{topic}', level='{level}', user_id='{user_id}'."
         )
-        # If found, ensure the response structure matches SyllabusResponse
-        # Extract modules from the nested 'content' dictionary
         modules = syllabus.get("content", {}).get("modules", [])
         if not modules:
             logger.warning(
                 f"Existing syllabus {syllabus.get('syllabus_id')} found but has no modules in its content."
             )
-            # Decide how to handle this - maybe regenerate? For now, return empty modules.
 
         return {
             "syllabus_id": syllabus["syllabus_id"],
             "topic": syllabus["topic"],
             "level": syllabus["level"],
-            "modules": modules,  # Use extracted modules list
-            # "uid": syllabus.get("uid"), # Not part of SyllabusResponse
-            # "is_new": False, # Not part of SyllabusResponse
+            "modules": modules,
         }
 
     async def create_syllabus(
@@ -111,36 +100,25 @@ class SyllabusService:
         logger.info(
             f"Creating syllabus for topic='{topic}', level='{knowledge_level}', user_id='{user_id}'"
         )
-        # Initialize syllabus creation with the AI
-        # Pass user_id during initialization
         self.syllabus_ai.initialize(topic, knowledge_level, user_id=user_id)
 
-        # Generate syllabus content (should include modules)
         syllabus_content = (
             self.syllabus_ai.get_or_create_syllabus()
-        )  # This returns the content dict
+        )
 
         if not syllabus_content or "modules" not in syllabus_content:
             logger.error("Syllabus AI failed to generate content with modules.")
             raise RuntimeError("Failed to generate syllabus content with modules.")
 
-        # Save to database using the service method which handles UID etc.
-        # Pass the original user-entered topic for storage
         syllabus_id = self.db_service.save_syllabus(
-            topic=syllabus_content.get(
-                "topic", topic
-            ),  # Use topic from generated content
-            level=syllabus_content.get(
-                "level", knowledge_level
-            ),  # Use level from generated content
-            content=syllabus_content,  # Pass the full generated content for saving
+            topic=str(syllabus_content.get("topic", topic)), # Ensure topic is str
+            level=str(syllabus_content.get("level", knowledge_level)), # Ensure level is str
+            content=cast(Dict[str, Any], syllabus_content), # Cast content to Dict
             user_id=user_id,
-            user_entered_topic=topic,  # Store the original user-entered topic
+            user_entered_topic=topic,
         )
         logger.info(f"Syllabus saved with ID: {syllabus_id}")
 
-        # Fetch the newly saved syllabus to ensure it was saved correctly
-        # get_syllabus_by_id returns the structure with nested content
         saved_syllabus = self.db_service.get_syllabus_by_id(syllabus_id)
 
         if not saved_syllabus:
@@ -151,23 +129,20 @@ class SyllabusService:
                 f"Failed to retrieve newly saved syllabus with ID {syllabus_id}"
             )
 
-        # Extract modules from the nested content of the saved syllabus
         modules = saved_syllabus.get("content", {}).get("modules", [])
         if not modules:
             logger.error(
                 f"Newly saved syllabus {syllabus_id} lacks modules in its content."
             )
-            # This indicates a problem either in generation or saving/retrieval logic
             raise RuntimeError(
                 f"Newly saved syllabus {syllabus_id} is missing modules."
             )
 
-        # Return data structured for SyllabusResponse
         return {
             "syllabus_id": syllabus_id,
             "topic": saved_syllabus["topic"],
             "level": saved_syllabus["level"],
-            "modules": modules,  # Use extracted modules
+            "modules": modules,
         }
 
     async def get_syllabus_by_id(self, syllabus_id: str) -> Optional[Dict[str, Any]]:
@@ -188,16 +163,12 @@ class SyllabusService:
             logger.warning(f"Syllabus with ID {syllabus_id} not found in DB.")
             return None
 
-        # Extract modules from the nested 'content' dictionary
         modules = syllabus.get("content", {}).get("modules", [])
         if not modules:
             logger.warning(
                 f"Syllabus {syllabus_id} found but has no modules in its content."
             )
-            # Return syllabus info even if modules are missing? Or return None?
-            # For now, return with empty modules list to match response model.
 
-        # Return data structured for SyllabusResponse
         return {
             "syllabus_id": syllabus["syllabus_id"],
             "topic": syllabus["topic"],
@@ -231,25 +202,22 @@ class SyllabusService:
             logger.info(
                 f"Syllabus not found for topic='{topic}', level='{level}', user_id='{user_id}'."
             )
-            return None  # Explicitly return None if not found
+            return None
 
         logger.info(
             f"Found existing syllabus for topic='{topic}', level='{level}', user_id='{user_id}'."
         )
-        # If found, ensure the response structure matches SyllabusResponse
         modules = syllabus.get("content", {}).get("modules", [])
         if not modules:
             logger.warning(
                 f"Existing syllabus {syllabus.get('syllabus_id')} found but has no modules in its content."
             )
-            # Return syllabus info even if modules are missing? Or return None?
-            # For now, return with empty modules list to match response model.
 
         return {
             "syllabus_id": syllabus["syllabus_id"],
             "topic": syllabus["topic"],
             "level": syllabus["level"],
-            "modules": modules,  # Use extracted modules list
+            "modules": modules,
         }
 
     async def get_module_details(
@@ -270,7 +238,6 @@ class SyllabusService:
             ValueError: If the syllabus is invalid, content is missing, or the
                         module index is out of range.
         """
-        # Use the internal DB service method that returns the nested structure
         syllabus = self.db_service.get_syllabus_by_id(syllabus_id)
 
         if not syllabus:
@@ -279,7 +246,7 @@ class SyllabusService:
         if "content" not in syllabus:
             raise ValueError(f"Invalid syllabus content for ID {syllabus_id}")
 
-        content = syllabus["content"]  # Content should already be a dict
+        content = syllabus["content"]
 
         if (
             not isinstance(content, dict)
@@ -295,10 +262,10 @@ class SyllabusService:
                 f"Module index {module_index} out of range for syllabus {syllabus_id}"
             )
 
-        # Add module_index to the returned dict for convenience
         module_data = content["modules"][module_index]
         module_data["module_index"] = module_index
-        return module_data
+        # Cast before returning
+        return cast(Dict[str, Any], module_data)
 
     async def get_lesson_details(
         self, syllabus_id: str, module_index: int, lesson_index: int
@@ -323,29 +290,29 @@ class SyllabusService:
         """
         module = await self.get_module_details(syllabus_id, module_index)
 
-        if "lessons" not in module or not isinstance(module["lessons"], list):
+        # Access lessons via module['content']['lessons'] based on _build_syllabus_dict
+        module_content = module.get("content", {})
+        if not isinstance(module_content, dict) or "lessons" not in module_content or not isinstance(module_content["lessons"], list):
             raise ValueError(
-                f"Module {module_index} in syllabus {syllabus_id} is missing 'lessons' list."
+                f"Module {module_index} in syllabus {syllabus_id} is missing 'lessons' list in its content."
             )
 
-        if lesson_index < 0 or lesson_index >= len(module["lessons"]):
+        lessons = module_content["lessons"]
+        if lesson_index < 0 or lesson_index >= len(lessons):
             raise ValueError(
                 f"Lesson index {lesson_index} out of range for module "
                 f"{module_index} in syllabus {syllabus_id}"
             )
 
-        lesson_data = module["lessons"][lesson_index]
+        lesson_data = lessons[lesson_index]
 
-        # Fetch the corresponding lesson ID from the lessons table using the new method
         lesson_db_id = self.db_service.get_lesson_id(
             syllabus_id, module_index, lesson_index
         )
 
-        # Add indices and DB ID to the returned dict
         lesson_data["module_index"] = module_index
         lesson_data["lesson_index"] = lesson_index
-        lesson_data["lesson_id"] = (
-            lesson_db_id  # Can be None if content doesn't exist yet
-        )
+        lesson_data["lesson_id"] = lesson_db_id
 
-        return lesson_data
+        # Cast before returning
+        return cast(Dict[str, Any], lesson_data)

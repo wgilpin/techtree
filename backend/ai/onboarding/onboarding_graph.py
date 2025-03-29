@@ -1,19 +1,32 @@
+# backend/ai/onboarding/onboarding_graph.py
 # pylint: disable=broad-exception-caught,singleton-comparison
-""" Langgraph graph for onboarding - evaluating the user on a topic """
+"""Langgraph graph for onboarding - evaluating the user on a topic"""
 
 import os
 import re
 import time
 import random
 from collections import Counter
-from typing import Dict, List, TypedDict, Optional
+from typing import (
+    Dict,
+    List,
+    TypedDict,
+    Optional,
+    cast,
+    Callable,
+    Any,
+)  # Added Callable, Any
+import logging
 
 import requests
 import google.generativeai as genai
 from google.api_core.exceptions import ResourceExhausted
 from dotenv import load_dotenv
 from langgraph.graph import END, StateGraph
-from tavily import TavilyClient
+from tavily import TavilyClient  # type: ignore
+
+# Add logger
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -22,58 +35,130 @@ load_dotenv()
 TAVILY_TIMEOUT = 5  # seconds
 
 # Configure Gemini API
-genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-model = genai.GenerativeModel(
-    os.environ["GEMINI_MODEL"]
-)  # User specified gemini 2 flash, but using gemini-pro for now
+# Define type hint before assignment
+MODEL: Optional[genai.GenerativeModel] = None
+try:
+    gemini_api_key = os.environ.get("GEMINI_API_KEY")
+    gemini_model_name = os.environ.get("GEMINI_MODEL")
+    if not gemini_api_key:
+        logger.error("Missing environment variable: GEMINI_API_KEY")
+        raise KeyError("GEMINI_API_KEY")
+    if not gemini_model_name:
+        logger.error("Missing environment variable: GEMINI_MODEL")
+        raise KeyError("GEMINI_MODEL")
+
+    # Configuration within the try block (8 spaces indent)
+    genai.configure(api_key=gemini_api_key)
+    MODEL = genai.GenerativeModel(gemini_model_name)
+    logger.info(f"Onboarding Config: Gemini model '{gemini_model_name}' configured.")
+
+# Except block aligned with try (0 spaces indent)
+except KeyError as e:
+    # Content of except block (4 spaces indent)
+    logger.error(
+        f"Onboarding Config: Gemini configuration failed due to missing env var: {e}"
+    )
+    MODEL = None
+except Exception as e:
+    logger.error(f"Onboarding Config: Error configuring Gemini: {e}", exc_info=True)
+    MODEL = None
+
 
 # Configure Tavily API
-tavily = TavilyClient(api_key=os.environ.get("TAVILY_API_KEY"))
+# Define type hint before assignment
+TAVILY: Optional[TavilyClient] = None
+try:
+    tavily_api_key = os.environ.get("TAVILY_API_KEY")
+    if not tavily_api_key:
+        logger.warning(
+            "Missing environment variable TAVILY_API_KEY. Tavily search disabled."
+        )
+    else:
+        TAVILY = TavilyClient(api_key=tavily_api_key)
+        logger.info("Onboarding Config: Tavily client configured.")
+except Exception as e:
+    logger.error(f"Onboarding Config: Error configuring Tavily: {e}", exc_info=True)
+    TAVILY = None
 
 
-def call_with_retry(func, *args, max_retries=5, initial_delay=1, **kwargs):
+# Added type annotations
+def call_with_retry(
+    func: Callable[..., Any],
+    *args: Any,
+    max_retries: int = 5,
+    initial_delay: float = 1.0,
+    **kwargs: Any,
+) -> Any:
     """Call a function with exponential backoff retry logic for quota errors."""
     retries = 0
+    delay = initial_delay
     while True:
         try:
+            # Ensure model is configured before calling generate_content
+            if func == getattr(MODEL, "generate_content", None) and MODEL is None:
+                raise RuntimeError("Gemini model is not configured.")
+            # Ensure tavily client is configured before calling search
+            if func == getattr(TAVILY, "search", None) and TAVILY is None:
+                raise RuntimeError("Tavily client is not configured.")
             return func(*args, **kwargs)
-        except ResourceExhausted:
+        except ResourceExhausted as e:
             retries += 1
             if retries > max_retries:
-                raise
+                logger.error(
+                    f"Max retries ({max_retries}) exceeded for {func.__name__}. "
+                    "Raising ResourceExhausted."
+                )
+                raise e
 
             # Calculate delay with exponential backoff and jitter
-            delay = initial_delay * (2 ** (retries - 1)) + random.uniform(0, 1)
-            time.sleep(delay)
-        except requests.exceptions.Timeout:
+            current_delay = delay * (2 ** (retries - 1)) + random.uniform(0, 1)
+            logger.warning(
+                f"ResourceExhausted error calling {func.__name__}. Retrying in {current_delay:.2f} "
+                f"seconds... (Attempt {retries}/{max_retries})"
+            )
+            time.sleep(current_delay)
+        except requests.exceptions.Timeout as e:
             retries += 1
             if retries > max_retries:
-                raise
+                logger.error(
+                    f"Max retries ({max_retries}) exceeded for {func.__name__} due to Timeout."
+                )
+                raise e
 
             # Calculate delay with exponential backoff and jitter
-            delay = initial_delay * (2 ** (retries - 1)) + random.uniform(0, 1)
-            time.sleep(delay)
+            current_delay = delay * (2 ** (retries - 1)) + random.uniform(0, 1)
+            logger.warning(
+                f"Timeout error calling {func.__name__}. Retrying in {current_delay:.2f} "
+                f"seconds... (Attempt {retries}/{max_retries})"
+            )
+            time.sleep(current_delay)
+        except Exception as e:
+            logger.error(
+                f"Non-retryable error calling {func.__name__}: {e}", exc_info=True
+            )
+            raise e
 
 
 # --- Define State ---
 class AgentState(TypedDict):
-    """ langgraph state """
+    """langgraph state"""
+
     topic: str
     knowledge_level: str
     questions_asked: List[str]
-    question_difficulties: List[int]  # Store difficulty level of each question
+    question_difficulties: List[int]
     answers: List[str]
-    answer_evaluations: List[float]  # Store the evaluation results
+    answer_evaluations: List[float]
     current_question: str
-    current_question_difficulty: int  # Store difficulty of current question
-    current_target_difficulty: int  # Target difficulty for the next question
-    consecutive_wrong: int  # Track consecutive wrong answers
-    wikipedia_content: str  # Content from Wikipedia search
-    google_results: List[str]  # Content from Google search results
-    search_completed: bool  # Flag to indicate if search has been completed
-    consecutive_hard_correct_or_partial: (
-        int  # Track consecutive correct/partially correct at HARD
-    )
+    current_question_difficulty: int
+    current_target_difficulty: int
+    consecutive_wrong: int
+    wikipedia_content: str
+    google_results: List[str]
+    search_completed: bool
+    consecutive_hard_correct_or_partial: int
+    feedback: Optional[str]
+    classification: Optional[float]
 
 
 # --- Define Constants ---
@@ -83,16 +168,16 @@ HARD = 3
 
 
 class TechTreeAI:
-    """Encapsulates the Tech Tree langgraph app """
+    """Encapsulates the Tech Tree langgraph app"""
 
-    def __init__(self):
+    def __init__(self) -> None:  # Added return type hint
         """Initialize the TechTreeAI."""
         self.state: Optional[AgentState] = None
-        self.workflow = self._create_workflow()
+        self.workflow: StateGraph = self._create_workflow()  # Added type hint
         self.graph = self.workflow.compile()
-        self.is_quiz_complete = False
-        self.search_status = ""
-        self.final_assessment = {}
+        self.is_quiz_complete: bool = False  # Added type hint
+        self.search_status: str = ""  # Added type hint
+        self.final_assessment: Dict[str, Any] = {}  # Added type hint
 
     def _create_workflow(self) -> StateGraph:
         """Create the langgraph workflow."""
@@ -118,104 +203,138 @@ class TechTreeAI:
         workflow.set_entry_point("initialize")
         return workflow
 
-    def _initialize(self, _: Optional[AgentState] = None, topic: str = "") -> Dict:
+    # Added type hints
+    def _initialize(
+        self, _: Optional[AgentState] = None, topic: str = ""
+    ) -> Dict[str, Any]:
         """Initialize the agent state with the given topic."""
         if not topic:
             raise ValueError("Topic is required")
 
-        return {
+        # Ensure return matches Dict[str, Any]
+        initial_state: Dict[str, Any] = {
             "topic": topic,
-            "knowledge_level": "beginner",  # Initial knowledge level
+            "knowledge_level": "beginner",
             "questions_asked": [],
-            "question_difficulties": [],  # Initialize question difficulties
+            "question_difficulties": [],
             "answers": [],
-            "answer_evaluations": [],  # Initialize answer_evaluations
+            "answer_evaluations": [],
             "current_question": "",
-            "current_question_difficulty": 0,  # Initialize current question difficulty
-            "current_target_difficulty": EASY,  # Start with easy questions
-            "consecutive_wrong": 0,  # Track consecutive wrong answers
-            "continue_flag": True,  # Initialize continue_flag
-            "wikipedia_content": "",  # Initialize Wikipedia content
-            "google_results": [],  # Initialize Google results
-            "search_completed": False,  # Initialize search completion flag
-            "consecutive_hard_correct_or_partial": 0,  # Initialize the new counter
+            "current_question_difficulty": 0,
+            "current_target_difficulty": EASY,
+            "consecutive_wrong": 0,
+            "wikipedia_content": "",
+            "google_results": [],
+            "search_completed": False,
+            "consecutive_hard_correct_or_partial": 0,
+            "feedback": None,
+            "classification": None,
         }
+        return initial_state
 
-    def _perform_internet_search(self, state: AgentState) -> Dict:
+    # Added return type hint
+    def _perform_internet_search(self, state: AgentState) -> Dict[str, Any]:
         """Performs internet search using Tavily API and stores results in state."""
         topic = state["topic"]
         self.search_status = (
             f"Searching the internet for information about '{topic}'..."
         )
+        logger.info(self.search_status)
+
+        # Check if Tavily client is configured
+        if TAVILY is None:
+            logger.warning("Tavily client not configured. Skipping internet search.")
+            self.search_status = "Search skipped: Tavily client not configured."
+            return {
+                "wikipedia_content": "Search skipped: Tavily client not configured.",
+                "google_results": [],
+                "search_completed": True,
+            }
 
         try:
             # Search Wikipedia
             self.search_status = "Searching Wikipedia..."
-            print(f"DEBUG: TAVILY_API_KEY = {os.environ.get('TAVILY_API_KEY')[0:8]}...")
+            logger.info(self.search_status)
+            tavily_key = os.environ.get("TAVILY_API_KEY")
+            key_preview = f"{tavily_key[:8]}..." if tavily_key else "Not Set"
+            logger.debug(f"DEBUG: TAVILY_API_KEY = {key_preview}")
+
             wiki_search = call_with_retry(
-                tavily.search,
+                TAVILY.search,
                 query=f"{topic} wikipedia",
                 search_depth="advanced",
                 include_domains=["en.wikipedia.org"],
                 max_results=1,
-                timeout=TAVILY_TIMEOUT
             )
             wikipedia_content = (
                 wiki_search.get("results", [{}])[0].get("content", "")
                 if wiki_search.get("results")
                 else ""
             )
+            logger.debug(f"Wikipedia search result length: {len(wikipedia_content)}")
 
             # Search Google (excluding Wikipedia)
             self.search_status = "Searching Google..."
+            logger.info(self.search_status)
             google_search = call_with_retry(
-                tavily.search,
+                TAVILY.search,
                 query=topic,
                 search_depth="advanced",
                 exclude_domains=["wikipedia.org"],
                 max_results=4,
-                timeout=TAVILY_TIMEOUT
             )
             google_results = [
                 result.get("content", "") for result in google_search.get("results", [])
             ]
+            logger.debug(f"Google search returned {len(google_results)} results.")
 
             self.search_status = "Search completed successfully."
+            logger.info(self.search_status)
             return {
                 "wikipedia_content": wikipedia_content,
                 "google_results": google_results,
                 "search_completed": True,
             }
-        except Exception as e: #pylint: disable=broad-except
+        except Exception as e:  # pylint: disable=broad-except
             self.search_status = f"Error during internet search: {e}"
-            # Return empty results but mark as completed to continue the flow
+            logger.error(self.search_status, exc_info=True)
             return {
                 "wikipedia_content": f"Error searching for {topic}: {str(e)}",
                 "google_results": [],
                 "search_completed": True,
             }
 
-    def _generate_question(self, state: AgentState) -> Dict:
+    # Added return type hint
+    def _generate_question(self, state: AgentState) -> Dict[str, Any]:
         """Generates a question using the Gemini API and search results."""
-        # Get the target difficulty level
+        if MODEL is None:
+            logger.error("Gemini model not configured. Cannot generate question.")
+            return {
+                "current_question": "Error: LLM model not configured.",
+                "current_question_difficulty": MEDIUM,
+                "questions_asked": state["questions_asked"],
+                "question_difficulties": state["question_difficulties"],
+            }
+
         target_difficulty = state["current_target_difficulty"]
         difficulty_name = (
             "easy"
             if target_difficulty == EASY
             else "medium" if target_difficulty == MEDIUM else "hard"
         )
+        logger.info(
+            f"Generating question for topic '{state['topic']}' at difficulty: {difficulty_name}"
+        )
 
-        # Prepare search content for the prompt
         wikipedia_content = state["wikipedia_content"]
         google_results = state["google_results"]
 
-        # Combine search results into a single context
         search_context = f"Wikipedia information:\n{wikipedia_content}\n\n"
         search_context += "Additional information from other sources:\n"
         for i, result in enumerate(google_results, 1):
             search_context += f"Source {i}:\n{result}\n\n"
+        logger.debug(f"Search context length: {len(search_context)}")
 
-        # Construct the prompt for Gemini
         prompt = f"""
         You are an expert tutor creating questions on the topic of {state['topic']} so
         you can assess their level of understanding of the topic to decide what help
@@ -231,7 +350,8 @@ class TechTreeAI:
 
         The question should be at {difficulty_name} difficulty level ({target_difficulty}).
 
-        Use the following information from internet searches to create an accurate and up-to-date question:
+        Use the following information from internet searches to create an accurate and
+        up-to-date question:
 
         {search_context}
 
@@ -243,36 +363,45 @@ class TechTreeAI:
         """
 
         try:
-            response = call_with_retry(model.generate_content, prompt)
+            response = call_with_retry(MODEL.generate_content, prompt)
             response_text = response.text
+            logger.debug(
+                f"LLM response for question generation: {response_text[:200]}..."
+            )
 
-            # Parse the response to extract difficulty and question
-            difficulty = MEDIUM  # Default difficulty
+            difficulty = MEDIUM
             question = response_text
+
+            difficulty_pattern = re.compile(r"Difficulty:\s*(\d+)", re.IGNORECASE)
+            question_pattern = re.compile(
+                r"Question:\s*(.*?)(?:\n|$)", re.IGNORECASE | re.DOTALL
+            )
+
+            difficulty_match = difficulty_pattern.search(response_text)
+            if difficulty_match:
+                try:
+                    difficulty = int(difficulty_match.group(1))
+                    logger.debug(f"Extracted difficulty: {difficulty}")
+                except ValueError:
+                    logger.warning(
+                        f"Could'nt parse extracted difficulty '{difficulty_match.group(1)}' as int."
+                    )
+                    difficulty = target_difficulty
+
+            question_match = question_pattern.search(response_text)
+            if question_match:
+                question = question_match.group(1).strip()
+                logger.debug(f"Extracted question: {question[:100]}...")
+            else:
+                logger.warning(
+                    "Could not extract question using regex, using full response."
+                )
+
         except Exception as e:
-            print(f"Error in _generate_question: {str(e)}")
-            difficulty = MEDIUM  # Default difficulty
+            logger.error(f"Error in _generate_question: {str(e)}", exc_info=True)
+            difficulty = MEDIUM
             question = f"Error generating question: {str(e)}"
 
-        # Try to extract difficulty and question from formatted response using regex
-
-        # Pattern to match "Difficulty: X" and "Question: Y"
-        difficulty_pattern = re.compile(r"Difficulty:\s*(\d+)", re.IGNORECASE)
-        question_pattern = re.compile(
-            r"Question:\s*(.*?)(?:\n|$)", re.IGNORECASE | re.DOTALL
-        )
-
-        # Extract difficulty
-        difficulty_match = difficulty_pattern.search(response_text)
-        if difficulty_match:
-            difficulty = int(difficulty_match.group(1))
-
-        # Extract question
-        question_match = question_pattern.search(response_text)
-        if question_match:
-            question = question_match.group(1).strip()
-
-        # Update state with the new question and its difficulty
         return {
             "current_question": question,
             "current_question_difficulty": difficulty,
@@ -280,22 +409,36 @@ class TechTreeAI:
             "question_difficulties": state["question_difficulties"] + [difficulty],
         }
 
-    def _evaluate_answer(self, state: AgentState, answer: str = "") -> Dict:
+    # Added return type hint
+    def _evaluate_answer(self, state: AgentState, answer: str = "") -> Dict[str, Any]:
         """Evaluates the answer using the Gemini API."""
         if not answer:
             raise ValueError("Answer is required")
+        logger.info(
+            f"Evaluating answer for question: {state['current_question'][:100]}..."
+        )
+        logger.debug(f"User answer: {answer}")
 
-        # Prepare search content for the prompt
+        if MODEL is None:
+            logger.error("Gemini model not configured. Cannot evaluate answer.")
+            return {
+                "answers": state["answers"] + [answer],
+                "answer_evaluations": state["answer_evaluations"] + [0.0],
+                "consecutive_wrong": state["consecutive_wrong"] + 1,
+                "current_target_difficulty": state["current_target_difficulty"],
+                "consecutive_hard_correct_or_partial": 0,
+                "feedback": "Error: LLM model not configured.",
+                "classification": 0.0,
+            }
+
         wikipedia_content = state["wikipedia_content"]
         google_results = state["google_results"]
 
-        # Combine search results into a single context
         search_context = f"Wikipedia information:\n{wikipedia_content}\n\n"
         search_context += "Additional information from other sources:\n"
         for i, result in enumerate(google_results, 1):
             search_context += f"Source {i}:\n{result}\n\n"
 
-        # Construct the prompt for Gemini to evaluate the answer
         prompt = f"""
         You are an expert tutor in {state['topic']}.
         Here is a question that was asked:
@@ -310,13 +453,15 @@ class TechTreeAI:
 
         {search_context}
 
-        Evaluate the answer for correctness and completeness, allowing that only short answers were requested.
+        Evaluate the answer for correctness and completeness, allowing that only short
+        answers were requested.
         Provide feedback on the answer, but never mention the sources, or provided information,
-        as the user has no access to the source documents or other information and does not know they
-        exist.
+        as the user has no access to the source documents or other information and does not know
+        they exist.
 
-        Important: If the student responds with "I don't know" or similar, the answer is incorrect and
-        this does not need explaining: classify the answer as incorrect return the correct answer as feedback.
+        Important: If the student responds with "I don't know" or similar, the answer is incorrect
+        and this does not need explaining: classify the answer as incorrect return the correct
+        answer as feedback.
 
         Classify the answer as one of: correct=1, partially correct=0.5, or incorrect=0.
         Make sure to include the classification explicitly as a number in your response.
@@ -327,47 +472,71 @@ class TechTreeAI:
         """
 
         try:
-            response = call_with_retry(model.generate_content, prompt)
+            response = call_with_retry(MODEL.generate_content, prompt)
             evaluation = response.text
+            logger.debug(f"LLM evaluation response: {evaluation[:200]}...")
 
-            # Extract the classification, the bit before the ':'
-            parts = evaluation.split(":")
-            classification: float = float(parts[0])
-            feedback = parts[1] if len(parts) > 1 else ""
+            parts = evaluation.split(":", 1)
+            classification_str = parts[0].strip()
+            feedback = parts[1].strip() if len(parts) > 1 else ""
+
+            try:
+                classification = float(classification_str)
+                if classification > 0.75:
+                    classification = 1.0
+                elif classification > 0.25:
+                    classification = 0.5
+                else:
+                    classification = 0.0
+                logger.debug(f"Extracted classification: {classification}")
+            except ValueError:
+                logger.warning(
+                    f"Could not parse classification '{classification_str}' "
+                    "as float. Defaulting to 0.0."
+                )
+                classification = 0.0
+                feedback = evaluation
+
         except Exception as e:
-            print(f"Error in _evaluate_answer: {str(e)}")
-            classification = 0.0  # Default to incorrect
+            logger.error(f"Error in _evaluate_answer: {str(e)}", exc_info=True)
+            classification = 0.0
             feedback = f"Error evaluating answer: {str(e)}"
 
-        # Update consecutive wrong counter and target difficulty
         current_difficulty = state["current_target_difficulty"]
         consecutive_wrong = state["consecutive_wrong"]
         consecutive_hard_correct_or_partial = state.get(
             "consecutive_hard_correct_or_partial", 0
         )
 
-        if classification == 0.0:  # Incorrect
+        if classification == 0.0:
             consecutive_wrong += 1
-            # Keep the same difficulty level for the next question
             next_difficulty = current_difficulty
-            # Reset the consecutive HARD counter
             consecutive_hard_correct_or_partial = 0
+            logger.debug(
+                f"Incorrect answer. Consecutive wrong: {consecutive_wrong}. "
+                f"Next difficulty: {next_difficulty}"
+            )
         else:
             consecutive_wrong = 0
-            # If correct or partially correct, increase difficulty if possible
             if current_difficulty == EASY:
                 next_difficulty = MEDIUM
             elif current_difficulty == MEDIUM:
                 next_difficulty = HARD
-            else:
-                next_difficulty = HARD  # Stay at HARD if already at HARD
-                # Increment if at HARD and correct/partially correct
+            else:  # current_difficulty == HARD
+                next_difficulty = HARD
                 if classification >= 0.5:
                     consecutive_hard_correct_or_partial += 1
+            logger.debug(
+                f"Correct/Partial answer. Consecutive wrong reset. Next difficulty: "
+                f"{next_difficulty}. Consecutive HARD correct/partial: "
+                f"{consecutive_hard_correct_or_partial}"
+            )
 
-        # Reset the counter if the difficulty is not HARD
         if current_difficulty != HARD:
             consecutive_hard_correct_or_partial = 0
+            logger.debug(
+                "Reset consecutive HARD counter as current difficulty is not HARD."
+            )
 
         return {
             "answers": state["answers"] + [answer],
@@ -379,28 +548,29 @@ class TechTreeAI:
             "classification": classification,
         }
 
-    def _end(self, state: AgentState) -> Dict:
+    # Added return type hint
+    def _end(self, state: AgentState) -> Dict[str, Any]:
         """Provides a final assessment of the user's knowledge level."""
         self.is_quiz_complete = True
+        logger.info("Quiz ended. Calculating final assessment.")
 
-        # Calculate score directly
-        total_score = 0
+        total_score = 0.0
         max_possible_score = 0
 
         for i, evaluation in enumerate(state["answer_evaluations"]):
             if i < len(state["question_difficulties"]):
                 difficulty = state["question_difficulties"][i]
-
-                # Calculate score: answer correctness * difficulty level
                 total_score += evaluation * difficulty
                 max_possible_score += difficulty
 
-        # Calculate percentage
         weighted_percentage = (
             (total_score / max_possible_score * 100) if max_possible_score > 0 else 0
         )
+        logger.debug(
+            f"Total score: {total_score}, Max possible: {max_possible_score},"
+            f" Weighted %: {weighted_percentage:.2f}"
+        )
 
-        # Determine knowledge level
         if weighted_percentage >= 85:
             final_level = "advanced"
         elif weighted_percentage >= 65:
@@ -409,10 +579,10 @@ class TechTreeAI:
             final_level = "early learner"
         else:
             final_level = "beginner"
+        logger.info(f"Final determined knowledge level: {final_level}")
 
         counts = Counter(state["answer_evaluations"])
 
-        # Store final assessment
         self.final_assessment = {
             "correct_answers": counts[1.0],
             "partially_correct_answers": counts[0.5],
@@ -422,56 +592,82 @@ class TechTreeAI:
             "weighted_percentage": weighted_percentage,
             "knowledge_level": final_level,
         }
+        logger.debug(f"Final assessment details: {self.final_assessment}")
 
-        return {}
+        return {}  # Return empty dict as per convention for end nodes
 
+    # Added return type hint
     def _should_continue(self, state: AgentState) -> str:
         """Decides whether to continue or end the conversation."""
-        # End if the user has gotten 2 consecutive wrong answers
         if state["consecutive_wrong"] >= 2:
+            logger.info("Ending quiz: 2 consecutive wrong answers.")
             return END
 
-        # End if user has 3 consecutive correct or partially correct answers at HARD difficulty
         if state.get("consecutive_hard_correct_or_partial", 0) >= 3:
+            logger.info(
+                "Ending quiz: 3 consecutive correct/partial answers at HARD difficulty."
+            )
             return END
 
-        # Otherwise continue
+        logger.debug("Continuing quiz.")
         return "continue"
 
-    def initialize(self, topic: str) -> Dict:
+    # Added return type hint
+    def initialize(self, topic: str) -> Dict[str, Any]:
         """Initialize the agent with a topic."""
-        print(f"DEBUG: Initializing TechTreeAI with topic: {topic}")
+        logger.debug(f"Initializing TechTreeAI with topic: {topic}")
         try:
-            self.state = self._initialize(topic=topic)
-            print(f"DEBUG: Successfully initialized state for topic: {topic}")
+            initial_state_dict = self._initialize(topic=topic)
+            self.state = cast(AgentState, initial_state_dict)
+            logger.debug(f"Successfully initialized state for topic: {topic}")
             return {"status": "initialized", "topic": topic}
         except Exception as e:
-            print(f"DEBUG: Error initializing TechTreeAI: {str(e)}")
+            logger.error(f"Error initializing TechTreeAI: {str(e)}", exc_info=True)
             raise
 
-    def perform_search(self) -> Dict:
+    # Added return type hint
+    def perform_search(self) -> Dict[str, Any]:
         """Perform internet search for the topic."""
-        print(f"DEBUG: Starting search for topic: {self.state['topic'] if self.state else 'None'}")
         if not self.state:
-            print("DEBUG: Error - Agent not initialized")
+            logger.error("Error - Agent not initialized for search")
             raise ValueError("Agent not initialized")
+        logger.debug(f"Starting search for topic: {self.state['topic']}")
 
         try:
             result = self._perform_internet_search(self.state)
-            print(f"DEBUG: Search completed with result: {result}")
-            self.state.update(result)
+            logger.debug(f"Search completed with result keys: {list(result.keys())}")
+            # Update state carefully
+            for key, value in result.items():
+                if key in AgentState.__annotations__:
+                    self.state[key] = value  # type: ignore
+                else:
+                    logger.warning(
+                        f"Ignoring unexpected key '{key}' from search node result."
+                    )
             return {"status": "search_completed", "search_status": self.search_status}
         except Exception as e:
-            print(f"DEBUG: Error during search: {str(e)}")
+            logger.error(f"Error during search: {str(e)}", exc_info=True)
             raise
 
-    def generate_question(self) -> Dict:
+    # Added return type hint
+    def generate_question(self) -> Dict[str, Any]:
         """Generate a question based on the current state."""
         if not self.state:
+            logger.error("Error - Agent not initialized for question generation")
             raise ValueError("Agent not initialized")
 
         result = self._generate_question(self.state)
-        self.state.update(result)
+        logger.debug(
+            f"Question generation completed with result keys: {list(result.keys())}"
+        )
+        # Update state carefully
+        for key, value in result.items():
+            if key in AgentState.__annotations__:
+                self.state[key] = value  # type: ignore
+            else:
+                logger.warning(
+                    f"Ignoring unexpected key '{key}' from generate_question node result."
+                )
 
         difficulty = self.state["current_question_difficulty"]
         difficulty_str = (
@@ -486,60 +682,77 @@ class TechTreeAI:
             "difficulty_str": difficulty_str,
         }
 
-    def evaluate_answer(self, answer: str) -> Dict:
+    # Added return type hint
+    def evaluate_answer(self, answer: str) -> Dict[str, Any]:
         """Evaluate the user's answer."""
         if not self.state:
+            logger.error("Error - Agent not initialized for answer evaluation")
             raise ValueError("Agent not initialized")
 
         result = self._evaluate_answer(self.state, answer)
-        self.state.update(result)
+        logger.debug(
+            f"Answer evaluation completed with result keys: {list(result.keys())}"
+        )
+        # Update state carefully
+        for key, value in result.items():
+            if key in AgentState.__annotations__:
+                self.state[key] = value  # type: ignore
+            else:
+                logger.warning(
+                    f"Ignoring unexpected key '{key}' from evaluate_answer node result."
+                )
 
         # Check if we should continue or end
         continue_or_end = self._should_continue(self.state)
         if continue_or_end == END:
             self._end(self.state)
 
+        # Ensure classification is treated as float
+        classification_val = result.get("classification", 0.0)
+        if not isinstance(classification_val, float):
+            try:
+                classification_val = float(classification_val)
+            except (ValueError, TypeError):
+                classification_val = 0.0
+
         return {
-            "classification": result["classification"],
+            "classification": classification_val,
             "feedback": result.get("feedback", ""),
-            "is_correct": result["classification"] == 1.0,
-            "is_partially_correct": result["classification"] == 0.5,
-            "is_incorrect": result["classification"] == 0.0,
+            "is_correct": classification_val == 1.0,
+            "is_partially_correct": classification_val == 0.5,
+            "is_incorrect": classification_val == 0.0,
             "is_complete": self.is_quiz_complete,
         }
 
-    def get_final_assessment(self) -> Dict:
+    # Added return type hint
+    def get_final_assessment(self) -> Dict[str, Any]:
         """Get the final assessment of the user's knowledge level."""
         if not self.is_quiz_complete:
+            logger.warning("Attempted to get final assessment before quiz completion.")
             return {"status": "quiz_not_complete"}
 
         return self.final_assessment
 
+    # Added return type hint
     def is_complete(self) -> bool:
         """Check if the quiz is complete."""
         return self.is_quiz_complete
 
+    # Added return type hint
     def get_search_status(self) -> str:
         """Return the search status."""
         return self.search_status
 
-    def process_response(self, answer: str) -> Dict:
+    # Added return type hint
+    def process_response(self, answer: str) -> Dict[str, Any]:
         """Process the user's response and return the result."""
         if not self.state:
+            logger.error("Error - Agent not initialized for processing response")
             raise ValueError("Agent not initialized")
 
         result = self.evaluate_answer(answer)
 
-        # Check if we should continue or end
-        continue_or_end = self._should_continue(self.state)
-        if continue_or_end == END:
-            self._end(self.state)
-            return {
-                "completed": True,
-                "feedback": result["feedback"],
-            }
-
         return {
-            "completed": False,
-            "feedback": result["feedback"],
+            "completed": self.is_quiz_complete,
+            "feedback": result.get("feedback", ""),  # Use get for safety
         }

@@ -2,11 +2,26 @@
 # See https://pre-commit.com/hooks.html for more hooks
 repos:
 -   repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.10.1 # Use a specific version of mypy hook
+    rev: v1.11.1 # Use a version consistent with pyproject.toml
     hooks:
     -   id: mypy
-        args: [--strict] # Start with strict checking
+        args: [--strict]
+        files: ^(backend/|frontend/)
         # Optionally exclude files/directories if needed:
-        # exclude: ^(docs/|tests/|frontend/)
+        exclude: (^|.*/)test # Exclude any file/dir starting with 'test' in any part of the path
         # Specify additional dependencies if mypy needs them for your project
-        # additional_dependencies: ['pydantic', 'fastapi']
+        additional_dependencies: [
+            'pydantic',
+            'types-requests',
+            'types-python-jose',
+            # Add stubs for google APIs if available (often not)
+            # Add stubs for other missing libs like fastapi, bcrypt, jwt, dotenv, langgraph, pytest
+            'fastapi',
+            'bcrypt',
+            'python-jose[cryptography]', # Need extras for crypto
+            'python-dotenv',
+            'langgraph',
+            'pytest',
+            'google-api-python-client', # Might provide some google stubs
+            'types-pyjwt' # Stubs for PyJWT
+            ]

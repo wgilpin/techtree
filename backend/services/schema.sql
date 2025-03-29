@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS syllabi (
     user_id TEXT,
     topic TEXT NOT NULL,
     level TEXT NOT NULL,
+    user_entered_topic TEXT, -- Added column
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE SET NULL

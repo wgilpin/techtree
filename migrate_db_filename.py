@@ -110,7 +110,7 @@ def migrate_data():
                         dest_cursor.executemany(sql_insert, data_to_insert)
                     except sqlite3.IntegrityError as e:
                          logging.error(f"Integrity error inserting data into table {table}: {e}")
-                         logging.warning(f"Consider using 'INSERT OR IGNORE' or 'INSERT OR REPLACE' if appropriate.")
+                         logging.warning("Consider using 'INSERT OR IGNORE' or 'INSERT OR REPLACE' if appropriate.")
                          logging.warning(f"Rolling back changes for table {table} due to integrity error.")
                          dest_conn.rollback() # Rollback changes for the current table on error
                          continue # Skip to next table

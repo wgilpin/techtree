@@ -135,27 +135,27 @@ class LessonState(TypedDict):
 
     topic: str
     knowledge_level: str
-    syllabus: Optional[Dict]
+    syllabus: Optional[Dict[str, Any]] # Added type parameters
     lesson_title: Optional[str]
     module_title: Optional[str]
     generated_content: Optional[
         GeneratedLessonContent
-    ]  # Use Pydantic model here too? Yes.
+    ]
     user_responses: List[
-        Dict
-    ]  # Could potentially be List[UserResponseRecord] if defined
-    user_performance: Optional[Dict]  # Structure depends on how progress is tracked
+        Dict[str, Any] # Added type parameters
+    ]
+    user_performance: Optional[Dict[str, Any]] # Added type parameters
     user_id: Optional[str]
     lesson_uid: Optional[
         str
-    ]  # Assuming this is relevant for identifying the lesson instance
-    created_at: Optional[str]  # ISO format string
-    updated_at: Optional[str]  # ISO format string
+    ]
+    created_at: Optional[str]
+    updated_at: Optional[str]
     # Conversational flow fields
     conversation_history: List[
         Dict[str, str]
-    ]  # Stores {'role': 'user'/'assistant', 'content': '...'}
-    current_interaction_mode: str  # e.g., 'chatting', 'doing_exercise', 'taking_quiz'
+    ]
+    current_interaction_mode: str
     current_exercise_index: Optional[int]
     current_quiz_question_index: Optional[int]
     # Fields for on-demand generated items
@@ -163,9 +163,15 @@ class LessonState(TypedDict):
     generated_assessment_questions: Optional[List[AssessmentQuestion]]
     generated_exercise_ids: Optional[
         List[str]
-    ]  # To track generated items and prevent repeats
+    ]
     generated_assessment_question_ids: Optional[
         List[str]
-    ]  # To track generated items and prevent repeats
+    ]
     # Potentially add fields for error handling or feedback messages
-    error_message: Optional[str] = None
+    error_message: Optional[str]
+    # Fields added for interaction flow
+    active_exercise: Optional[Exercise]
+    active_assessment: Optional[AssessmentQuestion]
+    potential_answer: Optional[str]
+    # Added field to store the lesson's DB primary key
+    lesson_db_id: Optional[int]

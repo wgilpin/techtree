@@ -40,3 +40,46 @@ disable = [
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
+
+[dependency-groups]
+dev = [
+    "pandas-stubs>=2.2.3.250308",
+    "types-cachetools>=5.5.0.20240820",
+    "types-defusedxml>=0.7.0.20240218",
+    "types-httplib2>=0.22.0.20241221",
+    "types-protobuf>=5.29.1.20250315",
+    "types-psutil>=7.0.0.20250218",
+    "types-pycurl>=7.45.6.20250309",
+    "types-pygments>=2.19.0.20250305",
+    "types-pyopenssl>=24.1.0.20240722",
+    "types-python-jose>=3.4.0.20250224",
+    "types-pyyaml>=6.0.12.20250326",
+    "types-requests>=2.32.0.20250328",
+    "types-tqdm>=4.67.0.20250319",
+]
+
+# Added Mypy configuration section
+[tool.mypy]
+python_version = "3.12"
+strict = true
+
+# Ignore missing imports for libraries without readily available stubs
+[[tool.mypy.overrides]]
+module = [
+    "google.*",
+    "dotenv",
+    "langgraph.*",
+    "bcrypt",
+    "jwt",
+    "jose.*", # For python-jose
+    "fastapi.*", # Includes fastapi and fastapi.security
+    "pytest", # Ignore missing stubs for pytest itself
+    "streamlit", # If using streamlit
+    "matplotlib", # If using matplotlib
+    "tinydb", # If using tinydb
+    "flask", # If using flask
+    "markdown", # If using markdown
+    "uvicorn", # If using uvicorn
+    "email_validator" # If using email-validator
+]
+ignore_missing_imports = true

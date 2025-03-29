@@ -12,7 +12,7 @@ This script:
 import uuid
 from datetime import datetime
 import sys
-from tinydb import TinyDB, Query
+from tinydb import TinyDB
 
 # Add the current directory to the path
 sys.path.append(".")

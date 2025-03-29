@@ -1,16 +1,14 @@
 """fastApi router for onboarding"""
 
-import logging
-from typing import Dict, List, Optional
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 # Corrected import: get_db -> get_db_service
 # Import get_onboarding_service explicitly
-from backend.dependencies import get_db_service, get_onboarding_service
+from backend.dependencies import get_onboarding_service
 from backend.services.onboarding_service import OnboardingService
-from backend.services.sqlite_db import SQLiteDatabaseService # Import for type hint
 from backend.logger import logger # Import logger
 
 router = APIRouter()
@@ -22,35 +20,41 @@ class OnboardingRequest(BaseModel):
     topic: str
     user_id: Optional[str] = None # Optional user ID
 
+# Updated response model for starting onboarding
 class OnboardingResponse(BaseModel):
     """Response model for the initial onboarding state."""
-    session_id: str # Or some identifier for the onboarding session
-    initial_questions: List[Dict] # List of initial assessment questions
+    question: str
+    difficulty: str
+    search_status: Optional[str] = None
+    is_complete: bool = False # Should always be false initially
+    logs: Optional[List[str]] = None # For debugging
 
+# Updated request model for submitting an answer
 class AnswerRequest(BaseModel):
-    """Request model for submitting answers during onboarding."""
-    session_id: str
-    answers: Dict[str, str] # Question ID -> User Answer mapping
+    """Request model for submitting an answer during onboarding."""
+    answer: str # Expect a single answer string
 
-class AssessmentResult(BaseModel):
-    """Response model for the final assessment result."""
-    session_id: str
-    knowledge_level: str
-    recommendations: Optional[List[str]] = None # Optional recommendations
+# New response model for submitting an answer
+class AnswerResponse(BaseModel):
+    """Response model after submitting an answer."""
+    is_complete: bool
+    knowledge_level: Optional[str] = None # Only present if complete
+    score: Optional[float] = None # Only present if complete
+    feedback: str
+    next_question: Optional[str] = None # Only present if not complete
+    next_difficulty: Optional[str] = None # Only present if not complete
+
 
 # --- Onboarding Routes ---
 
 @router.post("/start", response_model=OnboardingResponse)
-async def start_onboarding(
+async def start_onboarding( # Added return type hint
     request_body: OnboardingRequest,
-    # Use get_db_service for dependency injection
-    db_service: SQLiteDatabaseService = Depends(get_db_service),
-    # Inject OnboardingService explicitly using the getter function
     onboarding_service: OnboardingService = Depends(get_onboarding_service)
-):
+) -> OnboardingResponse:
     """
     Starts the onboarding process for a given topic.
-    Generates initial assessment questions.
+    Generates the first assessment question.
     """
     logger.info(f"Starting onboarding for topic: {request_body.topic}, user: {request_body.user_id}")
     try:
@@ -58,14 +62,24 @@ async def start_onboarding(
         session_data = await onboarding_service.start_assessment(
             topic=request_body.topic, user_id=request_body.user_id
         )
-        # Expecting session_data to contain session_id and initial_questions
-        if not session_data or "session_id" not in session_data or "questions" not in session_data:
-             logger.error("Onboarding service did not return expected data structure.")
+
+        if session_data.get("error"):
+             logger.error(f"Onboarding service returned error: {session_data['error']}")
+             # Include logs in the error detail if available
+             error_detail = f"Failed to initialize onboarding: {session_data['error']}"
+             if session_data.get("logs"):
+                 error_detail += f" Logs: {'; '.join(session_data['logs'])}"
+             raise HTTPException(status_code=500, detail=error_detail)
+
+        if "question" not in session_data or "difficulty" not in session_data:
+             logger.error("Onboarding service did not return expected question data.")
              raise HTTPException(status_code=500, detail="Failed to initialize onboarding session.")
 
         return OnboardingResponse(
-            session_id=session_data["session_id"],
-            initial_questions=session_data["questions"]
+            question=session_data["question"],
+            difficulty=session_data["difficulty"],
+            search_status=session_data.get("search_status"),
+            logs=session_data.get("logs") # Include logs if present
         )
     except ValueError as e:
         logger.error(f"Value error starting onboarding: {e}", exc_info=True)
@@ -75,37 +89,44 @@ async def start_onboarding(
         raise HTTPException(status_code=500, detail="Internal server error during onboarding.") from e
 
 
-@router.post("/submit", response_model=AssessmentResult)
-async def submit_onboarding_answers(
+@router.post("/submit", response_model=AnswerResponse)
+async def submit_onboarding_answer( # Added return type hint
     request_body: AnswerRequest,
-    # Use get_db_service for dependency injection
-    db_service: SQLiteDatabaseService = Depends(get_db_service),
-    # Inject OnboardingService explicitly using the getter function
     onboarding_service: OnboardingService = Depends(get_onboarding_service)
-):
+) -> AnswerResponse:
     """
-    Submits user answers for the onboarding assessment and gets the result.
+    Submits a user answer for the current onboarding question and gets feedback/next question or result.
     """
-    logger.info(f"Submitting answers for onboarding session: {request_body.session_id}")
+    logger.info("Submitting onboarding answer...") # Avoid logging the answer itself
     try:
-        # Call the service method to process answers and get results
-        result_data = await onboarding_service.process_answers_and_get_level(
-            session_id=request_body.session_id, answers=request_body.answers
+        # Call the service method to process the single answer
+        result_data = await onboarding_service.submit_answer(
+            answer=request_body.answer
         )
 
-        if not result_data or "knowledge_level" not in result_data:
-            logger.error("Onboarding service did not return expected result structure.")
-            raise HTTPException(status_code=500, detail="Failed to finalize onboarding assessment.")
+        if result_data.get("is_complete"):
+            # Assessment is finished
+            logger.info("Onboarding assessment complete.")
+            return AnswerResponse(
+                is_complete=True,
+                knowledge_level=result_data.get("knowledge_level"),
+                score=result_data.get("score"),
+                feedback=result_data.get("feedback", "")
+            )
+        else:
+            # Assessment continues
+            logger.info("Onboarding assessment continues, returning next question.")
+            return AnswerResponse(
+                is_complete=False,
+                feedback=result_data.get("feedback", ""),
+                next_question=result_data.get("question"),
+                next_difficulty=result_data.get("difficulty")
+            )
 
-        return AssessmentResult(
-            session_id=request_body.session_id, # Return the session ID back
-            knowledge_level=result_data["knowledge_level"],
-            recommendations=result_data.get("recommendations") # Optional field
-        )
     except ValueError as e:
-        logger.error(f"Value error submitting onboarding answers: {e}", exc_info=True)
-        # Could be 400 for bad answers or 404 for bad session ID
+        logger.error(f"Value error submitting onboarding answer: {e}", exc_info=True)
+        # Could be 400 for bad answers or 404 if session wasn't started
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        logger.error(f"Unexpected error submitting onboarding answers: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error during assessment submission.") from e
+        logger.error(f"Unexpected error submitting onboarding answer: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error during answer submission.") from e

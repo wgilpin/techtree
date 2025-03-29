@@ -7,6 +7,8 @@ Main application module for the TechTree API.
 import sys
 import os
 from contextlib import asynccontextmanager # Import asynccontextmanager
+from typing import AsyncIterator
+
 
 # Add project root to sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -20,7 +22,7 @@ from backend.logger import logger
 
 # Define the lifespan context manager
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """
     Manages application startup and shutdown events.
     """

@@ -1,35 +1,69 @@
 # backend/services/auth_service.py
 import bcrypt
 import jwt
-import os # Added import
+import os
 from datetime import datetime, timedelta
 from backend.services.sqlite_db import SQLiteDatabaseService
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional # Added cast
 
 # Settings for JWT
-# Use the same environment variable logic as dependencies.py
 SECRET_KEY = os.environ.get("SECRET_KEY")
+# Ensure SECRET_KEY is set at module load time
+if SECRET_KEY is None:
+    raise ValueError("SECRET_KEY environment variable not set. Cannot start AuthService.")
+
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 40320  # Increased to 28 days  (28 * 60 * 24)
+ACCESS_TOKEN_EXPIRE_MINUTES = 40320  # 28 days
 
 class AuthService:
-    # Make db_service a required argument and add type hint
+    """Provides authentication related services like registration, login, and token verification."""
     def __init__(self, db_service: SQLiteDatabaseService):
-        # Remove the fallback initialization and print statement
+        """
+        Initializes the AuthService.
+
+        Args:
+            db_service: An instance of SQLiteDatabaseService for database interactions.
+        """
         self.db_service = db_service
 
     def _hash_password(self, password: str) -> str:
-        """Hash a password for storing"""
+        """
+        Hashes a password for storing securely.
+
+        Args:
+            password: The plain text password.
+
+        Returns:
+            The hashed password as a string.
+        """
         salt = bcrypt.gensalt()
         hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
         return hashed.decode('utf-8')
 
     def _verify_password(self, plain_password: str, hashed_password: str) -> bool:
-        """Verify a stored password against a provided password"""
+        """
+        Verifies a stored password against a provided password.
+
+        Args:
+            plain_password: The password provided by the user.
+            hashed_password: The stored hashed password.
+
+        Returns:
+            True if the password matches, False otherwise.
+        """
         return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
 
     def _create_access_token(self, data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
-        """Create a JWT access token"""
+        """
+        Creates a JWT access token.
+
+        Args:
+            data: The data to encode in the token (typically user identifier).
+            expires_delta: Optional timedelta object for token expiry. Defaults to ACCESS_TOKEN_EXPIRE_MINUTES.
+
+        Returns:
+            The encoded JWT token as a string.
+        """
         to_encode = data.copy()
         if expires_delta:
             expire = datetime.utcnow() + expires_delta
@@ -37,11 +71,26 @@ class AuthService:
             expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
 
         to_encode.update({"exp": expire})
+        # Add assertion for mypy
+        assert SECRET_KEY is not None, "SECRET_KEY cannot be None here due to initial check."
         encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-        return encoded_jwt
+        return encoded_jwt  # type: ignore[return-value]
 
     async def register(self, email: str, password: str, name: Optional[str] = None) -> Dict[str, Any]:
-        """Register a new user"""
+        """
+        Registers a new user in the system.
+
+        Args:
+            email: The user's email address.
+            password: The user's chosen password.
+            name: Optional user's name.
+
+        Returns:
+            A dictionary containing user details and access token upon successful registration.
+
+        Raises:
+            ValueError: If a user with the given email already exists.
+        """
         try:
             print(f"Register method called with email: {email}, name: {name}")
 
@@ -53,7 +102,7 @@ class AuthService:
 
             # Hash the password
             hashed_password = self._hash_password(password)
-            print(f"Password hashed successfully")
+            print("Password hashed successfully")
 
             # Create the user
             user_id = self.db_service.create_user(email, hashed_password, name)
@@ -65,7 +114,7 @@ class AuthService:
                 data={"sub": user_id, "email": email},
                 expires_delta=access_token_expires
             )
-            print(f"Access token created")
+            print("Access token created")
 
             result = {
                 "user_id": user_id,
@@ -81,7 +130,19 @@ class AuthService:
             raise
 
     async def login(self, email: str, password: str) -> Dict[str, Any]:
-        """Authenticate a user and return a token"""
+        """
+        Authenticates a user and returns an access token.
+
+        Args:
+            email: The user's email address.
+            password: The user's password.
+
+        Returns:
+            A dictionary containing user details and access token upon successful login.
+
+        Raises:
+            ValueError: If the email or password is incorrect.
+        """
         # Get the user
         user = self.db_service.get_user_by_email(email)
         if not user:
@@ -107,21 +168,43 @@ class AuthService:
         }
 
     def verify_token(self, token: str) -> Dict[str, Any]:
-        """Verify JWT token and return payload"""
+        """
+        Verifies a JWT token and returns its payload if valid.
+
+        Args:
+            token: The JWT token string.
+
+        Returns:
+            The decoded payload of the token as a dictionary.
+
+        Raises:
+            ValueError: If the token is invalid, expired, or the user doesn't exist.
+        """
         try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            # Add assertion for mypy
+            assert SECRET_KEY is not None, "SECRET_KEY cannot be None here due to initial check."
+            # jwt.decode returns Dict[str, Any] if successful
+            payload: Dict[str, Any] = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
             user_id = payload.get("sub")
             if user_id is None:
-                raise ValueError("Invalid token")
+                raise ValueError("Invalid token: Missing 'sub' claim")
 
             # Additional verification - check if user still exists
             user = self.db_service.get_user_by_id(user_id)
             if not user:
-                raise ValueError("User not found")
+                raise ValueError(f"User with ID {user_id} not found")
             # add the user name to the payload
             payload["name"] = user["name"]
 
+            # Type is already known from line 187
             return payload
+        except jwt.ExpiredSignatureError as e:
+             print(f"Token expired: {str(e)}")
+             raise ValueError("Token has expired") from e
+        except jwt.InvalidTokenError as e:
+            print(f"Invalid token: {str(e)}")
+            raise ValueError(f"Invalid token: {str(e)}") from e
         except Exception as e:
             print(f"Error decoding token: {str(e)}")
-            raise ValueError(f"Invalid token: {str(e)}") from e
+            # Catch other potential errors during decoding or user lookup
+            raise ValueError(f"Token verification failed: {str(e)}") from e

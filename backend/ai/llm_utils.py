@@ -17,13 +17,30 @@ from backend.logger import logger
 # Load environment variables
 load_dotenv()
 
+# Define MODEL type hint before assignment
+MODEL: Optional[genai.GenerativeModel] = None
+
 # Configure Gemini API (Consider moving this configuration elsewhere if used broadly)
 # For now, keep it here as this module is the primary LLM interface
 try:
-    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-    MODEL = genai.GenerativeModel(os.environ["GEMINI_MODEL"])
+    gemini_api_key = os.environ.get("GEMINI_API_KEY")
+    gemini_model_name = os.environ.get("GEMINI_MODEL")
+    if not gemini_api_key:
+        logger.error("Missing environment variable: GEMINI_API_KEY")
+        raise KeyError("GEMINI_API_KEY")
+    if not gemini_model_name:
+        logger.error("Missing environment variable: GEMINI_MODEL")
+        raise KeyError("GEMINI_MODEL")
+
+    genai.configure(api_key=gemini_api_key)
+    MODEL = genai.GenerativeModel(gemini_model_name)
+    logger.info(f"Gemini model '{gemini_model_name}' configured successfully.")
+
 except KeyError as e:
-    logger.error(f"Missing environment variable for Gemini configuration: {e}")
+    logger.error(f"Gemini configuration failed due to missing environment variable: {e}")
+    MODEL = None # This assignment is now compatible with the type hint
+except Exception as e:
+    logger.error(f"An unexpected error occurred during Gemini configuration: {e}", exc_info=True)
     MODEL = None
 
 
@@ -31,8 +48,9 @@ except KeyError as e:
 T = TypeVar("T", bound=BaseModel)
 
 
+# Added type parameters to Callable
 def call_with_retry(
-    func: Callable,
+    func: Callable[..., Any],
     *args: Any,
     max_retries: int = 5,
     initial_delay: float = 1.0,
@@ -73,7 +91,7 @@ def call_with_retry(
             # Calculate delay with exponential backoff and jitter
             current_delay = delay * (2 ** (retries - 1)) + random.uniform(
                 0, 0.5
-            )  # Smaller jitter
+            )
             logger.warning(
                 f"ResourceExhausted error calling {func.__name__}."
                 f" Retrying in {current_delay:.2f} seconds... (Attempt {retries}/{max_retries})"
@@ -124,7 +142,7 @@ def call_llm_with_json_parsing(
         response_text = response.text
         logger.debug(
             f"Raw LLM response: {response_text[:500]}..."
-        )  # Log truncated response
+        )
 
     except ResourceExhausted:
         logger.error(
@@ -136,32 +154,35 @@ def call_llm_with_json_parsing(
         return None
 
     # Attempt to extract JSON from the response text
-    # Handles potential markdown code blocks ```json ... ```
     json_patterns = [
-        r"```(?:json)?\s*({.*?})```",  # JSON within markdown code blocks
-        r"({[\s\S]*})",  # Any JSON object (more lenient)
+        r"```(?:json)?\s*({.*?})```",
+        r"({[\s\S]*})",
     ]
-    parsed_json = None
+    # Explicitly type parsed_json
+    parsed_json: Optional[Dict[str, Any]] = None
     json_str_cleaned = None
 
     for pattern in json_patterns:
         json_match = re.search(pattern, response_text, re.DOTALL)
         if json_match:
             json_str = json_match.group(1)
-            # Basic cleaning (remove escaped newlines, be cautious with backslashes)
             json_str_cleaned = re.sub(r"\\n", " ", json_str)
-            # Avoid removing necessary escapes
-            # json_str_cleaned = re.sub(r"\\", "", json_str_cleaned)
             try:
-                parsed_json = json.loads(json_str_cleaned)
-                logger.debug(f"Successfully parsed JSON using pattern: {pattern}")
-                break  # Stop after first successful parse
+                # json.loads returns Any, cast it for safety
+                loaded_data = json.loads(json_str_cleaned)
+                if isinstance(loaded_data, dict):
+                    parsed_json = loaded_data
+                    logger.debug(f"Successfully parsed JSON using pattern: {pattern}")
+                    break
+                else:
+                    logger.warning(f"Parsed JSON is not a dictionary: {type(loaded_data)}")
+                    parsed_json = None # Reset if not a dict
             except json.JSONDecodeError as e:
                 logger.warning(
                     f"JSON parsing failed for pattern {pattern} with "
                     f"cleaned string: {e}. String: '{json_str_cleaned[:100]}...'"
                 )
-                continue  # Try next pattern
+                continue
 
     if parsed_json is None:
         logger.error(
@@ -176,16 +197,16 @@ def call_llm_with_json_parsing(
             logger.debug(
                 f"Successfully validated JSON against model: {validation_model.__name__}"
             )
-            return validated_data
+            return validated_data # Returns type T
         except ValidationError as e:
             logger.error(
                 f"Pydantic validation failed for model {validation_model.__name__}:"
                 f" {e}. Parsed JSON: {parsed_json}"
             )
-            return None  # Validation failed
+            return None
     else:
         # Return the raw parsed dictionary if no validation model is provided
-        return parsed_json
+        return parsed_json # Returns Dict[str, Any]
 
 
 def call_llm_plain_text(
@@ -219,7 +240,8 @@ def call_llm_plain_text(
         logger.debug(
             f"Raw LLM response (plain text): {response_text[:500]}..."
         )
-        return response_text
+        # Ensure response_text is actually a string before returning
+        return response_text if isinstance(response_text, str) else None
 
     except ResourceExhausted:
         logger.error(
@@ -269,7 +291,7 @@ if __name__ == "__main__":
         TEST_PROMPT_INVALID_JSON, validation_model=SimpleResult
     )
     if result2:
-        print(f"Result: {result2}")  # Should not reach here ideally
+        print(f"Result: {result2}")
     else:
         print("Failed as expected.")
 
@@ -279,7 +301,7 @@ if __name__ == "__main__":
         TEST_PROMPT_INVALID_MODEL, validation_model=SimpleResult
     )
     if result3:
-        print(f"Result: {result3}")  # Should not reach here ideally
+        print(f"Result: {result3}")
     else:
         print("Failed as expected.")
 

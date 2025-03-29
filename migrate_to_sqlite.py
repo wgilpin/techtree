@@ -1,7 +1,4 @@
-import os
-import json
 import sys
-from tinydb import TinyDB
 from backend.services.db import DatabaseService
 from backend.services.sqlite_db import SQLiteDatabaseService
 

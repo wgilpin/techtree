@@ -2,10 +2,10 @@
 
 # pylint: disable=broad-exception-caught,singleton-comparison
 
-from typing import Any, Dict, List, Optional # Added Optional
+from typing import Any, Dict, List, cast # Added cast
 
 from dotenv import load_dotenv
-from langgraph.graph import StateGraph
+from langgraph.graph import StateGraph, END # Added END import
 
 
 from backend.logger import logger  # Ensure logger is available
@@ -55,24 +55,20 @@ class LessonAI:
         workflow = StateGraph(LessonState)
 
         # Add nodes for the chat turn using functions from nodes.py
-        workflow.add_node("classify_intent", nodes.classify_intent) # Corrected node name
+        workflow.add_node("classify_intent", nodes.classify_intent)
         workflow.add_node("generate_chat_response", nodes.generate_chat_response)
-        # Add new generation nodes
         workflow.add_node("generate_new_exercise", nodes.generate_new_exercise)
-        workflow.add_node(
-            "generate_new_assessment", nodes.generate_new_assessment) # Corrected node name
-        workflow.add_node("evaluate_answer", nodes.evaluate_answer) # Corrected node name
-        # Removed "update_progress" node as its implementation is missing
+        workflow.add_node("generate_new_assessment", nodes.generate_new_assessment)
+        workflow.add_node("evaluate_answer", nodes.evaluate_answer)
 
         # Entry point for a chat turn
-        workflow.set_entry_point("classify_intent") # Start by classifying intent
+        workflow.set_entry_point("classify_intent")
 
         # Conditional routing after classifying intent
         workflow.add_conditional_edges(
             "classify_intent",
-            _route_message_logic,  # Use the local routing helper function
+            _route_message_logic,
             {
-                # Keys match return values of _route_message_logic
                 "generate_chat_response": "generate_chat_response",
                 "generate_new_exercise": "generate_new_exercise",
                 "generate_new_assessment": "generate_new_assessment",
@@ -81,13 +77,10 @@ class LessonAI:
         )
 
         # Edges leading back to the end after processing
-        # State saving (like update_progress) should happen outside the graph run
-        workflow.add_edge("generate_chat_response", "__end__")
-        workflow.add_edge("generate_new_exercise", "__end__")
-        workflow.add_edge("generate_new_assessment", "__end__")
-        workflow.add_edge("evaluate_answer", "__end__")
-
-        # Removed edges related to "update_progress"
+        workflow.add_edge("generate_chat_response", END) # Use END constant
+        workflow.add_edge("generate_new_exercise", END) # Use END constant
+        workflow.add_edge("generate_new_assessment", END) # Use END constant
+        workflow.add_edge("evaluate_answer", END) # Use END constant
 
         return workflow
 
@@ -105,10 +98,11 @@ class LessonAI:
         ) + [{"role": "user", "content": user_message}]
 
         # Ensure input_state matches LessonState structure
-        input_state: LessonState = {
-            **current_state, # type: ignore
+        # Cast to Dict for invoke, as LessonState is TypedDict
+        input_state: Dict[str, Any] = cast(Dict[str, Any], {
+            **current_state,
             "conversation_history": updated_history,
-        }
+        })
 
         # Invoke the chat graph
         # Assumes self.chat_graph was compiled in __init__
@@ -117,7 +111,8 @@ class LessonAI:
         # Merge output state changes back
         # Ensure the final state structure matches LessonState
         # Note: LangGraph output might only contain changed fields.
-        final_state: LessonState = {**input_state, **output_state} # type: ignore
+        # Cast merged dict back to LessonState
+        final_state: LessonState = cast(LessonState, {**input_state, **output_state})
         return final_state
 
     # --- Method to Start Chat (using imported node function) ---
@@ -127,36 +122,28 @@ class LessonAI:
         Assumes initial_state contains necessary context (topic, title, user_id, etc.)
         but has an empty conversation_history.
         """
-        # Logic to generate initial message needs refinement.
-        # For now, just set a default welcome message and mode.
-        # Removed call to non-existent nodes.start_conversation
         logger.info("Starting chat, setting initial state.")
         try:
-            # Option 1: Set a fixed welcome message
             welcome_message: Dict[str, str] = {
                  "role": "assistant",
                  "content": "Welcome to your lesson! Feel free to ask questions or tell me when you're ready for an exercise.",
             }
-            # Option 2: Call generate_chat_response with a specific prompt (more complex)
-            # initial_prompt_state = {**initial_state, "conversation_history": [{"role": "system", "content": "Start the lesson."}]}
-            # welcome_state = nodes.generate_chat_response(initial_prompt_state)
-            # welcome_message = welcome_state["conversation_history"][-1] # Get the generated message
 
-            return {
-                **initial_state, # type: ignore
+            # Cast merged dict to LessonState
+            return cast(LessonState, {
+                **initial_state,
                 "conversation_history": [welcome_message],
                 "current_interaction_mode": "chatting",
-            }
+            })
         except Exception as e:
-            # Log error, return state with a fallback message
             logger.error(f"Error during start_chat: {e}", exc_info=True)
             fallback_message: Dict[str, str] = {
                 "role": "assistant",
                 "content": "Welcome! Ready to start the lesson?",
             }
-            # Ensure the returned state matches LessonState structure
-            return {
-                **initial_state, # type: ignore
+            # Cast merged dict to LessonState
+            return cast(LessonState, {
+                **initial_state,
                 "conversation_history": [fallback_message],
                 "current_interaction_mode": "chatting",
-            }
+            })

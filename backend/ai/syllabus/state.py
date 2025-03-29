@@ -1,6 +1,6 @@
 """Defines the state dictionary for the syllabus generation graph."""
 
-from typing import Dict, List, Optional, TypedDict
+from typing import Dict, List, Optional, TypedDict, Any # Added Any
 
 class SyllabusState(TypedDict):
     """TypedDict representing the state of the syllabus generation graph."""
@@ -9,10 +9,10 @@ class SyllabusState(TypedDict):
     user_knowledge_level: (
         str  # 'beginner', 'early learner', 'good knowledge', or 'advanced'
     )
-    existing_syllabus: Optional[Dict]  # Syllabus loaded from DB
+    existing_syllabus: Optional[Dict[str, Any]]  # Added type parameters
     search_results: List[str]  # Content snippets from web search
     generated_syllabus: Optional[
-        Dict
+        Dict[str, Any] # Added type parameters
     ]  # Syllabus generated/updated by LLM in current run
     user_feedback: Optional[str]  # User feedback for syllabus revision
     syllabus_accepted: (

@@ -6,6 +6,8 @@ import os
 # Adjust the import path based on your project structure and how 'app' is defined
 import sys
 from unittest.mock import AsyncMock, MagicMock
+from typing import Generator, Dict, Any
+
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,12 +20,11 @@ from backend.dependencies import get_interaction_service  # New
 from backend.dependencies import get_current_user
 from backend.main import app
 # Import models needed for tests
-from backend.models import (AssessmentQuestion, Exercise,
-                            GeneratedLessonContent, User)
-from backend.services.lesson_exposition_service import LessonExpositionService
+from backend.models import User, GeneratedLessonContent, Exercise, AssessmentQuestion, Metadata
+
 # Import the new service classes for mocking specs
-from backend.services.lesson_interaction_service import \
-    LessonInteractionService
+from backend.services.lesson_exposition_service import LessonExpositionService
+from backend.services.lesson_interaction_service import LessonInteractionService
 
 # Removed old imports
 
@@ -35,24 +36,24 @@ client = TestClient(app)
 
 # Mock the dependency get_current_user (remains the same)
 @pytest.fixture(autouse=True)
-def override_get_current_user():
+def override_get_current_user() -> Generator[User, None, None]: # Yield User directly
     mock_user = User(
         user_id="test_user_id",
         email="test@example.com",
         name="Test User",
     )
 
-    def mock_dependency():
+    def mock_dependency() -> User:
         return mock_user
 
     app.dependency_overrides[get_current_user] = mock_dependency
-    yield
+    yield mock_user # Yield the user object
     app.dependency_overrides = {}
 
 
 # Mock the LessonInteractionService
 @pytest.fixture
-def mock_interaction_service():
+def mock_interaction_service() -> Generator[MagicMock, None, None]: # Fixture yields
     print("Setting up mock_interaction_service override")
     mock_service = MagicMock(spec=LessonInteractionService)
     mock_service.get_or_create_lesson_state = AsyncMock()
@@ -61,7 +62,7 @@ def mock_interaction_service():
     mock_service.generate_assessment_question = AsyncMock()
     mock_service.update_lesson_progress = AsyncMock()
 
-    def override_get_interaction_service():
+    def override_get_interaction_service() -> MagicMock:
         print("Using mock get_interaction_service")
         return mock_service
 
@@ -75,12 +76,12 @@ def mock_interaction_service():
 
 # Mock the LessonExpositionService
 @pytest.fixture
-def mock_exposition_service():
+def mock_exposition_service() -> Generator[MagicMock, None, None]: # Fixture yields
     print("Setting up mock_exposition_service override")
     mock_service = MagicMock(spec=LessonExpositionService)
     mock_service.get_exposition_by_id = AsyncMock()
 
-    def override_get_exposition_service():
+    def override_get_exposition_service() -> MagicMock:
         print("Using mock get_exposition_service")
         return mock_service
 
@@ -96,22 +97,28 @@ def mock_exposition_service():
 
 
 # Test GET /{syllabus_id}/{module_index}/{lesson_index}
-def test_get_lesson_data_success(mock_interaction_service):
+def test_get_lesson_data_success(mock_interaction_service: MagicMock) -> None:
     """Test successful retrieval of lesson data and state."""
     print("Running test_get_lesson_data_success")
     syllabus_id = "syllabus1"
     module_index = 0
     lesson_index = 1
     lesson_db_id = 123
-    mock_content_dict = {
+    # Create Metadata object first
+    mock_metadata = Metadata(title="Test Lesson")
+    mock_content_dict: Dict[str, Any] = { # Add type hint
         "topic": "Test Topic",
         "level": "beginner",
         "exposition_content": "<p>Test Exposition</p>",
-        "metadata": {"title": "Test Lesson"},
-        "exercises": [],
-        "assessment_questions": [],
+        "metadata": mock_metadata, # Use the Metadata object
     }
-    mock_content_obj = GeneratedLessonContent(**mock_content_dict)
+    # Explicitly pass args to avoid mypy **dict inference issues
+    mock_content_obj = GeneratedLessonContent(
+        topic=mock_content_dict["topic"],
+        level=mock_content_dict["level"],
+        exposition_content=mock_content_dict["exposition_content"],
+        metadata=mock_content_dict["metadata"],
+    )
     mock_state = {
         "conversation_history": [],
         "current_interaction_mode": "chatting",
@@ -136,7 +143,7 @@ def test_get_lesson_data_success(mock_interaction_service):
     print("test_get_lesson_data_success finished")
 
 
-def test_get_lesson_data_not_found(mock_interaction_service):
+def test_get_lesson_data_not_found(mock_interaction_service: MagicMock) -> None:
     """Test retrieving lesson data when exposition cannot be found/generated."""
     print("Running test_get_lesson_data_not_found")
     syllabus_id = "syllabus_bad"
@@ -155,7 +162,7 @@ def test_get_lesson_data_not_found(mock_interaction_service):
 
 
 # --- Tests for POST /chat ---
-def test_handle_chat_message_success(mock_interaction_service):
+def test_handle_chat_message_success(mock_interaction_service: MagicMock) -> None:
     """Test successfully sending a chat message and getting a response."""
     print("Running test_handle_chat_message_success")
     syllabus_id = "syllabus1"
@@ -182,7 +189,7 @@ def test_handle_chat_message_success(mock_interaction_service):
     print("test_handle_chat_message_success finished")
 
 
-def test_handle_chat_message_unauthenticated():
+def test_handle_chat_message_unauthenticated() -> None:
     """Test sending chat message without authentication."""
     print("Running test_handle_chat_message_unauthenticated")
     app.dependency_overrides[get_current_user] = lambda: None
@@ -198,7 +205,7 @@ def test_handle_chat_message_unauthenticated():
     print("test_handle_chat_message_unauthenticated finished")
 
 
-def test_handle_chat_message_service_error(mock_interaction_service):
+def test_handle_chat_message_service_error(mock_interaction_service: MagicMock) -> None:
     """Test handling an error structure returned from the service during chat."""
     print("Running test_handle_chat_message_service_error")
     syllabus_id = "syllabus1"
@@ -219,7 +226,7 @@ def test_handle_chat_message_service_error(mock_interaction_service):
     print("test_handle_chat_message_service_error finished")
 
 
-def test_handle_chat_message_state_not_found(mock_interaction_service):
+def test_handle_chat_message_state_not_found(mock_interaction_service: MagicMock) -> None:
     """Test handling ValueError (e.g., state not found) raised by the service."""
     print("Running test_handle_chat_message_state_not_found")
     syllabus_id = "syllabus1"
@@ -239,7 +246,7 @@ def test_handle_chat_message_state_not_found(mock_interaction_service):
 
 
 # --- Tests for POST /exercise/{syllabus_id}/{module_index}/{lesson_index} ---
-def test_generate_exercise_success(mock_interaction_service):
+def test_generate_exercise_success(mock_interaction_service: MagicMock) -> None:
     """Test successfully generating an exercise."""
     print("Running test_generate_exercise_success")
     syllabus_id = "syllabus1"
@@ -266,7 +273,7 @@ def test_generate_exercise_success(mock_interaction_service):
     print("test_generate_exercise_success finished")
 
 
-def test_generate_exercise_unauthenticated():
+def test_generate_exercise_unauthenticated() -> None:
     """Test generating exercise without authentication."""
     print("Running test_generate_exercise_unauthenticated")
     app.dependency_overrides[get_current_user] = lambda: None
@@ -281,7 +288,7 @@ def test_generate_exercise_unauthenticated():
     print("test_generate_exercise_unauthenticated finished")
 
 
-def test_generate_exercise_not_found(mock_interaction_service):
+def test_generate_exercise_not_found(mock_interaction_service: MagicMock) -> None:
     """Test generating exercise when lesson state is not found."""
     print("Running test_generate_exercise_not_found")
     syllabus_id = "syllabus_bad"
@@ -298,7 +305,7 @@ def test_generate_exercise_not_found(mock_interaction_service):
     print("test_generate_exercise_not_found finished")
 
 
-def test_generate_exercise_runtime_error(mock_interaction_service):
+def test_generate_exercise_runtime_error(mock_interaction_service: MagicMock) -> None:
     """Test generating exercise when the service raises a runtime error."""
     print("Running test_generate_exercise_runtime_error")
     syllabus_id = "syllabus1"
@@ -316,7 +323,7 @@ def test_generate_exercise_runtime_error(mock_interaction_service):
 
 
 # --- Tests for POST /assessment/{syllabus_id}/{module_index}/{lesson_index} ---
-def test_generate_assessment_question_success(mock_interaction_service):
+def test_generate_assessment_question_success(mock_interaction_service: MagicMock) -> None:
     """Test successfully generating an assessment question."""
     print("Running test_generate_assessment_question_success")
     syllabus_id = "syllabus1"
@@ -345,7 +352,7 @@ def test_generate_assessment_question_success(mock_interaction_service):
     print("test_generate_assessment_question_success finished")
 
 
-def test_generate_assessment_question_unauthenticated():
+def test_generate_assessment_question_unauthenticated() -> None:
     """Test generating assessment question without authentication."""
     print("Running test_generate_assessment_question_unauthenticated")
     app.dependency_overrides[get_current_user] = lambda: None
@@ -360,7 +367,7 @@ def test_generate_assessment_question_unauthenticated():
     print("test_generate_assessment_question_unauthenticated finished")
 
 
-def test_generate_assessment_question_not_found(mock_interaction_service):
+def test_generate_assessment_question_not_found(mock_interaction_service: MagicMock) -> None:
     """Test generating assessment question when lesson state is not found."""
     print("Running test_generate_assessment_question_not_found")
     syllabus_id = "syllabus_bad"
@@ -377,7 +384,7 @@ def test_generate_assessment_question_not_found(mock_interaction_service):
     print("test_generate_assessment_question_not_found finished")
 
 
-def test_generate_assessment_question_runtime_error(mock_interaction_service):
+def test_generate_assessment_question_runtime_error(mock_interaction_service: MagicMock) -> None:
     """Test generating assessment question when the service raises a runtime error."""
     print("Running test_generate_assessment_question_runtime_error")
     syllabus_id = "syllabus1"
@@ -395,19 +402,26 @@ def test_generate_assessment_question_runtime_error(mock_interaction_service):
 
 
 # --- Test for GET /by-id/{lesson_id} ---
-def test_get_lesson_exposition_by_id_success(mock_exposition_service):
+def test_get_lesson_exposition_by_id_success(mock_exposition_service: MagicMock) -> None:
     """Test successfully retrieving lesson exposition by ID."""
     print("Running test_get_lesson_exposition_by_id_success")
     lesson_db_id = 456
-    mock_exposition_dict = {
+    # Create Metadata object first
+    mock_metadata = Metadata(title="Expo Lesson")
+    mock_exposition_dict: Dict[str, Any] = { # Add type hint
         "topic": "Expo Topic",
         "level": "intermediate",
         "exposition_content": "Expo Content",
-        "metadata": {"title": "Expo Lesson"},
-        "exercises": [],
-        "assessment_questions": [],
+        "metadata": mock_metadata, # Use the Metadata object
+        # exercises and assessment_questions are not part of GeneratedLessonContent model
     }
-    mock_exposition_obj = GeneratedLessonContent(**mock_exposition_dict)
+    # Explicitly pass args to avoid mypy **dict inference issues
+    mock_exposition_obj = GeneratedLessonContent(
+        topic=mock_exposition_dict["topic"],
+        level=mock_exposition_dict["level"],
+        exposition_content=mock_exposition_dict["exposition_content"],
+        metadata=mock_exposition_dict["metadata"],
+    )
     mock_exposition_service.get_exposition_by_id.return_value = mock_exposition_obj
     response = client.get(f"/lesson/by-id/{lesson_db_id}")
     assert response.status_code == 200
@@ -418,7 +432,7 @@ def test_get_lesson_exposition_by_id_success(mock_exposition_service):
     print("test_get_lesson_exposition_by_id_success finished")
 
 
-def test_get_lesson_exposition_by_id_not_found(mock_exposition_service):
+def test_get_lesson_exposition_by_id_not_found(mock_exposition_service: MagicMock) -> None:
     """Test retrieving non-existent lesson exposition by ID."""
     print("Running test_get_lesson_exposition_by_id_not_found")
     lesson_db_id = 999
@@ -435,7 +449,7 @@ def test_get_lesson_exposition_by_id_not_found(mock_exposition_service):
 
 
 # --- Test for POST /progress/{syllabus_id}/{module_index}/{lesson_index} ---
-def test_update_lesson_progress_success(mock_interaction_service):
+def test_update_lesson_progress_success(mock_interaction_service: MagicMock) -> None:
     """Test successfully updating lesson progress."""
     print("Running test_update_lesson_progress_success")
     syllabus_id = "syllabus1"
@@ -468,7 +482,7 @@ def test_update_lesson_progress_success(mock_interaction_service):
     print("test_update_lesson_progress_success finished")
 
 
-def test_update_lesson_progress_invalid_status(mock_interaction_service):
+def test_update_lesson_progress_invalid_status(mock_interaction_service: MagicMock) -> None:
     """Test updating progress with an invalid status."""
     print("Running test_update_lesson_progress_invalid_status")
     syllabus_id = "syllabus1"
@@ -487,7 +501,7 @@ def test_update_lesson_progress_invalid_status(mock_interaction_service):
     print("test_update_lesson_progress_invalid_status finished")
 
 
-def test_update_lesson_progress_unauthenticated():
+def test_update_lesson_progress_unauthenticated() -> None:
     """Test updating progress without authentication."""
     print("Running test_update_lesson_progress_unauthenticated")
     app.dependency_overrides[get_current_user] = lambda: None

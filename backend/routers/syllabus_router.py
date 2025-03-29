@@ -62,36 +62,30 @@ class SyllabusListResponse(BaseModel):
     summary="Generate a new syllabus", # Add summary for docs
     description="Generates a new syllabus based on topic and level, optionally personalized.", # Add description
 )
-async def generate_syllabus(
+async def generate_syllabus( # Added return type hint
     request_body: SyllabusRequest,
-    # db_service removed - assuming SyllabusService handles its DB dependency
     syllabus_service: SyllabusService = Depends(get_syllabus_service),
-    current_user: User = Depends(get_current_user) # Ensure user is authenticated
-):
+    current_user: User = Depends(get_current_user)
+) -> SyllabusResponse:
     """
     Generates a new syllabus based on the topic and level.
     Optionally personalizes based on user ID if provided.
     """
-    # Use structured logging if possible
     logger.info(
         "Generating syllabus request received",
         extra={
             "topic": request_body.topic,
             "level": request_body.level,
-            "user_id": current_user.user_id, # Use authenticated user ID
+            "user_id": current_user.user_id,
         },
     )
     try:
-        # Await the service call as it likely involves I/O (DB, AI model)
         syllabus_data = await syllabus_service.get_or_generate_syllabus(
             topic=request_body.topic,
             level=request_body.level,
-            user_id=current_user.user_id, # Pass authenticated user ID
+            user_id=current_user.user_id,
         )
 
-        # Ideally, syllabus_service returns a Pydantic model or raises specific
-        # exceptions for failures (e.g., GenerationError, ValidationError).
-        # If it returns a dict, validation is needed here.
         if not syllabus_data:
              logger.error("Syllabus service returned empty data.")
              raise HTTPException(
@@ -99,20 +93,18 @@ async def generate_syllabus(
                  detail="Failed to generate syllabus data.",
              )
 
-        # Validate the structure (or let Pydantic handle it if service returns model)
-        # This assumes syllabus_data is a dict matching SyllabusResponse structure
-        # Pydantic will raise validation errors if the structure is wrong when creating SyllabusResponse
+        # Pydantic will validate the structure when creating SyllabusResponse
         return SyllabusResponse(**syllabus_data)
 
-    except ValueError as e: # Catch specific expected errors from the service
+    except ValueError as e:
         logger.warning(f"Validation error generating syllabus: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid input: {e}"
         ) from e
-    except HTTPException as http_exc: # Re-raise HTTP exceptions directly
+    except HTTPException as http_exc:
         raise http_exc
-    except Exception as e: # Catch unexpected errors
+    except Exception as e:
         logger.error(f"Unexpected error generating syllabus: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -125,25 +117,21 @@ async def generate_syllabus(
     response_model=SyllabusResponse,
     summary="Get syllabus by ID",
     description="Retrieves a specific syllabus by its unique ID.",
-    responses={ # Add specific responses for docs
+    responses={
         status.HTTP_404_NOT_FOUND: {"description": "Syllabus not found"},
         status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
     }
 )
-async def get_syllabus_by_id(
+async def get_syllabus_by_id( # Added return type hint
     syllabus_id: str,
-    # db_service removed
     syllabus_service: SyllabusService = Depends(get_syllabus_service),
-    current_user: User = Depends(get_current_user) # Ensure user is authenticated
-):
+    current_user: User = Depends(get_current_user)
+) -> SyllabusResponse:
     """
     Retrieves a specific syllabus by its unique ID.
     """
     logger.info(f"Retrieving syllabus with ID: {syllabus_id} for user: {current_user.user_id}")
     try:
-        # Await the service call assuming it might involve I/O
-        # Note: get_syllabus_by_id in service doesn't currently use user_id,
-        # but keeping current_user dependency for consistency/future use.
         syllabus_data = await syllabus_service.get_syllabus_by_id(syllabus_id)
 
         if syllabus_data is None:
@@ -153,13 +141,11 @@ async def get_syllabus_by_id(
                 detail=f"Syllabus with ID '{syllabus_id}' not found.",
             )
 
-        # Let Pydantic validate the structure when creating the response object
-        # This assumes syllabus_data is a dict matching SyllabusResponse structure
         return SyllabusResponse(**syllabus_data)
 
-    except HTTPException as http_exc: # Re-raise known HTTP errors
+    except HTTPException as http_exc:
         raise http_exc
-    except Exception as e: # Catch unexpected errors
+    except Exception as e:
         logger.error(
             f"Unexpected error retrieving syllabus {syllabus_id}: {e}", exc_info=True
         )
@@ -171,7 +157,7 @@ async def get_syllabus_by_id(
 # --- NEW ROUTE ---
 @router.get(
     "/topic/{topic}/level/{level}",
-    response_model=SyllabusResponse, # Assuming we return the full syllabus
+    response_model=SyllabusResponse,
     summary="Get syllabus by topic and level",
     description="Retrieves a specific syllabus by its topic and level, considering the logged-in user.",
     responses={
@@ -179,22 +165,21 @@ async def get_syllabus_by_id(
         status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
     }
 )
-async def get_syllabus_by_topic_level(
+async def get_syllabus_by_topic_level( # Added return type hint
     topic: str,
     level: str,
     syllabus_service: SyllabusService = Depends(get_syllabus_service),
-    current_user: User = Depends(get_current_user) # UNCOMMENTED: Ensure user is authenticated
-):
+    current_user: User = Depends(get_current_user)
+) -> SyllabusResponse:
     """
     Retrieves a specific syllabus by its topic and level for the current user.
     """
     logger.info(f"Retrieving syllabus for topic: {topic}, level: {level}, user: {current_user.user_id}")
     try:
-        # Pass the authenticated user's ID to the service method
         syllabus_data = await syllabus_service.get_syllabus_by_topic_level(
             topic=topic,
             level=level,
-            user_id=current_user.user_id # ADDED: Pass user_id
+            user_id=current_user.user_id
         )
 
         if syllabus_data is None:
@@ -204,7 +189,6 @@ async def get_syllabus_by_topic_level(
                 detail=f"Syllabus not found for topic '{topic}', level '{level}'.",
             )
 
-        # Validate and return the syllabus data
         return SyllabusResponse(**syllabus_data)
 
     except HTTPException as http_exc:

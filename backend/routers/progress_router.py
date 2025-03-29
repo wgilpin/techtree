@@ -2,7 +2,7 @@
 """fastApi router for user progress"""
 
 import logging # Added logging
-from typing import List, Optional
+from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -34,11 +34,10 @@ class CourseListResponse(BaseModel):
 # --- Progress Routes ---
 
 @router.get("/courses", response_model=CourseListResponse)
-async def get_user_courses(
+async def get_user_courses( # Added return type hint
     current_user: User = Depends(get_current_user),
-    # Use get_db_service for dependency injection
     db_service: SQLiteDatabaseService = Depends(get_db_service)
-):
+) -> CourseListResponse:
     """
     Retrieves a list of courses (syllabi) the user has made progress on.
     """
