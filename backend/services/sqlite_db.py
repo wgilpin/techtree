@@ -6,6 +6,8 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Optional # Added import
+# Import logger
+from backend.logger import logger
 
 
 class SQLiteDatabaseService:
@@ -23,7 +25,7 @@ class SQLiteDatabaseService:
                 os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             )
             abs_path = os.path.join(root_dir, db_path)
-            print(f"Using database at root directory: {abs_path}")
+            logger.info(f"Using database at root directory: {abs_path}") # Use logger
 
             # Ensure the directory exists
             db_dir = os.path.dirname(abs_path)
@@ -32,7 +34,7 @@ class SQLiteDatabaseService:
             # Check if file exists
             db_exists = os.path.exists(abs_path)
             if not db_exists:
-                print(f"Database file does not exist, will be created at: {abs_path}")
+                logger.warning(f"Database file does not exist, will be created at: {abs_path}") # Use logger
 
             # Connect to the database with proper settings for concurrent access
             self.conn = sqlite3.connect(
@@ -50,15 +52,15 @@ class SQLiteDatabaseService:
             # Use Row factory for dict-like access to rows
             self.conn.row_factory = sqlite3.Row
 
-            print(f"SQLite database initialized at: {abs_path}")
+            logger.info(f"SQLite database initialized at: {abs_path}") # Use logger
 
             # Create tables if they don't exist
             if not db_exists:
                 self._create_tables()
-                print("Database tables created")
+                logger.info("Database tables created") # Use logger
 
         except Exception as e:
-            print(f"Error initializing database: {str(e)}")
+            logger.error(f"Error initializing database: {str(e)}", exc_info=True) # Use logger
             raise
 
     def _create_tables(self):
@@ -83,7 +85,7 @@ class SQLiteDatabaseService:
         """
         if self.conn:
             self.conn.close()
-            print("Database connection closed")
+            logger.info("Database connection closed") # Use logger
 
     def execute_query(self, query, params=None, fetch_one=False, commit=False):
         """
@@ -115,9 +117,9 @@ class SQLiteDatabaseService:
                 return cursor.fetchall()
 
         except sqlite3.Error as e:
-            print(f"Database error: {str(e)}")
-            print(f"Query: {query}")
-            print(f"Params: {params}")
+            logger.error(f"Database error: {str(e)}", exc_info=True) # Use logger
+            logger.error(f"Query: {query}") # Use logger
+            logger.error(f"Params: {params}") # Use logger
             raise
 
     def execute_read_query(self, query, params=None):
@@ -148,7 +150,7 @@ class SQLiteDatabaseService:
             with self.conn:  # This automatically handles BEGIN/COMMIT/ROLLBACK
                 return func(*args, **kwargs)
         except Exception as e:
-            print(f"Transaction error: {str(e)}")
+            logger.error(f"Transaction error: {str(e)}", exc_info=True) # Use logger
             raise
 
     def get_all_table_data(self):
@@ -191,7 +193,7 @@ class SQLiteDatabaseService:
             str: The newly created user's ID
         """
         try:
-            print(f"Creating user with email: {email}, name: {name}")
+            logger.info(f"Creating user with email: {email}, name: {name}") # Use logger
             user_id = str(uuid.uuid4())
             now = datetime.now().isoformat()
 
@@ -204,11 +206,11 @@ class SQLiteDatabaseService:
             params = (user_id, email, name, password_hash, now, now)
 
             self.execute_query(query, params, commit=True)
-            print(f"User inserted into database with ID: {user_id}")
+            logger.info(f"User inserted into database with ID: {user_id}") # Use logger
             return user_id
 
         except Exception as e:
-            print(f"Error creating user: {str(e)}")
+            logger.error(f"Error creating user: {str(e)}", exc_info=True) # Use logger
             raise
 
     def get_user_by_email(self, email):
@@ -229,11 +231,11 @@ class SQLiteDatabaseService:
                 user_dict = dict(user)
                 return user_dict
 
-            print(f"User not found: {email}")
+            logger.warning(f"User not found: {email}") # Use logger
             return None
 
         except Exception as e:
-            print(f"Error looking up user by email: {str(e)}")
+            logger.error(f"Error looking up user by email: {str(e)}", exc_info=True) # Use logger
             raise
 
     def get_user_by_id(self, user_id):
@@ -254,11 +256,11 @@ class SQLiteDatabaseService:
                 user_dict = dict(user)
                 return user_dict
 
-            print("User not found: {user_id}")
+            logger.warning(f"User not found: {user_id}") # Use logger
             return None
 
         except Exception as e:
-            print(f"Error looking up user by ID: {str(e)}")
+            logger.error(f"Error looking up user by ID: {str(e)}", exc_info=True) # Use logger
             raise
 
     # Assessment methods
@@ -324,14 +326,23 @@ class SQLiteDatabaseService:
 
             # Parse JSON strings back to lists
             if assessment_dict["question_history"]:
-                assessment_dict["question_history"] = json.loads(
-                    assessment_dict["question_history"]
-                )
+                try:
+                    assessment_dict["question_history"] = json.loads(
+                        assessment_dict["question_history"]
+                    )
+                except json.JSONDecodeError:
+                     logger.warning(f"Failed to parse question_history for assessment {assessment_dict.get('assessment_id')}")
+                     assessment_dict["question_history"] = [] # Default to empty list
 
             if assessment_dict["response_history"]:
-                assessment_dict["response_history"] = json.loads(
-                    assessment_dict["response_history"]
-                )
+                try:
+                    assessment_dict["response_history"] = json.loads(
+                        assessment_dict["response_history"]
+                    )
+                except json.JSONDecodeError:
+                     logger.warning(f"Failed to parse response_history for assessment {assessment_dict.get('assessment_id')}")
+                     assessment_dict["response_history"] = [] # Default to empty list
+
 
             result.append(assessment_dict)
 
@@ -355,14 +366,22 @@ class SQLiteDatabaseService:
 
             # Parse JSON strings back to lists
             if assessment_dict["question_history"]:
-                assessment_dict["question_history"] = json.loads(
-                    assessment_dict["question_history"]
-                )
+                 try:
+                    assessment_dict["question_history"] = json.loads(
+                        assessment_dict["question_history"]
+                    )
+                 except json.JSONDecodeError:
+                     logger.warning(f"Failed to parse question_history for assessment {assessment_dict.get('assessment_id')}")
+                     assessment_dict["question_history"] = []
 
             if assessment_dict["response_history"]:
-                assessment_dict["response_history"] = json.loads(
-                    assessment_dict["response_history"]
-                )
+                 try:
+                    assessment_dict["response_history"] = json.loads(
+                        assessment_dict["response_history"]
+                    )
+                 except json.JSONDecodeError:
+                     logger.warning(f"Failed to parse response_history for assessment {assessment_dict.get('assessment_id')}")
+                     assessment_dict["response_history"] = []
 
             return assessment_dict
 
@@ -779,8 +798,9 @@ class SQLiteDatabaseService:
         module_index,
         lesson_index,
         status,
-        score: Optional[float] = None, # Added type hint
-        lesson_state_json: Optional[str] = None, # Added parameter
+        lesson_id: Optional[int] = None, # Added lesson_id parameter
+        score: Optional[float] = None,
+        lesson_state_json: Optional[str] = None,
     ):
         """
         Saves or updates user progress for a specific lesson, including conversational state.
@@ -791,6 +811,7 @@ class SQLiteDatabaseService:
             module_index (int): The index of the module
             lesson_index (int): The index of the lesson
             status (str): The status of the lesson ("not_started", "in_progress", "completed")
+            lesson_id (int, optional): The actual ID of the lesson from the lessons table.
             score (float, optional): The user's score for the lesson
             lesson_state_json (str, optional): JSON string representing the conversational state.
 
@@ -812,11 +833,11 @@ class SQLiteDatabaseService:
             progress_id = existing["progress_id"]
             update_query = """
                 UPDATE user_progress
-                SET status = ?, score = ?, lesson_state_json = ?, updated_at = ?
+                SET status = ?, score = ?, lesson_state_json = ?, updated_at = ?, lesson_id = ?
                 WHERE progress_id = ?
             """
-            # Ensure lesson_state_json is included in update
-            update_params = (status, score, lesson_state_json, now, progress_id)
+            # Ensure lesson_id is included in update
+            update_params = (status, score, lesson_state_json, now, lesson_id, progress_id)
             self.execute_query(update_query, update_params, commit=True)
             return progress_id
         else:
@@ -824,19 +845,20 @@ class SQLiteDatabaseService:
             progress_id = str(uuid.uuid4())
             insert_query = """
                 INSERT INTO user_progress
-                (progress_id, user_id, syllabus_id, module_index, lesson_index, status, score, lesson_state_json, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (progress_id, user_id, syllabus_id, module_index, lesson_index, lesson_id, status, score, lesson_state_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
-            # Ensure lesson_state_json is included in insert
+            # Ensure lesson_id is included in insert
             insert_params = (
                 progress_id,
                 user_id,
                 syllabus_id,
                 module_index,
                 lesson_index,
+                lesson_id, # Added value
                 status,
                 score,
-                lesson_state_json, # Added value
+                lesson_state_json,
                 now,
                 now,
             )
@@ -854,28 +876,49 @@ class SQLiteDatabaseService:
             lesson_index (int): The index of the lesson.
 
         Returns:
-            dict: The progress entry including parsed 'lesson_state', or None if not found.
+            dict: The progress entry including parsed 'lesson_state' and 'lesson_id', or None if not found.
         """
         query = """
             SELECT * FROM user_progress
             WHERE user_id = ? AND syllabus_id = ? AND module_index = ? AND lesson_index = ?
         """
         params = (user_id, syllabus_id, module_index, lesson_index)
+        logger.debug(f"Executing get_lesson_progress query with params: {params}")
         entry = self.execute_query(query, params, fetch_one=True)
+        logger.debug(f"Raw entry fetched from DB: {entry}")
 
         if entry:
-            entry_dict = dict(entry)
-            # Parse lesson_state_json if it exists
-            if 'lesson_state_json' in entry_dict and entry_dict['lesson_state_json']:
-                try:
-                    entry_dict['lesson_state'] = json.loads(entry_dict['lesson_state_json'])
-                except json.JSONDecodeError:
-                    print(f"Warning: Failed to parse lesson_state_json for progress_id {entry_dict.get('progress_id')}")
-                    entry_dict['lesson_state'] = None # Or some default error state
+            # Log the raw entry keys and values before converting to dict
+            if isinstance(entry, sqlite3.Row):
+                 logger.debug(f"Raw entry keys: {entry.keys()}")
+                 logger.debug(f"Raw entry values: {tuple(entry)}")
             else:
-                 entry_dict['lesson_state'] = None # Ensure the key exists even if JSON is null/empty
-            return entry_dict
+                 logger.debug(f"Fetched entry is not an sqlite3.Row: {type(entry)}")
 
+            entry_dict = dict(entry)
+            logger.debug(f"Converted entry_dict: {entry_dict}")
+
+            # Parse lesson_state_json if it exists
+            raw_json_string = entry_dict.get('lesson_state_json') # Get raw string first
+            if raw_json_string:
+                # Log the raw JSON string (or part of it if too long)
+                log_json_str = (raw_json_string[:200] + '...') if len(raw_json_string) > 200 else raw_json_string
+                logger.debug(f"Attempting to parse lesson_state_json: {log_json_str}")
+                try:
+                    entry_dict['lesson_state'] = json.loads(raw_json_string)
+                    logger.debug("Successfully parsed lesson_state_json.")
+                except json.JSONDecodeError as json_err:
+                    # Log the specific JSON error
+                    logger.error(f"Failed to parse lesson_state_json for progress_id {entry_dict.get('progress_id')}: {json_err}", exc_info=True)
+                    entry_dict['lesson_state'] = None # Set state to None on error
+            else:
+                 logger.debug("lesson_state_json is null or empty.")
+                 entry_dict['lesson_state'] = None # Ensure the key exists even if JSON is null/empty
+
+            logger.debug(f"Returning entry_dict from get_lesson_progress: {entry_dict}")
+            return entry_dict # <-- Added missing return statement
+
+        logger.debug("No progress entry found, returning None.")
         return None
 
     def get_user_syllabus_progress(self, user_id, syllabus_id):
@@ -902,11 +945,12 @@ class SQLiteDatabaseService:
             if 'lesson_state_json' in entry_dict and entry_dict['lesson_state_json']:
                 try:
                     entry_dict['lesson_state'] = json.loads(entry_dict['lesson_state_json'])
-                except json.JSONDecodeError:
-                    print(f"Warning: Failed to parse lesson_state_json for progress_id {entry_dict.get('progress_id')}")
+                except json.JSONDecodeError as json_err: # Catch specific error
+                    logger.warning(f"Failed to parse lesson_state_json for progress_id {entry_dict.get('progress_id')}: {json_err}") # Use logger
                     entry_dict['lesson_state'] = None # Or some default error state
             else:
                  entry_dict['lesson_state'] = None # Ensure the key exists even if JSON is null/empty
+            # lesson_id is already included due to SELECT *
             result.append(entry_dict)
 
         return result

@@ -2,9 +2,9 @@ Analyze the user's latest message in the context of the conversation history to 
 The user is currently in a general chat mode within an educational lesson.
 
 Conversation History (most recent last):
-{history_json}
+${history_json}
 
-User's latest message: "{user_input}"
+User's latest message: "${user_input}"
 
 Possible intents:
 - "ask_question": User is asking a question about the lesson material or seeking clarification.

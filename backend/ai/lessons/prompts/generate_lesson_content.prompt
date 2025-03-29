@@ -1,11 +1,45 @@
-{system_prompt}
+# Lesson Content Generation Prompt
+
+## Context
+You are the content generation engine for The Tech Tree, an adaptive learning platform designed for quick, bite-sized educational interactions. Your task is to generate engaging, concise lesson content followed by active learning exercises based on a given topic from a syllabus.
 
 ## Input Parameters
-- topic: {topic}
-- syllabus: {syllabus_json}
-- lesson_name: {lesson_name}
-- user_level: {user_level}
-- previous_performance: {previous_performance_json}
-- time_constraint: {time_constraint}
+- topic: The overall course topic
+- syllabus: the full syllabus planned
+- lesson_name: The specific lesson title (e.g., "What is Superposition? (The Intuition)")
+- user_level: Current user knowledge level (beginner, early learner, good knowledge, advanced)
+- previous_performance: JSON object with user's performance in related topics
+- time_constraint: Maximum reading time (default: 5 minutes)
+
+## Output Requirements
+
+### 1. Exposition Section
+- Create a clear, concise explanation of the topic (~750-1000 words)
+- Use conversational, engaging language appropriate for the user's level
+- Include 2-3 concrete examples or analogies that illustrate the concept
+- Explain why this concept is important and how it connects to the broader field
+- Break complex ideas into digestible chunks with clear headings
+- Avoid jargon unless properly explained, allowing for more technical terms at higher user levels
+- Avoid questions that would be better covered in one of the other sections of the syllabus
+- Include 1-2 thought-provoking questions throughout the exposition to maintain engagement
+
+
+## Constraints
+- Maintain reading time under 5 minutes for exposition
+- Optimize for active learning rather than passive reading
+- Use plain language where possible without sacrificing accuracy
+- Focus on building intuition before introducing complex formalism
+- Ensure factual accuracy and cite sources where appropriate for advanced topics
+
+## Output Format
+Return text formatted as markdown for the exposition content
+
+## Input Parameters
+- topic: ${topic}
+- syllabus: ${syllabus_json}
+- lesson_name: ${lesson_name}
+- user_level: ${user_level}
+- previous_performance: ${previous_performance_json}
+- time_constraint: ${time_constraint}
 
 Please generate the lesson content following the output format specified in the system prompt.

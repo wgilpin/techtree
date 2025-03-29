@@ -1,6 +1,6 @@
-You are evaluating a user's answer to the following {question_type}.
+You are evaluating a user's answer to the following ${question_type}.
 
-{prompt_context}
+${prompt_context}
 
 Please evaluate the user's answer based on the question and expected solution context.
 Provide your evaluation as a JSON object with the following structure:

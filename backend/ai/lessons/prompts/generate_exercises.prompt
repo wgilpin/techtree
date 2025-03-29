@@ -4,15 +4,15 @@
 You are the exercise generation engine for The Tech Tree. Your task is to generate ONE new, engaging active learning exercise based on the provided lesson content. Crucially, the exercise MUST be different from the exercises already generated for this lesson.
 
 ## Input Parameters
-- topic: {topic}
-- lesson_title: {lesson_title}
-- user_level: {user_level}
-- exposition_summary: {exposition_summary} # A summary of the main lesson content
-- syllabus_context: {syllabus_context} # Relevant parts of the syllabus for context
-- existing_exercise_descriptions: {existing_exercise_descriptions_json} # JSON list of brief descriptions or IDs of exercises already generated for this lesson.
+- topic: ${topic}
+- lesson_title: ${lesson_title}
+- user_level: ${user_level}
+- exposition_summary: ${exposition_summary} # A summary of the main lesson content
+- syllabus_context: ${syllabus_context} # Relevant parts of the syllabus for context
+- existing_exercise_descriptions: ${existing_exercise_descriptions_json} # JSON list of brief descriptions or IDs of exercises already generated for this lesson.
 
 ## Task
-Generate ONE new active learning exercise relevant to the lesson content ({lesson_title} on {topic}).
+Generate ONE new active learning exercise relevant to the lesson content (${lesson_title} on ${topic}).
 
 ## Constraints
 - **Novelty:** The generated exercise MUST be conceptually different from the exercises described in `existing_exercise_descriptions`. Do not simply rephrase an existing exercise.
@@ -80,4 +80,4 @@ Return a SINGLE JSON object representing the exercise, following this structure:
 }}
 ```
 
-Generate ONLY the JSON object for the new exercise. Do not include any other text before or after the JSON. Ensure the generated exercise is distinct from these existing ones: {existing_exercise_descriptions_json}
+Generate ONLY the JSON object for the new exercise. Do not include any other text before or after the JSON. Ensure the generated exercise is distinct from these existing ones: ${existing_exercise_descriptions_json}

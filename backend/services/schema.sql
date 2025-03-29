@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS user_progress (
     syllabus_id TEXT NOT NULL,
     module_index INTEGER NOT NULL,
     lesson_index INTEGER NOT NULL,
+    lesson_id INTEGER, -- Added lesson_id column
     status TEXT NOT NULL,  -- "not_started", "in_progress", "completed"
     score REAL,
     lesson_state_json TEXT, -- JSON blob for conversational state (history, mode, etc.)
@@ -96,8 +97,10 @@ CREATE TABLE IF NOT EXISTS user_progress (
     updated_at TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
     FOREIGN KEY (syllabus_id) REFERENCES syllabi(syllabus_id) ON DELETE CASCADE,
+    FOREIGN KEY (lesson_id) REFERENCES lessons(lesson_id) ON DELETE CASCADE, -- Added foreign key
     UNIQUE(user_id, syllabus_id, module_index, lesson_index)
 );
 CREATE INDEX IF NOT EXISTS idx_progress_user_id ON user_progress(user_id);
 CREATE INDEX IF NOT EXISTS idx_progress_syllabus_id ON user_progress(syllabus_id);
 CREATE INDEX IF NOT EXISTS idx_progress_user_syllabus ON user_progress(user_id, syllabus_id);
+CREATE INDEX IF NOT EXISTS idx_progress_lesson_id ON user_progress(lesson_id); -- Added index for lesson_id
