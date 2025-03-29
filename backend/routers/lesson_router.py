@@ -3,144 +3,82 @@
 from typing import Any, Dict, List, Optional
 
 # Import necessary dependencies
-from fastapi import Depends  # Add Depends
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import Depends
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
-from backend.dependencies import get_current_user, get_db
+# Import new dependency functions and User model
+from backend.dependencies import (
+    get_current_user,
+    get_interaction_service,  # New
+    get_exposition_service,  # New
+)
 from backend.logger import logger
-# Add Exercise and AssessmentQuestion to imports
 from backend.models import User, GeneratedLessonContent, Exercise, AssessmentQuestion
-from backend.routers.syllabus_router import get_syllabus_service
-from backend.services.lesson_service import LessonService
-from backend.services.sqlite_db import SQLiteDatabaseService
 
-# We also need SyllabusService to instantiate LessonService
-from backend.services.syllabus_service import SyllabusService
+# Import the new service types for type hinting
+from backend.services.lesson_interaction_service import LessonInteractionService
+from backend.services.lesson_exposition_service import LessonExpositionService
 
 router = APIRouter()
-# Removed direct instantiation of lesson_service
-
-
-def get_lesson_service(
-    db: SQLiteDatabaseService = Depends(get_db),
-    syllabus_service: SyllabusService = Depends(get_syllabus_service),
-) -> LessonService:
-    """Dependency function to get LessonService instance"""
-    return LessonService(db_service=db, syllabus_service=syllabus_service)
-
 
 # --- Pydantic Models ---
 
-# ... (existing models: LessonRequest, ExerciseSubmission, etc.) ...
 
-
-# New models for chat
+# Models for chat
 class ChatMessageRequest(BaseModel):
     """Request model for sending a chat message."""
-
     message: str
 
 
 class ChatMessage(BaseModel):
     """Model for a single message in the conversation history."""
-
-    role: str  # 'user' or 'assistant'
+    role: str
     content: str
 
 
 class ChatTurnResponse(BaseModel):
     """Response model for a chat turn, containing AI responses."""
-
     responses: List[ChatMessage]
-    error: Optional[str] = None  # Include optional error field
+    error: Optional[str] = None
 
 
 # Updated model for GET /lesson to include state
 class LessonDataResponse(BaseModel):
     """Response model for lesson data including conversational state."""
-
-    lesson_id: Optional[str]  # Can be None if lesson doesn't exist yet?
-    syllabus_id: str
-    module_index: int
-    lesson_index: int
-    content: Optional[GeneratedLessonContent]  # Use the specific Pydantic model
-    lesson_state: Optional[Dict[str, Any]]  # Conversational state (Keep as dict for now)
-    is_new: bool
+    lesson_id: Optional[int]
+    content: Optional[GeneratedLessonContent]
+    lesson_state: Optional[Dict[str, Any]]
 
 
-# Add response models for new endpoints
+# Response models for new generation endpoints
 class ExerciseResponse(BaseModel):
+    """Response model for generating an exercise."""
     exercise: Optional[Exercise]
     error: Optional[str] = None
 
+
 class AssessmentQuestionResponse(BaseModel):
+    """Response model for generating an assessment question."""
     question: Optional[AssessmentQuestion]
     error: Optional[str] = None
 
 
-# Existing models (ensure they are still here or adjust if needed)
-class LessonRequest(BaseModel):
-    """
-    Request model for retrieving a lesson. (May not be needed if using path params)
-    """
-
-    syllabus_id: str
-    module_index: int
-    lesson_index: int
-
-
-class ExerciseSubmission(BaseModel):
-    """
-    Request model for submitting an exercise answer.
-    """
-
-    lesson_id: str  # This might need to be syllabus_id/module/lesson indices now
-    exercise_index: int
-    answer: str
-
-
-# LessonContent might be replaced by LessonDataResponse
-# class LessonContent(BaseModel):
-#     """
-#     Response model for lesson content.
-#     """
-#     lesson_id: str
-#     syllabus_id: str
-#     module_index: int
-#     lesson_index: int
-#     content: Dict[str, Any]
-#     is_new: bool
-
-
-class ExerciseFeedback(BaseModel):
-    """
-    Response model for exercise feedback.
-    """
-
-    is_correct: bool
-    score: float
-    feedback: str
-    explanation: Optional[str] = None
+# Model for getting exposition by ID
+class LessonExpositionResponse(BaseModel):
+    """Response model for retrieving lesson exposition by ID."""
+    exposition: Optional[GeneratedLessonContent]
+    error: Optional[str] = None
 
 
 class ProgressUpdate(BaseModel):
-    """
-    Request model for updating lesson progress.
-    """
-
-    syllabus_id: str
-    module_index: int
-    lesson_index: int
-    status: str  # "not_started", "in_progress", "completed"
+    """Request model for updating lesson progress status."""
+    status: str
 
 
 class ProgressResponse(BaseModel):
-    """
-    Response model for lesson progress updates.
-    """
-
-    progress_id: str
+    """Response model for lesson progress updates."""
+    progress_id: Optional[int]
     user_id: str
     syllabus_id: str
     module_index: int
@@ -151,48 +89,54 @@ class ProgressResponse(BaseModel):
 # --- API Routes ---
 
 
-# Modify existing GET endpoint
 @router.get(
     "/{syllabus_id}/{module_index}/{lesson_index}", response_model=LessonDataResponse
-)  # Updated response model
-# Inject LessonService
-async def get_lesson_data(  # Renamed function for clarity
+)
+async def get_lesson_data(
     syllabus_id: str,
     module_index: int,
     lesson_index: int,
     current_user: Optional[User] = Depends(get_current_user),
-    #pylint: disable=unused-argument
-    response: Response = None,  # Keep Response for headers if needed
-    lesson_service: LessonService = Depends(get_lesson_service),
+    interaction_service: LessonInteractionService = Depends(get_interaction_service),
 ):
     """
-    Get or generate lesson content structure and current conversational state.
+    Retrieves or generates lesson data, including static content and user state.
+
+    If a user is authenticated, it fetches or initializes their specific lesson state.
+    If no user is authenticated, it only fetches or generates the static lesson content.
+
+    Args:
+        syllabus_id: The ID of the parent syllabus.
+        module_index: The index of the parent module within the syllabus.
+        lesson_index: The index of the lesson within the module.
+        current_user: The authenticated user (optional).
+        interaction_service: Dependency-injected LessonInteractionService instance.
+
+    Returns:
+        LessonDataResponse containing the lesson ID, content, and state (if user).
+
+    Raises:
+        HTTPException (404): If the lesson exposition cannot be found or generated.
+        HTTPException (500): If there's an internal server error during state handling.
     """
     logger.info(
         "Entering get_lesson_data endpoint for syllabus:"
         f" {syllabus_id}, mod: {module_index}, lesson: {lesson_index}"
     )
     user_id = current_user.user_id if current_user else None
-    # Handle no-auth if necessary
-    # if current_user and current_user.user_id == "no-auth":
-    #     response.headers["X-No-Auth"] = "true" # Example
-
     try:
-        # This service method now returns content and lesson_state
-        result = await lesson_service.get_or_generate_lesson(
+        result = await interaction_service.get_or_create_lesson_state(
             syllabus_id, module_index, lesson_index, user_id
         )
-        # Ensure the response matches the LessonDataResponse model
-
-        # Ensure the response matches the LessonDataResponse model
-        # Convert lesson_id to string if present, as the model expects a string
-        if result.get("lesson_id") is not None:
-            result["lesson_id"] = str(result["lesson_id"])
-        # The service result keys ("content", "lesson_state", etc.) should directly match the model
         return LessonDataResponse(**result)
     except ValueError as e:
         logger.error(f"Value error in get_lesson_data: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except RuntimeError as e:
+        logger.error(f"Runtime error in get_lesson_data: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        ) from e
     except Exception as e:
         logger.error(f"Unexpected error in get_lesson_data: {e}", exc_info=True)
         raise HTTPException(
@@ -201,40 +145,52 @@ async def get_lesson_data(  # Renamed function for clarity
         ) from e
 
 
-# Add new POST endpoint for chat
 @router.post(
     "/chat/{syllabus_id}/{module_index}/{lesson_index}", response_model=ChatTurnResponse
 )
-# Inject LessonService
 async def handle_chat_message(
     syllabus_id: str,
     module_index: int,
     lesson_index: int,
     request_body: ChatMessageRequest,
-    current_user: User = Depends(get_current_user),  # Require authentication for chat
-    lesson_service: LessonService = Depends(get_lesson_service),
+    current_user: User = Depends(get_current_user),
+    interaction_service: LessonInteractionService = Depends(get_interaction_service),
 ):
     """
-    Process a user's chat message for a specific lesson and return the AI's response.
+    Processes one turn of a user's chat conversation within a specific lesson.
+
+    Requires user authentication. Loads the current lesson state, passes the user's
+    message to the interaction service (which coordinates with the AI), saves the
+    updated state, and returns the AI's response messages.
+
+    Args:
+        syllabus_id: The ID of the parent syllabus.
+        module_index: The index of the parent module.
+        lesson_index: The index of the lesson.
+        request_body: Contains the user's chat message.
+        current_user: The authenticated user.
+        interaction_service: Dependency-injected LessonInteractionService instance.
+
+    Returns:
+        ChatTurnResponse containing a list of AI response messages or an error message.
+
+    Raises:
+        HTTPException (401): If the user is not authenticated.
+        HTTPException (404): If the lesson state cannot be found.
+        HTTPException (500): If an internal server error occurs.
     """
-    # Check authentication first
-    if (
-        not current_user or current_user.user_id == "no-auth"
-    ):  # Ensure authenticated user
+    if not current_user or current_user.user_id == "no-auth":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required to chat.",
         )
-
-    # Log after confirming user exists
     logger.info(
         "Entering handle_chat_message for syllabus: "
         f"{syllabus_id}, mod: {module_index}, "
         f"lesson: {lesson_index}, user: {current_user.user_id}"
     )
-
     try:
-        result = await lesson_service.handle_chat_turn(
+        result = await interaction_service.handle_chat_turn(
             user_id=current_user.user_id,
             syllabus_id=syllabus_id,
             module_index=module_index,
@@ -242,17 +198,12 @@ async def handle_chat_message(
             user_message=request_body.message,
         )
         if "error" in result:
-            # If service layer handled an error and returned it
             return ChatTurnResponse(responses=[], error=result["error"])
         else:
-            # Map result['responses'] to ChatMessage model if needed, though structure matches
             return ChatTurnResponse(responses=result.get("responses", []))
-
-    except ValueError as e:  # Catch errors like "Lesson state not found"
+    except ValueError as e:
         logger.error(f"Value error in handle_chat_message: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(e)  # Or 400 Bad Request?
-        ) from e
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Unexpected error in handle_chat_message: {e}", exc_info=True)
         raise HTTPException(
@@ -261,34 +212,50 @@ async def handle_chat_message(
         ) from e
 
 
-# Add new POST endpoint for generating exercises
 @router.post(
-    "/exercise/{syllabus_id}/{module_index}/{lesson_index}", response_model=ExerciseResponse
+    "/exercise/{syllabus_id}/{module_index}/{lesson_index}",
+    response_model=ExerciseResponse,
 )
 async def generate_exercise(
     syllabus_id: str,
     module_index: int,
     lesson_index: int,
-    current_user: User = Depends(get_current_user),  # Require authentication
-    lesson_service: LessonService = Depends(get_lesson_service),
+    current_user: User = Depends(get_current_user),
+    interaction_service: LessonInteractionService = Depends(get_interaction_service),
 ):
     """
-    Generates a new exercise for the specified lesson on demand.
+    Generates a new, unique exercise for the specified lesson on demand.
+
+    Requires user authentication. Calls the interaction service to generate
+    and save the exercise within the user's lesson state.
+
+    Args:
+        syllabus_id: The ID of the parent syllabus.
+        module_index: The index of the parent module.
+        lesson_index: The index of the lesson.
+        current_user: The authenticated user.
+        interaction_service: Dependency-injected LessonInteractionService instance.
+
+    Returns:
+        ExerciseResponse containing the generated Exercise object or an error message.
+
+    Raises:
+        HTTPException (401): If the user is not authenticated.
+        HTTPException (404): If the lesson state cannot be found.
+        HTTPException (500): If exercise generation fails or an internal error occurs.
     """
     if not current_user or current_user.user_id == "no-auth":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required to generate exercises.",
         )
-
     logger.info(
         "Entering generate_exercise for syllabus: "
         f"{syllabus_id}, mod: {module_index}, "
         f"lesson: {lesson_index}, user: {current_user.user_id}"
     )
-
     try:
-        new_exercise = await lesson_service.generate_exercise_for_lesson(
+        new_exercise = await interaction_service.generate_exercise(
             user_id=current_user.user_id,
             syllabus_id=syllabus_id,
             module_index=module_index,
@@ -297,15 +264,18 @@ async def generate_exercise(
         if new_exercise:
             return ExerciseResponse(exercise=new_exercise)
         else:
-            # If service returns None, it means generation failed gracefully
-            return ExerciseResponse(exercise=None, error="Failed to generate a new exercise.")
-
-    except ValueError as e: # Catch errors like "Lesson state not found"
+            # If service returns None, indicate failure gracefully
+            return ExerciseResponse(
+                exercise=None, error="Failed to generate a new exercise."
+            )
+    except ValueError as e:
         logger.error(f"Value error in generate_exercise: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
-    except RuntimeError as e: # Catch errors from generation itself
-         logger.error(f"Runtime error in generate_exercise: {e}", exc_info=True)
-         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+    except RuntimeError as e:
+        logger.error(f"Runtime error in generate_exercise: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        ) from e
     except Exception as e:
         logger.error(f"Unexpected error in generate_exercise: {e}", exc_info=True)
         raise HTTPException(
@@ -314,34 +284,50 @@ async def generate_exercise(
         ) from e
 
 
-# Add new POST endpoint for generating assessment questions
 @router.post(
-    "/assessment/{syllabus_id}/{module_index}/{lesson_index}", response_model=AssessmentQuestionResponse
+    "/assessment/{syllabus_id}/{module_index}/{lesson_index}",
+    response_model=AssessmentQuestionResponse,
 )
 async def generate_assessment_question(
     syllabus_id: str,
     module_index: int,
     lesson_index: int,
-    current_user: User = Depends(get_current_user),  # Require authentication
-    lesson_service: LessonService = Depends(get_lesson_service),
+    current_user: User = Depends(get_current_user),
+    interaction_service: LessonInteractionService = Depends(get_interaction_service),
 ):
     """
-    Generates a new assessment question for the specified lesson on demand.
+    Generates a new, unique assessment question for the specified lesson on demand.
+
+    Requires user authentication. Calls the interaction service to generate
+    and save the assessment question within the user's lesson state.
+
+    Args:
+        syllabus_id: The ID of the parent syllabus.
+        module_index: The index of the parent module.
+        lesson_index: The index of the lesson.
+        current_user: The authenticated user.
+        interaction_service: Dependency-injected LessonInteractionService instance.
+
+    Returns:
+        AssessmentQuestionResponse containing the generated question or an error.
+
+    Raises:
+        HTTPException (401): If the user is not authenticated.
+        HTTPException (404): If the lesson state cannot be found.
+        HTTPException (500): If question generation fails or an internal error occurs.
     """
     if not current_user or current_user.user_id == "no-auth":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required to generate assessment questions.",
         )
-
     logger.info(
         "Entering generate_assessment_question for syllabus: "
         f"{syllabus_id}, mod: {module_index}, "
         f"lesson: {lesson_index}, user: {current_user.user_id}"
     )
-
     try:
-        new_question = await lesson_service.generate_assessment_question_for_lesson(
+        new_question = await interaction_service.generate_assessment_question(
             user_id=current_user.user_id,
             syllabus_id=syllabus_id,
             module_index=module_index,
@@ -350,108 +336,148 @@ async def generate_assessment_question(
         if new_question:
             return AssessmentQuestionResponse(question=new_question)
         else:
-            return AssessmentQuestionResponse(question=None, error="Failed to generate a new assessment question.")
-
+            # If service returns None, indicate failure gracefully
+            return AssessmentQuestionResponse(
+                question=None, error="Failed to generate a new assessment question."
+            )
     except ValueError as e:
         logger.error(f"Value error in generate_assessment_question: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
     except RuntimeError as e:
-         logger.error(f"Runtime error in generate_assessment_question: {e}", exc_info=True)
-         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        logger.error(
+            f"Runtime error in generate_assessment_question: {e}", exc_info=True
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        ) from e
     except Exception as e:
-        logger.error(f"Unexpected error in generate_assessment_question: {e}", exc_info=True)
+        logger.error(
+            f"Unexpected error in generate_assessment_question: {e}", exc_info=True
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error generating assessment question: {str(e)}",
         ) from e
 
 
-@router.get("/by-id/{lesson_id}", response_model=Dict[str, Any])
-# Inject LessonService
-async def get_lesson_by_id(
-    lesson_id: str, lesson_service: LessonService = Depends(get_lesson_service)
+@router.get("/by-id/{lesson_id}", response_model=LessonExpositionResponse)
+async def get_lesson_exposition_by_id(
+    lesson_id: int,
+    exposition_service: LessonExpositionService = Depends(get_exposition_service),
 ):
     """
-    Get a lesson by its ID.
-    """
-    logger.info(f"Entering get_lesson_by_id endpoint for lesson_id: {lesson_id}")
-    try:
-        lesson = await lesson_service.get_lesson_by_id(lesson_id)
-        return lesson
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error retrieving lesson: {str(e)}",
-        ) from e
+    Retrieves the static exposition content for a lesson using its database ID.
 
+    Does not require user authentication as it fetches static content.
 
-@router.post("/exercise/evaluate", response_model=ExerciseFeedback)
-# Inject LessonService
-async def evaluate_exercise(
-    submission: ExerciseSubmission,
-    current_user: Optional[User] = Depends(get_current_user),
-    response: Response = None,
-    lesson_service: LessonService = Depends(get_lesson_service),
-):
-    """
-    Evaluate a user's answer to an exercise.
+    Args:
+        lesson_id: The integer primary key of the lesson in the database.
+        exposition_service: Dependency-injected LessonExpositionService instance.
+
+    Returns:
+        LessonExpositionResponse containing the lesson's static content.
+
+    Raises:
+        HTTPException (404): If no lesson exposition is found for the given ID.
+        HTTPException (500): If an internal server error occurs.
     """
     logger.info(
-        "Entering evaluate_exercise endpoint for lesson_id:"
-        f" {submission.lesson_id}, exercise_index: {submission.exercise_index}"
+        f"Entering get_lesson_exposition_by_id endpoint for lesson_id: {lesson_id}"
     )
-    user_id = current_user.user_id if current_user else None
-    if current_user and current_user.user_id == "no-auth":
-        response.headers["X-No-Auth"] = "true"
-
     try:
-        result = await lesson_service.evaluate_exercise(
-            submission.lesson_id, submission.exercise_index, submission.answer, user_id
-        )
-        return result
-    except ValueError as e:
+        exposition = await exposition_service.get_exposition_by_id(lesson_id)
+        if exposition is None:
+            logger.warning(
+                f"Lesson exposition with ID {lesson_id} not found by service."
+            )
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Lesson exposition with ID {lesson_id} not found or invalid.",
+            )
+        return LessonExpositionResponse(exposition=exposition)
+    except HTTPException as http_exc:
+        raise http_exc
+    except ValueError as e: # Should not happen if service handles None return
+        logger.error(f"Value error in get_lesson_exposition_by_id: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
     except Exception as e:
+        logger.error(
+            f"Unexpected error in get_lesson_exposition_by_id: {e}", exc_info=True
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error evaluating exercise: {str(e)}",
+            detail=f"Error retrieving lesson exposition: {str(e)}",
         ) from e
 
 
-@router.post("/progress", response_model=ProgressResponse)
-# Inject LessonService
+# Comment out evaluate_exercise endpoint
+# @router.post("/exercise/evaluate", response_model=ExerciseFeedback) ...
+
+
+@router.post(
+    "/progress/{syllabus_id}/{module_index}/{lesson_index}",
+    response_model=ProgressResponse,
+)
 async def update_lesson_progress(
+    syllabus_id: str,
+    module_index: int,
+    lesson_index: int,
     progress: ProgressUpdate,
     current_user: User = Depends(get_current_user),
-    response: Response = None,
-    lesson_service: LessonService = Depends(get_lesson_service),
+    interaction_service: LessonInteractionService = Depends(get_interaction_service),
 ):
     """
-    Update user's progress for a specific lesson.
+    Updates the progress status for a specific lesson for the authenticated user.
+
+    Allowed statuses are "not_started", "in_progress", "completed".
+
+    Args:
+        syllabus_id: The ID of the parent syllabus.
+        module_index: The index of the parent module.
+        lesson_index: The index of the lesson.
+        progress: Request body containing the new status.
+        current_user: The authenticated user.
+        interaction_service: Dependency-injected LessonInteractionService instance.
+
+    Returns:
+        ProgressResponse confirming the updated progress details.
+
+    Raises:
+        HTTPException (401): If the user is not authenticated.
+        HTTPException (400): If the provided status is invalid.
+        HTTPException (404): If the lesson details cannot be found (implicitly via service).
+        HTTPException (500): If an internal server error occurs.
     """
+    if not current_user or current_user.user_id == "no-auth":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required to update progress.",
+        )
     logger.info(
         "Entering update_lesson_progress endpoint for syllabus_id:"
-        f" {progress.syllabus_id}, module_index: {progress.module_index},"
-        f" lesson_index: {progress.lesson_index}, user: {current_user.email}"
+        f" {syllabus_id}, module_index: {module_index},"
+        f" lesson_index: {lesson_index}, status: {progress.status}, user: {current_user.user_id}"
     )
-    if current_user and current_user.user_id == "no-auth":
-        response.headers["X-No-Auth"] = "true"
     try:
-        result = await lesson_service.update_lesson_progress(
-            current_user.user_id,
-            progress.syllabus_id,
-            progress.module_index,
-            progress.lesson_index,
-            progress.status,
+        result = await interaction_service.update_lesson_progress(
+            user_id=current_user.user_id,
+            syllabus_id=syllabus_id,
+            module_index=module_index,
+            lesson_index=lesson_index,
+            status=progress.status,
         )
-        return result
-    except ValueError as e:
+        return ProgressResponse(**result)
+    except ValueError as e: # Catches invalid status or lesson not found from service
+        logger.error(f"Value error in update_lesson_progress: {e}", exc_info=True)
+        # Determine if it's a 404 or 400 based on error message?
+        # For now, assume 400 for invalid status.
+        status_code = status.HTTP_400_BAD_REQUEST if "Invalid status" in str(e) \
+            else status.HTTP_404_NOT_FOUND
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+            status_code=status_code, detail=str(e)
         ) from e
     except Exception as e:
+        logger.error(f"Unexpected error in update_lesson_progress: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error updating progress: {str(e)}",
