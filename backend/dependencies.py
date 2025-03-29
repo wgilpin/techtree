@@ -7,6 +7,7 @@ AI components, and business logic services) and provides dependency functions
 This promotes code reuse and testability by managing singleton instances
 and handling common tasks like authentication.
 """
+
 import os
 import logging
 from fastapi import Depends, HTTPException, status
@@ -15,12 +16,12 @@ from fastapi.security import OAuth2PasswordBearer
 # Import Services
 from backend.services.auth_service import AuthService
 from backend.services.sqlite_db import SQLiteDatabaseService
-from backend.services.syllabus_service import SyllabusService  # Added
-from backend.services.lesson_exposition_service import LessonExpositionService  # Added
+from backend.services.syllabus_service import SyllabusService
+from backend.services.lesson_exposition_service import LessonExpositionService
 from backend.services.lesson_interaction_service import (
     LessonInteractionService,
-)  # Added
-from backend.ai.app import LessonAI  # Added
+)
+from backend.ai.app import LessonAI
 
 # Import Models
 from backend.models import User
@@ -33,17 +34,17 @@ db_service = SQLiteDatabaseService()
 
 # Authentication Service
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
-auth_service = AuthService(db_service=db_service)  # Needs DB
+auth_service = AuthService(db_service=db_service)
 
 # Syllabus Service
-syllabus_service = SyllabusService(db_service=db_service)  # Needs DB
+syllabus_service = SyllabusService(db_service=db_service)
 
 # Lesson Exposition Service
-exposition_service = LessonExpositionService(  # Needs DB and Syllabus Service
+exposition_service = LessonExpositionService(
     db_service=db_service, syllabus_service=syllabus_service
 )
 
-# Lesson AI Component (Assuming simple instantiation for now)
+# Lesson AI Component
 lesson_ai = LessonAI()
 
 # Lesson Interaction Service
@@ -53,7 +54,6 @@ interaction_service = LessonInteractionService(  # Needs DB, Syllabus, Expositio
     exposition_service=exposition_service,
     lesson_ai=lesson_ai,
 )
-# TODO: Consider if lesson_ai needs a reference back to interaction_service
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +136,6 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> User:
                 headers={"WWW-Authenticate": "Bearer"},
             )
         # Fetch user details from DB or use token payload
-        # Assuming token payload is sufficient for now
         return User(
             user_id=user_id, email=payload.get("email"), name=payload.get("name")
         )
