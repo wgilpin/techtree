@@ -1,11 +1,14 @@
+# backend/services/auth_service.py
 import bcrypt
 import jwt
+import os # Added import
 from datetime import datetime, timedelta
 from backend.services.sqlite_db import SQLiteDatabaseService
 from typing import Dict, Any, Optional
 
 # Settings for JWT
-SECRET_KEY = "your-secret-key"  # In production, this should be an environment variable
+# Use the same environment variable logic as dependencies.py
+SECRET_KEY = os.environ.get("SECRET_KEY")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 40320  # Increased to 28 days  (28 * 60 * 24)
 
