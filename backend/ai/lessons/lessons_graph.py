@@ -2,7 +2,7 @@
 
 # pylint: disable=broad-exception-caught,singleton-comparison
 
-from typing import Any, Dict, List  # Added Union
+from typing import Any, Dict, List, Optional # Added Optional
 
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph
@@ -18,6 +18,21 @@ from backend.ai.lessons import nodes
 
 # Load environment variables
 load_dotenv()
+
+
+# Helper function for routing based on state
+def _route_message_logic(state: LessonState) -> str:
+    """Determines the next node based on the current interaction mode."""
+    mode = state.get("current_interaction_mode", "chatting")
+    logger.debug(f"Routing based on interaction mode: {mode}")
+    if mode == "request_exercise":
+        return "generate_new_exercise"
+    if mode == "request_assessment":
+        return "generate_new_assessment"
+    if mode == "submit_answer":
+        return "evaluate_answer"
+    # Default to chatting for 'chatting' or unknown modes
+    return "generate_chat_response"
 
 
 class LessonAI:
@@ -40,41 +55,39 @@ class LessonAI:
         workflow = StateGraph(LessonState)
 
         # Add nodes for the chat turn using functions from nodes.py
-        workflow.add_node("process_user_message", nodes.process_user_message)
+        workflow.add_node("classify_intent", nodes.classify_intent) # Corrected node name
         workflow.add_node("generate_chat_response", nodes.generate_chat_response)
         # Add new generation nodes
         workflow.add_node("generate_new_exercise", nodes.generate_new_exercise)
         workflow.add_node(
-            "generate_new_assessment_question", nodes.generate_new_assessment_question)
-        workflow.add_node("evaluate_chat_answer", nodes.evaluate_chat_answer)
-        workflow.add_node(
-            "update_progress", nodes.update_progress
-        )  # Node to potentially save state
+            "generate_new_assessment", nodes.generate_new_assessment) # Corrected node name
+        workflow.add_node("evaluate_answer", nodes.evaluate_answer) # Corrected node name
+        # Removed "update_progress" node as its implementation is missing
 
         # Entry point for a chat turn
-        workflow.set_entry_point("process_user_message")
+        workflow.set_entry_point("classify_intent") # Start by classifying intent
 
-        # Conditional routing after processing user message using function from nodes.py
+        # Conditional routing after classifying intent
         workflow.add_conditional_edges(
-            "process_user_message",
-            nodes.route_message_logic,  # Use the imported routing function
+            "classify_intent",
+            _route_message_logic,  # Use the local routing helper function
             {
+                # Keys match return values of _route_message_logic
                 "generate_chat_response": "generate_chat_response",
-                "generate_new_exercise": "generate_new_exercise", # Updated route
-                "generate_new_assessment_question": "generate_new_assessment_question",
-                # Route directly if mode requires evaluation
-                "evaluate_chat_answer": "evaluate_chat_answer",
+                "generate_new_exercise": "generate_new_exercise",
+                "generate_new_assessment": "generate_new_assessment",
+                "evaluate_answer": "evaluate_answer",
             },
         )
 
-        # Edges leading to update_progress (and potentially loop or end)
-        workflow.add_edge("generate_chat_response", "update_progress")
-        workflow.add_edge("generate_new_exercise", "update_progress")
-        workflow.add_edge("generate_new_assessment_question", "update_progress")
-        workflow.add_edge("evaluate_chat_answer", "update_progress")
+        # Edges leading back to the end after processing
+        # State saving (like update_progress) should happen outside the graph run
+        workflow.add_edge("generate_chat_response", "__end__")
+        workflow.add_edge("generate_new_exercise", "__end__")
+        workflow.add_edge("generate_new_assessment", "__end__")
+        workflow.add_edge("evaluate_answer", "__end__")
 
-        # End the turn after updating progress
-        workflow.add_edge("update_progress", "__end__")  # Use built-in end
+        # Removed edges related to "update_progress"
 
         return workflow
 
@@ -90,9 +103,10 @@ class LessonAI:
         updated_history: List[Dict[str, str]] = current_state.get(
             "conversation_history", []
         ) + [{"role": "user", "content": user_message}]
-        # type: ignore
+
+        # Ensure input_state matches LessonState structure
         input_state: LessonState = {
-            **current_state,
+            **current_state, # type: ignore
             "conversation_history": updated_history,
         }
 
@@ -101,7 +115,9 @@ class LessonAI:
         output_state: Any = self.chat_graph.invoke(input_state)
 
         # Merge output state changes back
-        final_state: LessonState = {**input_state, **output_state}  # type: ignore
+        # Ensure the final state structure matches LessonState
+        # Note: LangGraph output might only contain changed fields.
+        final_state: LessonState = {**input_state, **output_state} # type: ignore
         return final_state
 
     # --- Method to Start Chat (using imported node function) ---
@@ -111,12 +127,26 @@ class LessonAI:
         Assumes initial_state contains necessary context (topic, title, user_id, etc.)
         but has an empty conversation_history.
         """
-        # Directly call the logic from the start_conversation node function
-        # This avoids running the full graph just for the first message
+        # Logic to generate initial message needs refinement.
+        # For now, just set a default welcome message and mode.
+        # Removed call to non-existent nodes.start_conversation
+        logger.info("Starting chat, setting initial state.")
         try:
-            start_result: Dict[str, Any] = nodes.start_conversation(initial_state)
-            # Merge the result (history, mode) back into the initial state
-            return {**initial_state, **start_result}  # type: ignore
+            # Option 1: Set a fixed welcome message
+            welcome_message: Dict[str, str] = {
+                 "role": "assistant",
+                 "content": "Welcome to your lesson! Feel free to ask questions or tell me when you're ready for an exercise.",
+            }
+            # Option 2: Call generate_chat_response with a specific prompt (more complex)
+            # initial_prompt_state = {**initial_state, "conversation_history": [{"role": "system", "content": "Start the lesson."}]}
+            # welcome_state = nodes.generate_chat_response(initial_prompt_state)
+            # welcome_message = welcome_state["conversation_history"][-1] # Get the generated message
+
+            return {
+                **initial_state, # type: ignore
+                "conversation_history": [welcome_message],
+                "current_interaction_mode": "chatting",
+            }
         except Exception as e:
             # Log error, return state with a fallback message
             logger.error(f"Error during start_chat: {e}", exc_info=True)
@@ -126,7 +156,7 @@ class LessonAI:
             }
             # Ensure the returned state matches LessonState structure
             return {
-                **initial_state,
+                **initial_state, # type: ignore
                 "conversation_history": [fallback_message],
                 "current_interaction_mode": "chatting",
-            }  # type: ignore
+            }

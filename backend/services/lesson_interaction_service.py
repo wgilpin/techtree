@@ -1,150 +1,234 @@
+# backend/services/lesson_interaction_service.py
 """
-Service responsible for managing the interactive state of a lesson,
-including chat, exercises, and assessments.
+Service layer for handling lesson interactions, coordinating between the database,
+AI graph, and potentially other services.
 """
-# pylint: disable=broad-exception-caught
 
 import json
-from typing import Any, Dict, Optional
+import logging
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
-from backend.ai.app import LessonAI
-from backend.ai.lessons import nodes  # Needed for generate_exercise/assessment calls
-from backend.logger import logger
+from pydantic import ValidationError, BaseModel  # Added BaseModel
+from fastapi import HTTPException  # Added HTTPException
+
+from backend.ai.app import LessonAI  # Import the LessonAI class
+from backend.ai.lessons import nodes  # Import nodes directly for generation functions
 from backend.models import (
     AssessmentQuestion,
+    ChatMessage,
     Exercise,
     GeneratedLessonContent,
+    LessonState,
 )
 from backend.services.lesson_exposition_service import LessonExpositionService
 from backend.services.sqlite_db import SQLiteDatabaseService
-from backend.services.syllabus_service import SyllabusService
+
+logger = logging.getLogger(__name__)
 
 
 class LessonInteractionService:
     """
-    Service focused on the user's interactive experience within a lesson.
-
-    This service orchestrates the retrieval or creation of a user's lesson state,
-    handles chat interactions by coordinating with the LessonAI component,
-    manages the generation of on-demand exercises and assessment questions (potentially
-    triggered by LessonAI), and updates the user's progress status. It relies on
-    LessonExpositionService to obtain the static lesson content.
+    Manages the state and interaction logic for lessons, including chat and
+    on-demand content generation.
     """
 
     def __init__(
         self,
         db_service: SQLiteDatabaseService,
-        syllabus_service: SyllabusService,
         exposition_service: LessonExpositionService,
         lesson_ai: LessonAI,
     ):
         """
-        Initializes the service with necessary dependencies.
+        Initializes the LessonInteractionService.
 
         Args:
-            db_service: Service for database interactions.
-            syllabus_service: Service for retrieving syllabus details.
-            exposition_service: Service for retrieving static lesson exposition.
-            lesson_ai: The AI component handling chat logic.
+            db_service: Instance of the database service.
+            exposition_service: Instance of the exposition service.
+            lesson_ai: Instance of the LessonAI graph application.
         """
         self.db_service = db_service
-        self.syllabus_service = syllabus_service
         self.exposition_service = exposition_service
         self.lesson_ai = lesson_ai
-        # TODO: If LessonAI needs to call generate_exercise/assessment,
-        # it might need a reference to this service instance.
-        # This could be done via a setter or passing `self` during AI processing.
-        # Example: self.lesson_ai.set_interaction_service(self)
+        logger.info("LessonInteractionService initialized.")
 
-    async def _initialize_lesson_state(
+    async def _load_or_initialize_state(
         self,
-        topic: str,
-        level: str,
+        user_id: str,
         syllabus_id: str,
-        module_title: str,
-        lesson_title: str,
-        generated_content: GeneratedLessonContent,  # Expect Pydantic object
-        user_id: Optional[str],
         module_index: int,
         lesson_index: int,
-        lesson_db_id: int,  # Expect non-optional int here
-    ) -> Dict[str, Any]:
+    ) -> Tuple[Optional[LessonState], Optional[GeneratedLessonContent]]:
         """
-        Helper function to create and initialize lesson state.
+        Loads existing lesson state or initializes a new one if not found.
+        Also fetches the static lesson content.
 
-        Args:
-            topic: The lesson topic.
-            level: The knowledge level.
-            syllabus_id: The syllabus ID.
-            module_title: The module title.
-            lesson_title: The lesson title.
-            generated_content: The validated static exposition content.
-            user_id: The user ID.
-            module_index: The module index.
-            lesson_index: The lesson index.
-            lesson_db_id: The database ID of the lesson content.
-
-        Returns:
-            The initialized lesson state dictionary.
+        TODO: If LessonAI needs to call generate_exercise/assessment,
+              it might need the full state including generated content.
+              Consider how state is passed and updated.
         """
         logger.info(
-            f"Initializing lesson state for user {user_id}, "
-            f"lesson {syllabus_id}/{module_index}/{lesson_index} (lesson_id: {lesson_db_id})"
+            f"Loading/Initializing state for user {user_id}, lesson "
+            f"{syllabus_id}/{module_index}/{lesson_index}"
         )
 
-        initial_state = {
-            "topic": topic,
-            "knowledge_level": level,
-            "syllabus_id": syllabus_id,
-            "lesson_title": lesson_title,
-            "module_title": module_title,
-            "generated_content": generated_content,  # Store the object directly
-            "user_id": user_id,
-            "lesson_uid": lesson_db_id,  # Use the integer lesson_id as the UID
-            "conversation_history": [],
-            "current_interaction_mode": "chatting",
-            "current_exercise_index": -1,
-            "current_quiz_question_index": -1,
-            "generated_exercises": [],
-            "generated_assessment_questions": [],
-            "generated_exercise_ids": [],
-            "generated_assessment_question_ids": [],
-            "user_responses": [],
-            "user_performance": {},
-        }
-
-        if not user_id:  # No need to call AI if no user
-            return initial_state
-
-        try:
-            # Pass the state to start_chat.
-            updated_state = self.lesson_ai.start_chat(
-                initial_state.copy()
-            )  # Pass a copy
-            initial_state = updated_state  # Use the returned state
-            logger.info(
-                "Called start_chat and potentially added initial AI welcome message to state."
+        # 1. Fetch static lesson content (exposition, metadata)
+        lesson_content: Optional[GeneratedLessonContent] = (
+            await self.exposition_service.get_or_generate_lesson_content(
+                syllabus_id=syllabus_id,
+                module_index=module_index,
+                lesson_index=lesson_index,
+                user_id=user_id,  # Pass user_id if needed by exposition service
             )
-        except Exception as ai_err:
+        )
+
+        if not lesson_content:
             logger.error(
-                f"Failed to get initial AI message via start_chat: {ai_err}",
-                exc_info=True,
+                "Failed to retrieve or generate lesson content. Cannot proceed."
             )
-            # Fallback logic if start_chat fails or doesn't add history
-            if "conversation_history" not in initial_state or not initial_state.get(
-                "conversation_history"
-            ):
-                fallback_message = {
-                    "role": "assistant",
-                    "content": f"Welcome to the lesson on '{lesson_title}'! Let's begin.",
-                }
-                initial_state["conversation_history"] = [fallback_message]
-                initial_state["current_interaction_mode"] = "chatting"
-                logger.warning(
-                    "Added fallback welcome message as start_chat failed or returned no history."
-                )
+            # Raise error or return None? Raising might be better upstream.
+            raise ValueError("Lesson content could not be loaded or generated.")
 
-        return initial_state
+        # 2. Try to load existing user-specific state from DB
+        lesson_state: Optional[LessonState] = self.db_service.get_lesson_state(
+            user_id=user_id,
+            syllabus_id=syllabus_id,
+            module_index=module_index,
+            lesson_index=lesson_index,
+        )
+
+        # 3. If no state exists, initialize a new one
+        if lesson_state is None:
+            logger.info(f"No existing state found for user {user_id}. Initializing.")
+            # Extract necessary info from lesson_content for initial state
+            topic = lesson_content.topic or "Unknown Topic"
+            level = lesson_content.level or "beginner"  # Default level?
+            lesson_title = (
+                lesson_content.metadata.title
+                if lesson_content.metadata
+                else "Untitled Lesson"
+            )
+            # Get module title (assuming exposition service can provide it or look up syllabus)
+            # This might require an extra call or data structure adjustment
+            module_title = f"Module {module_index + 1}"  # Placeholder
+
+            # Create the initial state structure matching LessonState TypedDict
+            initial_state_dict: Dict[str, Any] = {
+                "topic": topic,
+                "knowledge_level": level,  # Assuming level maps to knowledge_level
+                "syllabus": None,  # TODO: Load syllabus if needed by AI graph
+                "lesson_title": lesson_title,
+                "module_title": module_title,  # Placeholder
+                "generated_content": lesson_content.model_dump(),  # Store raw dict for now
+                "user_responses": [],
+                "user_performance": {},
+                "user_id": user_id,
+                "lesson_uid": f"{syllabus_id}_{module_index}_{lesson_index}",  # Example UID
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "conversation_history": [],
+                "current_interaction_mode": "chatting",  # Start in chat mode
+                "current_exercise_index": None,
+                "current_quiz_question_index": None,
+                "generated_exercises": [],
+                "generated_assessment_questions": [],
+                "generated_exercise_ids": [],
+                "generated_assessment_question_ids": [],
+                "error_message": None,
+                # Add fields for active items
+                "active_exercise": None,
+                "active_assessment": None,
+                "potential_answer": None,
+            }
+            # Validate against LessonState TypedDict (runtime check won't enforce structure strictly)
+            lesson_state = initial_state_dict  # type: ignore
+
+            # Generate initial welcome message using LessonAI
+            # Pass the validated initial_state dictionary
+            lesson_state = self.lesson_ai.start_chat(lesson_state)  # type: ignore
+
+            # Save the newly initialized state (including welcome message)
+            # Ensure state is serializable before saving
+            serializable_initial_state = {}
+            for key, value in lesson_state.items():
+                if isinstance(value, BaseModel):
+                    serializable_initial_state[key] = value.model_dump()
+                elif (
+                    isinstance(value, list)
+                    and value
+                    and isinstance(value[0], BaseModel)
+                ):
+                    serializable_initial_state[key] = [
+                        item.model_dump() for item in value
+                    ]
+                else:
+                    serializable_initial_state[key] = value
+
+            self.db_service.save_lesson_state(
+                user_id=user_id,
+                syllabus_id=syllabus_id,
+                module_index=module_index,
+                lesson_index=lesson_index,
+                state_data=serializable_initial_state,  # Save serialized state
+            )
+            logger.info(f"Initialized and saved new state for user {user_id}.")
+
+        else:
+            logger.info(f"Loaded existing state for user {user_id}.")
+            # Ensure loaded state has necessary keys, potentially merge with defaults
+            # This is crucial if the LessonState structure changes over time.
+            # For now, assume loaded state is valid.
+            # Deserialize generated_content back into Pydantic model if needed by AI graph
+            # Also deserialize active_exercise and active_assessment if they exist
+            if isinstance(lesson_state.get("generated_content"), dict):
+                try:
+                    # Store the model in a different key to avoid type conflicts if needed later
+                    lesson_state["generated_content_model"] = (
+                        GeneratedLessonContent.model_validate(
+                            lesson_state["generated_content"]
+                        )
+                    )
+                except ValidationError:
+                    logger.error("Failed to validate stored generated_content.")
+                    lesson_state["generated_content_model"] = None  # Handle error state
+            else:
+                lesson_state["generated_content_model"] = None
+
+            if isinstance(lesson_state.get("active_exercise"), dict):
+                try:
+                    lesson_state["active_exercise"] = Exercise.model_validate(
+                        lesson_state["active_exercise"]
+                    )
+                except ValidationError:
+                    logger.error("Failed to validate stored active_exercise.")
+                    lesson_state["active_exercise"] = None
+            elif (
+                lesson_state.get("active_exercise") is not None
+            ):  # If it's not a dict and not None, log warning
+                logger.warning(
+                    f"Stored active_exercise is not a dict: {type(lesson_state.get('active_exercise'))}"
+                )
+                lesson_state["active_exercise"] = None  # Clear invalid data
+
+            if isinstance(lesson_state.get("active_assessment"), dict):
+                try:
+                    lesson_state["active_assessment"] = (
+                        AssessmentQuestion.model_validate(
+                            lesson_state["active_assessment"]
+                        )
+                    )
+                except ValidationError:
+                    logger.error("Failed to validate stored active_assessment.")
+                    lesson_state["active_assessment"] = None
+            elif (
+                lesson_state.get("active_assessment") is not None
+            ):  # If it's not a dict and not None, log warning
+                logger.warning(
+                    f"Stored active_assessment is not a dict: {type(lesson_state.get('active_assessment'))}"
+                )
+                lesson_state["active_assessment"] = None  # Clear invalid data
+
+        return lesson_state, lesson_content  # Return state and static content
 
     async def get_or_create_lesson_state(
         self,
@@ -154,199 +238,116 @@ class LessonInteractionService:
         user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Gets existing lesson state or creates a new one, ensuring exposition exists.
+        Retrieves the lesson content and the user's state for a specific lesson.
+        If no user is provided, only static content is returned.
+        If a user is provided but has no state, initializes it.
 
-        Args:
-            syllabus_id: The ID of the syllabus.
-            module_index: The index of the module.
-            lesson_index: The index of the lesson.
-            user_id: The optional ID of the user.
-
-        Returns:
-            A dictionary containing the lesson state, exposition content, and metadata.
-            Structure: {
-                "lesson_id": int,
-                "content": GeneratedLessonContent,
-                "lesson_state": Optional[Dict]
-            }
-
-        Raises:
-            ValueError: If lesson exposition cannot be found or generated.
-            RuntimeError: If state initialization or saving fails.
+        Returns a dictionary suitable for the LessonDataResponse model.
         """
         logger.info(
-            f"Getting/Creating lesson state: syllabus={syllabus_id}, mod={module_index},"
-            f" lesson={lesson_index}, user={user_id}"
+            f"Get/Create state request: user={user_id}, "
+            f"lesson={syllabus_id}/{module_index}/{lesson_index}"
         )
 
-        # 1. Get or Generate Exposition Content and ID
-        exposition_content_obj, lesson_db_id = (
-            await self.exposition_service.get_or_generate_exposition(
-                syllabus_id, module_index, lesson_index
-            )
-        )
+        lesson_state: Optional[LessonState] = None
+        lesson_content: Optional[GeneratedLessonContent] = None
+        lesson_db_id: Optional[int] = None  # To store the actual lesson ID from DB
 
-        if exposition_content_obj is None or lesson_db_id is None:
-            logger.error(
-                "Failed to get or generate exposition for "
-                f"{syllabus_id}/{module_index}/{lesson_index}"
-            )
-            raise ValueError(
-                "Could not retrieve or generate lesson exposition content."
-            )
-
-        # If no user, just return the content
-        if not user_id:
-            return {
-                "lesson_id": lesson_db_id,
-                "content": exposition_content_obj,
-                "lesson_state": None,
-            }
-
-        # 2. Fetch User Progress & State
-        lesson_state = None
-        progress_entry = self.db_service.get_lesson_progress(
-            user_id, syllabus_id, module_index, lesson_index
-        )
-
-        state_needs_saving = False
-        if progress_entry:
-            # Verify lesson_id consistency
-            progress_lesson_id = progress_entry.get("lesson_id")
-            if progress_lesson_id != lesson_db_id:
-                logger.warning(
-                    f"Progress entry lesson_id ({progress_lesson_id}) mismatch with "
-                    f"fetched/generated lesson_id ({lesson_db_id}) for user {user_id}, lesson "
-                    f"{syllabus_id}/{module_index}/{lesson_index}. Using {lesson_db_id}."
+        if user_id:
+            # --- Authenticated User Flow ---
+            try:
+                # Load/initialize state AND get content
+                loaded_state, loaded_content = await self._load_or_initialize_state(
+                    user_id, syllabus_id, module_index, lesson_index
                 )
-                # Force state re-initialization if IDs mismatch? Or just update progress entry?
-                # For now, let's assume we proceed with lesson_db_id and
-                # potentially initialize state below.
-                # Mark state as needing saving if we load it.
+                lesson_state = loaded_state
+                lesson_content = loaded_content
 
-            if "lesson_state" in progress_entry and progress_entry["lesson_state"]:
-                lesson_state = progress_entry["lesson_state"]
-                logger.info(f"Loaded existing lesson state for user {user_id}")
+                # Get the actual lesson ID from the database if available in state
+                # This assumes the exposition service or state initialization stores it
+                # We might need a more direct way to get this ID.
+                # Placeholder: Try getting it from the loaded content's metadata if stored there
+                # Or look it up based on syllabus_id/module/lesson indices
+                lesson_lookup = self.db_service.get_lesson_indices_by_id(
+                    syllabus_id=syllabus_id,
+                    module_index=module_index,
+                    lesson_index=lesson_index,
+                )
+                if lesson_lookup:
+                    lesson_db_id = lesson_lookup.get("lesson_pk")
 
-                # Ensure content object and lesson_uid are up-to-date in loaded state
-                if (
-                    not isinstance(
-                        lesson_state.get("generated_content"), GeneratedLessonContent
-                    )
-                    or lesson_state.get("generated_content").exposition_content
-                    != exposition_content_obj.exposition_content
-                ):
-                    logger.warning("Updating generated_content in loaded state.")
-                    lesson_state["generated_content"] = exposition_content_obj
-                    state_needs_saving = True
-
-                if lesson_state.get("lesson_uid") != lesson_db_id:
-                    logger.warning(
-                        "Updating lesson_uid in loaded state from "
-                        f"{lesson_state.get('lesson_uid')} to {lesson_db_id}."
-                    )
-                    lesson_state["lesson_uid"] = lesson_db_id
-                    state_needs_saving = True
-
-            else:
-                logger.info(f"Progress entry found but no state for user {user_id}")
+            except ValueError as e:
+                logger.error(f"Error loading/initializing state: {e}", exc_info=True)
+                raise HTTPException(status_code=404, detail=str(e)) from e
+            except Exception as e:
+                logger.error(f"Unexpected error getting state: {e}", exc_info=True)
+                raise HTTPException(
+                    status_code=500,
+                    detail="Internal server error getting lesson state.",
+                ) from e
         else:
-            logger.info(f"No existing progress entry found for user {user_id}")
-
-        # 3. Initialize State if Needed
-        if lesson_state is None:
-            logger.info(
-                f"Initializing new lesson state for user {user_id}, lesson_id {lesson_db_id}."
-            )
+            # --- Unauthenticated User Flow ---
+            logger.info("Unauthenticated user request. Fetching only static content.")
             try:
-                # Fetch necessary details for state initialization
-                syllabus = await self.syllabus_service.get_syllabus(syllabus_id)
-                module_details = await self.syllabus_service.get_module_details(
-                    syllabus_id, module_index
+                # Only fetch static content
+                lesson_content = (
+                    await self.exposition_service.get_or_generate_lesson_content(
+                        syllabus_id=syllabus_id,
+                        module_index=module_index,
+                        lesson_index=lesson_index,
+                        user_id=None,  # Indicate no user
+                    )
                 )
-                module_title = module_details.get("title", "Unknown Module")
-                lesson_title = (
-                    exposition_content_obj.metadata.title
-                    if exposition_content_obj.metadata
-                    else "Unknown Lesson"
-                )
-                topic = exposition_content_obj.topic or syllabus.get(
-                    "topic", "Unknown Topic"
-                )
-                level = exposition_content_obj.level or syllabus.get(
-                    "level", "beginner"
-                )
+                if not lesson_content:
+                    raise ValueError("Lesson content could not be loaded or generated.")
 
-                # Call the helper function to initialize state
-                lesson_state = await self._initialize_lesson_state(
-                    topic=topic,
-                    level=level,
+                # Get lesson DB ID (same logic as above, might need refinement)
+                lesson_lookup = self.db_service.get_lesson_indices_by_id(
                     syllabus_id=syllabus_id,
-                    module_title=module_title,
-                    lesson_title=lesson_title,
-                    generated_content=exposition_content_obj,
-                    user_id=user_id,
                     module_index=module_index,
                     lesson_index=lesson_index,
-                    lesson_db_id=lesson_db_id,
                 )
-                state_needs_saving = True  # Newly initialized state needs saving
+                if lesson_lookup:
+                    lesson_db_id = lesson_lookup.get("lesson_pk")
 
-            except Exception as init_err:
+            except ValueError as e:
+                logger.error(f"Error loading static content: {e}", exc_info=True)
+                raise HTTPException(status_code=404, detail=str(e)) from e
+            except Exception as e:
                 logger.error(
-                    f"Failed to initialize lesson state: {init_err}",
-                    exc_info=True,
+                    f"Unexpected error getting static content: {e}", exc_info=True
                 )
-                raise RuntimeError("Failed to initialize lesson state") from init_err
+                raise HTTPException(
+                    status_code=500,
+                    detail="Internal server error getting lesson content.",
+                ) from e
 
-        # 4. Save State if it was newly initialized or updated
-        if state_needs_saving:
-            try:
-                logger.info(
-                    f"Saving lesson state for user {user_id}, lesson_id {lesson_db_id}"
-                )
-                state_json = json.dumps(
-                    lesson_state,
-                    default=lambda o: (
-                        o.model_dump(mode="json")
-                        if isinstance(
-                            o, (GeneratedLessonContent, Exercise, AssessmentQuestion)
-                        )
-                        else o
-                    ),
-                )
-                # Determine status and score (use existing if available, else defaults)
-                current_status = (
-                    progress_entry.get("status", "in_progress")
-                    if progress_entry
-                    else "in_progress"
-                )
-                current_score = progress_entry.get("score") if progress_entry else None
+        # Prepare response structure
+        # Ensure the state is JSON serializable (Pydantic models need dumping)
+        serializable_state = None
+        if lesson_state:
+            serializable_state = {}
+            for key, value in lesson_state.items():
+                # Check if value is a Pydantic model instance before dumping
+                if isinstance(value, BaseModel):
+                    serializable_state[key] = value.model_dump()
+                # Check if value is a list containing Pydantic models
+                elif (
+                    isinstance(value, list)
+                    and value
+                    and isinstance(value[0], BaseModel)
+                ):
+                    serializable_state[key] = [item.model_dump() for item in value]
+                # Otherwise, assume it's already serializable (dict, str, int, etc.)
+                else:
+                    serializable_state[key] = value
 
-                self.db_service.save_user_progress(
-                    user_id=user_id,
-                    syllabus_id=syllabus_id,
-                    module_index=module_index,
-                    lesson_index=lesson_index,
-                    status=current_status,
-                    score=current_score,
-                    lesson_state_json=state_json,
-                    lesson_id=lesson_db_id,
-                )
-                logger.info(
-                    f"Successfully saved lesson state for user {user_id}, lesson_id {lesson_db_id}"
-                )
-            except Exception as save_err:
-                logger.error(f"Failed to save lesson state: {save_err}", exc_info=True)
-                # Decide whether to raise or just log
-                raise RuntimeError("Failed to save lesson state") from save_err
-
-        # 5. Return the final structure
-        return {
-            "lesson_id": lesson_db_id,
-            "content": exposition_content_obj,
-            "lesson_state": lesson_state,
+        response_data = {
+            "lesson_id": lesson_db_id,  # The actual DB ID of the lesson
+            "content": lesson_content.model_dump() if lesson_content else None,
+            "lesson_state": serializable_state,  # Pass the serialized state
         }
+        return response_data
 
     async def handle_chat_turn(
         self,
@@ -357,148 +358,104 @@ class LessonInteractionService:
         user_message: str,
     ) -> Dict[str, Any]:
         """
-        Handles one turn of the chat conversation for a lesson.
+        Processes a single turn of the chat conversation.
 
-        Args:
-            user_id: The ID of the user.
-            syllabus_id: The ID of the syllabus.
-            module_index: The index of the module.
-            lesson_index: The index of the lesson.
-            user_message: The message sent by the user.
-
-        Returns:
-            Dict[str, Any]: Containing the AI's response message(s) or an error.
-            Structure: {"responses": List[Dict]} or {"error": str}
+        Loads state, invokes the LessonAI graph, saves the updated state,
+        and returns the AI responses.
         """
         logger.info(
-            f"Handling chat turn for user {user_id}, "
-            f"lesson {syllabus_id}/{module_index}/{lesson_index}"
+            f"Handling chat turn for user {user_id}, lesson "
+            f"{syllabus_id}/{module_index}/{lesson_index}"
         )
-
-        # 1. Load current lesson state using the new orchestrator method
         try:
-            lesson_data = await self.get_or_create_lesson_state(
-                syllabus_id, module_index, lesson_index, user_id
+            # 1. Load current state (and content, though maybe not needed directly here)
+            current_state, _ = await self._load_or_initialize_state(
+                user_id, syllabus_id, module_index, lesson_index
             )
-            current_lesson_state = lesson_data.get("lesson_state")
-            lesson_db_id = lesson_data.get("lesson_id")
+            if not current_state:
+                # This shouldn't happen if _load_or_initialize_state raises errors
+                raise RuntimeError("Failed to load or initialize lesson state.")
 
-            if not current_lesson_state or not lesson_db_id:
-                # This shouldn't happen if get_or_create_lesson_state
-                # works correctly for a given user_id
-                logger.error(
-                    f"Failed to retrieve valid state or lesson_id for chat turn. User: {user_id}"
-                )
-                raise ValueError("Could not load lesson state for chat.")
-
-        except (ValueError, RuntimeError) as load_err:
-            logger.error(
-                f"Error loading state for chat turn: {load_err}", exc_info=True
-            )
-            return {
-                "error": "Sorry, I couldn't load the lesson data to process your message."
-            }
-
-        # 2. Call LessonAI.process_chat_turn
-        try:
-            # LessonAI modifies the state internally
-            updated_lesson_state = self.lesson_ai.process_chat_turn(
-                current_state=current_lesson_state, user_message=user_message
-            )
-        except Exception as ai_err:
-            logger.error(
-                f"Error during LessonAI.process_chat_turn: {ai_err}", exc_info=True
-            )
-            return {"error": "Sorry, I encountered an error processing your message."}
-
-        # 2.5 Apply Adaptivity Rules (Example - kept from original)
-        # This logic might be better placed within LessonAI or a dedicated adaptivity component
-        try:
-            user_responses = updated_lesson_state.get("user_responses", [])
-            # ... (rest of adaptivity logic from original service remains the same) ...
-            if len(user_responses) >= 2:
-                last_response = user_responses[-1]
-                prev_response = user_responses[-2]
-                if "evaluation" in last_response and "evaluation" in prev_response:
-                    last_eval = last_response["evaluation"]
-                    prev_eval = prev_response["evaluation"]
-                    last_type = last_response.get("question_type")
-                    prev_type = prev_response.get("question_type")
-                    if (
-                        not last_eval.get("is_correct", True)
-                        and not prev_eval.get("is_correct", True)
-                        and last_type == prev_type
-                        and last_type is not None
-                    ):
-                        logger.warning(
-                            f"Adaptivity Alert: User {user_id} answered 2 consecutive "
-                            f"{last_type} questions incorrectly. "
-                            f"(Last Q: {last_response.get('question_id', 'unknown')}, "
-                            f"Prev Q: {prev_response.get('question_id', 'unknown')})"
-                        )
-            elif user_responses:
-                last_response = user_responses[-1]
-                if "evaluation" in last_response:
-                    evaluation = last_response["evaluation"]
-                    if not evaluation.get("is_correct", True):
-                        logger.info(
-                            f"Adaptivity Check: Incorrect answer detected for user {user_id}, "
-                            f"question {last_response.get('question_id', 'unknown')}. "
-                            f"Score: {evaluation.get('score', 'N/A')}"
-                        )
-        except Exception as adapt_err:
-            logger.error(f"Error during adaptivity logic: {adapt_err}", exc_info=True)
-
-        # 3. Serialize and save the updated state
-        try:
-            updated_state_json = json.dumps(
-                updated_lesson_state,
-                default=lambda o: (
-                    o.model_dump(mode="json")
-                    if isinstance(
-                        o, (GeneratedLessonContent, Exercise, AssessmentQuestion)
-                    )
-                    else o
-                ),
-            )
-            current_status = "in_progress"  # Assume still in progress after chat
-            current_score = updated_lesson_state.get("user_performance", {}).get(
-                "score"
+            # 2. Invoke the LessonAI graph
+            # Ensure the state passed matches the LessonState structure expected by the graph
+            updated_state = self.lesson_ai.process_chat_turn(
+                current_state=current_state, user_message=user_message  # type: ignore
             )
 
-            self.db_service.save_user_progress(
+            # 3. Save the updated state back to the database
+            # Ensure state is serializable before saving
+            serializable_updated_state = {}
+            for key, value in updated_state.items():
+                if isinstance(value, BaseModel):
+                    serializable_updated_state[key] = value.model_dump()
+                elif (
+                    isinstance(value, list)
+                    and value
+                    and isinstance(value[0], BaseModel)
+                ):
+                    serializable_updated_state[key] = [
+                        item.model_dump() for item in value
+                    ]
+                else:
+                    serializable_updated_state[key] = value
+
+            self.db_service.save_lesson_state(
                 user_id=user_id,
                 syllabus_id=syllabus_id,
                 module_index=module_index,
                 lesson_index=lesson_index,
-                status=current_status,
-                score=current_score,
-                lesson_state_json=updated_state_json,
-                lesson_id=lesson_db_id,  # Use the ID confirmed at the start
+                state_data=serializable_updated_state,  # Save the serialized version
             )
-            logger.info(
-                f"Saved updated lesson state for user {user_id}, lesson_id {lesson_db_id}"
-            )
-        except Exception as db_err:
-            logger.error(
-                f"Failed to save updated lesson state after chat turn: {db_err}",
-                exc_info=True,
-            )
-            # Log but don't prevent response return
+            logger.info(f"Saved updated state for user {user_id}.")
 
-        # 4. Return the AI's response(s)
-        # Find messages added in the last turn
-        last_user_msg_index = -1
-        history = updated_lesson_state.get("conversation_history", [])
-        for i in range(len(history) - 1, -1, -1):
-            if history[i].get("role") == "user":
-                last_user_msg_index = i
-                break
-        ai_responses = history[last_user_msg_index + 1 :]
+            # 4. Prepare response for the router
+            # Extract only the AI responses from the latest turn
+            # The graph should append messages to conversation_history
+            new_messages = []
+            # Use the original state for comparison before it was potentially modified by serialization
+            num_current_messages = len(current_state.get("conversation_history", []))
+            if (
+                len(updated_state.get("conversation_history", []))
+                > num_current_messages
+            ):
+                # Find messages added in this turn (usually just the last one)
+                for msg in updated_state["conversation_history"][num_current_messages:]:
+                    if msg.get("role") == "assistant":
+                        # Ensure message structure matches ChatMessage for response model
+                        new_messages.append(
+                            {"role": msg.get("role"), "content": msg.get("content")}
+                        )
 
-        return {"responses": ai_responses}
+            # Check for errors set by the graph
+            error_message = updated_state.get("error_message")
 
-    async def generate_exercise(  # Renamed
+            response_payload: Dict[str, Any] = {"responses": new_messages}
+            if error_message:
+                response_payload["error"] = error_message
+                # Clear error after reporting?
+                updated_state["error_message"] = None
+                # Save again to clear error (use serialized state)
+                serializable_updated_state["error_message"] = None
+                self.db_service.save_lesson_state(
+                    user_id=user_id,
+                    syllabus_id=syllabus_id,
+                    module_index=module_index,
+                    lesson_index=lesson_index,
+                    state_data=serializable_updated_state,
+                )
+
+            return response_payload
+
+        except ValueError as e:
+            logger.error(f"Value error during chat turn: {e}", exc_info=True)
+            # Re-raise or return error structure? Re-raising seems appropriate here.
+            raise e
+        except Exception as e:
+            logger.error(f"Unexpected error during chat turn: {e}", exc_info=True)
+            # Return error structure for the router to handle
+            return {"responses": [], "error": "An internal server error occurred."}
+
+    async def generate_exercise(
         self,
         user_id: str,
         syllabus_id: str,
@@ -506,116 +463,80 @@ class LessonInteractionService:
         lesson_index: int,
     ) -> Optional[Exercise]:
         """
-        Generates a new exercise for the lesson on demand, ensuring novelty.
-        Likely called by LessonAI during process_chat_turn.
+        Handles the request to generate a new exercise on demand.
 
-        Args:
-            user_id: The user ID.
-            syllabus_id: The syllabus ID.
-            module_index: The module index.
-            lesson_index: The lesson index.
-
-        Returns:
-            The generated Exercise object or None if generation failed.
-
-        Raises:
-            ValueError: If lesson state cannot be loaded.
-            RuntimeError: If exercise generation via node fails.
+        Loads state, calls the specific generation node, saves state, returns exercise.
         """
         logger.info(
-            f"Generating new exercise for user {user_id}, "
-            f"lesson {syllabus_id}/{module_index}/{lesson_index}"
+            f"Generating exercise for user {user_id}, lesson "
+            f"{syllabus_id}/{module_index}/{lesson_index}"
         )
-
-        # 1. Load current lesson state (using the orchestrator is safer)
         try:
-            lesson_data = await self.get_or_create_lesson_state(
-                syllabus_id, module_index, lesson_index, user_id
+            # 1. Load current state
+            current_state, _ = await self._load_or_initialize_state(
+                user_id, syllabus_id, module_index, lesson_index
             )
-            current_lesson_state = lesson_data.get("lesson_state")
-            lesson_db_id = lesson_data.get("lesson_id")
+            if not current_state:
+                raise RuntimeError("Failed to load or initialize lesson state.")
 
-            if not current_lesson_state or not lesson_db_id:
-                logger.error(
-                    "Failed to retrieve valid state or lesson_id for exercise generation. "
-                    f"User: {user_id}"
-                )
-                raise ValueError("Could not load lesson state for exercise generation.")
+            # 2. Call the generation node directly (synchronous)
+            # The node function returns the updated state and the generated item
+            updated_state, new_exercise = nodes.generate_new_exercise(current_state)  # type: ignore
 
-        except (ValueError, RuntimeError) as load_err:
-            logger.error(
-                f"Error loading state for exercise generation: {load_err}",
-                exc_info=True,
-            )
-            # Re-raise or return None? Re-raise for clarity.
-            raise ValueError(
-                "Failed to load lesson state for exercise generation."
-            ) from load_err
+            # 3. Save the updated state (ensure it's serializable)
+            serializable_updated_state = {}
+            for key, value in updated_state.items():
+                if isinstance(value, BaseModel):
+                    serializable_updated_state[key] = value.model_dump()
+                elif (
+                    isinstance(value, list)
+                    and value
+                    and isinstance(value[0], BaseModel)
+                ):
+                    serializable_updated_state[key] = [
+                        item.model_dump() for item in value
+                    ]
+                else:
+                    serializable_updated_state[key] = value
 
-        # 2. Call the generation node function (assuming LessonAI doesn't do this)
-        # If LessonAI *does* handle this, this method might just be a placeholder
-        # or only handle saving if the node returns the exercise object directly.
-        # For now, assume this service calls the node as per original structure.
-        try:
-            # Pass state to the node
-            updated_state, new_exercise = await nodes.generate_new_exercise(
-                current_lesson_state.copy()  # Pass a copy
-            )
-            if not new_exercise:
-                logger.warning(
-                    f"generate_new_exercise node did not return a new exercise for user {user_id}."
-                )
-                # Need to save the updated_state even if no exercise generated? Yes.
-            else:
-                # Assuming Exercise model now uses 'id' field
-                logger.info(f"Successfully generated exercise: {new_exercise.id}")
-
-        except Exception as gen_err:
-            logger.error(
-                f"Error during exercise generation node call: {gen_err}", exc_info=True
-            )
-            raise RuntimeError("Failed to generate new exercise.") from gen_err
-
-        # 3. Save the updated state (returned from the node)
-        try:
-            updated_state_json = json.dumps(
-                updated_state,
-                default=lambda o: (
-                    o.model_dump(mode="json")
-                    if isinstance(
-                        o, (GeneratedLessonContent, Exercise, AssessmentQuestion)
-                    )
-                    else o
-                ),
-            )
-            current_status = "in_progress"
-            current_score = updated_state.get("user_performance", {}).get("score")
-
-            self.db_service.save_user_progress(
+            self.db_service.save_lesson_state(
                 user_id=user_id,
                 syllabus_id=syllabus_id,
                 module_index=module_index,
                 lesson_index=lesson_index,
-                status=current_status,
-                score=current_score,
-                lesson_state_json=updated_state_json,
-                lesson_id=lesson_db_id,
+                state_data=serializable_updated_state,  # Save serialized state
             )
             logger.info(
-                "Saved updated lesson state after generating exercise for user "
-                f"{user_id}, lesson_id {lesson_db_id}"
+                f"Saved updated state after exercise generation for user {user_id}."
             )
-        except Exception as db_err:
+
+            # 4. Return the generated exercise object (or None if failed)
+            # Ensure the returned object is the Pydantic model instance
+            if new_exercise and isinstance(new_exercise, dict):
+                # If the node returned a dict, try to validate it back
+                try:
+                    return Exercise.model_validate(new_exercise)
+                except ValidationError:
+                    logger.error("Failed to validate exercise returned from node.")
+                    return None
+            elif isinstance(new_exercise, Exercise):
+                return new_exercise
+            else:
+                return None  # Return None if generation failed or type is wrong
+
+        except ValueError as e:
+            logger.error(f"Value error during exercise generation: {e}", exc_info=True)
+            raise e  # Let the router handle 404 etc.
+        except Exception as e:
             logger.error(
-                f"Failed to save updated lesson state after exercise generation: {db_err}",
-                exc_info=True,
+                f"Unexpected error during exercise generation: {e}", exc_info=True
             )
-            # Log but return the exercise if generated
+            # Raise a runtime error for the router to catch as 500
+            raise RuntimeError(
+                "Failed to generate exercise due to an internal error."
+            ) from e
 
-        # 4. Return the newly generated exercise
-        return new_exercise
-
-    async def generate_assessment_question(  # Renamed
+    async def generate_assessment_question(
         self,
         user_id: str,
         syllabus_id: str,
@@ -623,117 +544,81 @@ class LessonInteractionService:
         lesson_index: int,
     ) -> Optional[AssessmentQuestion]:
         """
-        Generates a new assessment question for the lesson on demand.
-        Likely called by LessonAI.
+        Handles the request to generate a new assessment question on demand.
 
-        Args:
-            user_id: The user ID.
-            syllabus_id: The syllabus ID.
-            module_index: The module index.
-            lesson_index: The lesson index.
-
-        Returns:
-            The generated AssessmentQuestion object or None.
-
-        Raises:
-            ValueError: If lesson state cannot be loaded.
-            RuntimeError: If question generation via node fails.
+        Loads state, calls the specific generation node, saves state, returns question.
         """
         logger.info(
-            f"Generating new assessment question for user {user_id}, "
-            f"lesson {syllabus_id}/{module_index}/{lesson_index}"
+            f"Generating assessment question for user {user_id}, lesson "
+            f"{syllabus_id}/{module_index}/{lesson_index}"
         )
-
-        # 1. Load current lesson state (using orchestrator)
         try:
-            lesson_data = await self.get_or_create_lesson_state(
-                syllabus_id, module_index, lesson_index, user_id
+            # 1. Load current state
+            current_state, _ = await self._load_or_initialize_state(
+                user_id, syllabus_id, module_index, lesson_index
             )
-            current_lesson_state = lesson_data.get("lesson_state")
-            lesson_db_id = lesson_data.get("lesson_id")
+            if not current_state:
+                raise RuntimeError("Failed to load or initialize lesson state.")
 
-            if not current_lesson_state or not lesson_db_id:
-                logger.error(
-                    "Failed to retrieve valid state or lesson_id for assessment generation. "
-                    f"User: {user_id}"
-                )
-                raise ValueError(
-                    "Could not load lesson state for assessment generation."
-                )
+            # 2. Call the generation node directly (synchronous)
+            # Corrected function name used here
+            updated_state, new_question = nodes.generate_new_assessment(current_state)  # type: ignore
 
-        except (ValueError, RuntimeError) as load_err:
-            logger.error(
-                f"Error loading state for assessment generation: {load_err}",
-                exc_info=True,
-            )
-            raise ValueError(
-                "Failed to load lesson state for assessment generation."
-            ) from load_err
+            # 3. Save the updated state (ensure it's serializable)
+            serializable_updated_state = {}
+            for key, value in updated_state.items():
+                if isinstance(value, BaseModel):
+                    serializable_updated_state[key] = value.model_dump()
+                elif (
+                    isinstance(value, list)
+                    and value
+                    and isinstance(value[0], BaseModel)
+                ):
+                    serializable_updated_state[key] = [
+                        item.model_dump() for item in value
+                    ]
+                else:
+                    serializable_updated_state[key] = value
 
-        # 2. Call the generation node function (assuming this service calls it)
-        try:
-            updated_state, new_question = await nodes.generate_new_assessment_question(
-                current_lesson_state.copy()  # Pass a copy
-            )
-            if not new_question:
-                logger.warning(
-                    "generate_new_assessment_question node did not "
-                    f"return a new question for user {user_id}."
-                )
-                # Save updated state anyway
-            else:
-                # Assuming AssessmentQuestion model now uses 'id' field
-                logger.info(
-                    f"Successfully generated assessment question: {new_question.id}"
-                )
-
-        except Exception as gen_err:
-            logger.error(
-                f"Error during assessment question generation node call: {gen_err}",
-                exc_info=True,
-            )
-            raise RuntimeError(
-                "Failed to generate new assessment question."
-            ) from gen_err
-
-        # 3. Save the updated state (returned from the node)
-        try:
-            updated_state_json = json.dumps(
-                updated_state,
-                default=lambda o: (
-                    o.model_dump(mode="json")
-                    if isinstance(
-                        o, (GeneratedLessonContent, Exercise, AssessmentQuestion)
-                    )
-                    else o
-                ),
-            )
-            current_status = "in_progress"
-            current_score = updated_state.get("user_performance", {}).get("score")
-
-            self.db_service.save_user_progress(
+            self.db_service.save_lesson_state(
                 user_id=user_id,
                 syllabus_id=syllabus_id,
                 module_index=module_index,
                 lesson_index=lesson_index,
-                status=current_status,
-                score=current_score,
-                lesson_state_json=updated_state_json,
-                lesson_id=lesson_db_id,
+                state_data=serializable_updated_state,  # Save serialized state
             )
             logger.info(
-                "Saved updated lesson state after generating assessment "
-                f"question for user {user_id}, lesson_id {lesson_db_id}"
+                f"Saved updated state after assessment generation for user {user_id}."
             )
-        except Exception as db_err:
-            logger.error(
-                f"Failed to save updated lesson state after assessment generation: {db_err}",
-                exc_info=True,
-            )
-            # Log but return question if generated
 
-        # 4. Return the newly generated question
-        return new_question
+            # 4. Return the generated question object (or None if failed)
+            # Ensure the returned object is the Pydantic model instance
+            if new_question and isinstance(new_question, dict):
+                try:
+                    return AssessmentQuestion.model_validate(new_question)
+                except ValidationError:
+                    logger.error(
+                        "Failed to validate assessment question returned from node."
+                    )
+                    return None
+            elif isinstance(new_question, AssessmentQuestion):
+                return new_question
+            else:
+                return None  # Return None if generation failed or type is wrong
+
+        except ValueError as e:
+            logger.error(
+                f"Value error during assessment generation: {e}", exc_info=True
+            )
+            raise e  # Let the router handle 404 etc.
+        except Exception as e:
+            logger.error(
+                f"Unexpected error during assessment generation: {e}", exc_info=True
+            )
+            # Raise a runtime error for the router to catch as 500
+            raise RuntimeError(
+                "Failed to generate assessment question due to an internal error."
+            ) from e
 
     async def update_lesson_progress(
         self,
@@ -744,104 +629,46 @@ class LessonInteractionService:
         status: str,
     ) -> Dict[str, Any]:
         """
-        Update user's progress status for a specific lesson.
-
-        Args:
-            user_id: The user ID.
-            syllabus_id: The syllabus ID.
-            module_index: The module index.
-            lesson_index: The lesson index.
-            status: The new progress status ("not_started", "in_progress", "completed").
-
-        Returns:
-            A dictionary confirming the update.
-
-        Raises:
-            ValueError: If status is invalid or lesson details cannot be found.
+        Updates the progress status for a specific lesson for the user.
         """
         logger.info(
-            f"Updating progress for user {user_id}, "
-            f"lesson {syllabus_id}/{module_index}/{lesson_index} to {status}"
+            f"Updating progress for user {user_id}, lesson "
+            f"{syllabus_id}/{module_index}/{lesson_index} to status: {status}"
         )
         # Validate status
-        if status not in ["not_started", "in_progress", "completed"]:
-            raise ValueError(f"Invalid status: {status}")
-
-        # Fetch lesson_id to ensure it's included in the progress update
-        lesson_db_id = None
-        progress_entry = None  # Keep track of existing entry
-        try:
-            # Try getting from existing progress first
-            progress_entry = self.db_service.get_lesson_progress(
-                user_id, syllabus_id, module_index, lesson_index
+        allowed_statuses = ["not_started", "in_progress", "completed"]
+        if status not in allowed_statuses:
+            raise ValueError(
+                f"Invalid progress status: {status}. Must be one of {allowed_statuses}"
             )
-            if progress_entry and progress_entry.get("lesson_id"):
-                lesson_db_id = progress_entry.get("lesson_id")
-                logger.debug(
-                    f"Found lesson_id {lesson_db_id} in existing progress for status update."
-                )
-            else:
-                # If not in progress, look up via indices using
-                # exposition service (indirectly syllabus service)
-                _, lesson_db_id = (
-                    await self.exposition_service.get_or_generate_exposition(
-                        syllabus_id, module_index, lesson_index
-                    )
-                )
-                if lesson_db_id:
-                    logger.debug(
-                        f"Determined lesson_id {lesson_db_id} "
-                        "via exposition service for status update."
-                    )
-                else:
-                    # This case means exposition couldn't be found/generated either
-                    logger.error(
-                        "Could not determine lesson_id via exposition service for progress update:"
-                        f" {syllabus_id}/{module_index}/{lesson_index}"
-                    )
-                    raise ValueError(
-                        "Could not find lesson details via exposition service for progress update."
-                    )
 
-            if not isinstance(lesson_db_id, int):  # Final check
-                logger.error(
-                    "Failed to determine a valid integer lesson_id "
-                    f"for progress update. Found: {lesson_db_id}"
+        try:
+            # Call DB service to update progress
+            progress_record = self.db_service.save_user_progress(
+                user_id=user_id,
+                syllabus_id=syllabus_id,
+                module_index=module_index,
+                lesson_index=lesson_index,
+                status=status,
+                # Pass None for score/details unless available
+                score=None,
+                details=None,
+            )
+            if progress_record is None:
+                # This might happen if the lesson doesn't exist for lookup within save_user_progress
+                raise ValueError(
+                    "Failed to update progress. Lesson or user might not exist."
                 )
-                raise ValueError("Could not determine lesson ID for progress update.")
+
+            logger.info(f"Progress updated successfully for user {user_id}.")
+            # Return the updated progress record details
+            return progress_record  # This should be a dictionary
 
         except ValueError as e:
-            logger.error(f"Failed to get lesson_id for progress update: {e}")
-            raise  # Re-raise the ValueError
-
-        # Update the progress, including lesson_id
-        # Preserve existing score and state if only status is changing
-        current_score = progress_entry.get("score") if progress_entry else None
-        current_state_json = (
-            json.dumps(progress_entry.get("lesson_state"))
-            if progress_entry and progress_entry.get("lesson_state")
-            else None
-        )
-
-        progress_id = self.db_service.save_user_progress(
-            user_id=user_id,
-            syllabus_id=syllabus_id,
-            module_index=module_index,
-            lesson_index=lesson_index,
-            status=status,
-            score=current_score,  # Preserve score
-            lesson_state_json=current_state_json,  # Preserve state
-            lesson_id=lesson_db_id,  # Pass the determined lesson_id
-        )
-        logger.info(
-            f"Progress status updated to {status} for lesson_id {lesson_db_id}, user {user_id}."
-        )
-
-        return {
-            "progress_id": progress_id,
-            "user_id": user_id,
-            "syllabus_id": syllabus_id,
-            "module_index": module_index,
-            "lesson_index": lesson_index,
-            "status": status,
-        }
+            logger.error(f"Value error updating progress: {e}", exc_info=True)
+            raise e  # Let router handle 400/404
+        except Exception as e:
+            logger.error(f"Unexpected error updating progress: {e}", exc_info=True)
+            raise RuntimeError(
+                "Failed to update progress due to an internal error."
+            ) from e

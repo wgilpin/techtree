@@ -6,6 +6,7 @@ Main application module for the TechTree API.
 
 import sys
 import os
+from contextlib import asynccontextmanager # Import asynccontextmanager
 
 # Add project root to sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -17,22 +18,30 @@ from fastapi import FastAPI
 from backend.dependencies import db_service
 from backend.logger import logger
 
-app = FastAPI(title="TechTree API")
+# Define the lifespan context manager
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """
+    Manages application startup and shutdown events.
+    """
+    # Startup logic would go here (if any)
+    logger.info("Application startup...")
+    yield
+    # Shutdown logic
+    logger.info("Application shutdown...")
+    # Use the imported shared db_service instance
+    db_service.close()
+    print("Database connection closed.") # Keep print for visibility if desired
+
+# Instantiate FastAPI app with the lifespan manager
+app = FastAPI(title="TechTree API", lifespan=lifespan)
 """
 FastAPI application instance for the TechTree API.
 """
 
 # Removed direct DB instantiation and print statement
 
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """
-    Gracefully closes the database connection on application shutdown.
-    """
-    # Use the imported shared db_service instance
-    db_service.close()
-    print("Database connection closed.")
+# Removed deprecated @app.on_event("shutdown") function
 
 
 # Add CORS middleware to allow frontend requests

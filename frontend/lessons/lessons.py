@@ -1,8 +1,9 @@
 # frontend/lessons/lessons.py
 """blueprint for lesson handling in the flask app"""
+# pylint: disable=broad-exception-caught
 
 import logging
-from typing import Optional, Union, Dict, List, Any # Added List, Any
+from typing import Optional, Union, Dict, List  # Added List, Any
 import requests
 import markdown
 from flask import (
@@ -22,8 +23,8 @@ from backend.models import (
     GeneratedLessonContent,
     ExpositionContent,
     ExpositionContentItem,
-    Exercise, # Import Exercise model
-    AssessmentQuestion, # Import AssessmentQuestion model
+    Exercise,  # Import Exercise model
+    AssessmentQuestion,  # Import AssessmentQuestion model
 )
 
 from frontend.auth.auth import login_required  # Import the centralized decorator
@@ -288,13 +289,17 @@ def _process_lesson_content(lesson_data_dict: Dict) -> Optional[Dict]:
         "exposition": markdown.markdown(exposition_markdown_str),
         # Pass the raw exercise and assessment definitions retrieved from the main dict
         # The template (lesson.html) will need to handle rendering these lists of objects
-        "active_exercises": [ex.model_dump() for ex in exercises if ex], # Added 'if ex' for safety
+        "active_exercises": [
+            ex.model_dump() for ex in exercises if ex
+        ],  # Added 'if ex' for safety
         "knowledge_assessment": [
-            q.model_dump() for q in assessment_questions if q # Added 'if q' for safety
+            q.model_dump() for q in assessment_questions if q  # Added 'if q' for safety
         ],
     }
 
-    logger.info("Lesson content processed (exposition from model, exercises/assessment from dict).")
+    logger.info(
+        "Lesson content processed (exposition from model, exercises/assessment from dict)."
+    )
     return processed_content
 
 
@@ -349,7 +354,9 @@ def lesson(syllabus_id: str, module: str, lesson_id: str):
         # Extract state and raw content
         lesson_state = backend_response.get("lesson_state")
         # Use "content" key, which should now be correctly populated by the backend router
-        raw_content = backend_response.get("content") # This is the exposition/metadata part
+        raw_content = backend_response.get(
+            "content"
+        )  # This is the exposition/metadata part
 
         if raw_content is None:
             logger.error("Backend response missing 'content' (exposition/metadata).")
@@ -472,6 +479,67 @@ def lesson_chat(syllabus_id: str, module_index: int, lesson_index: int):
         return jsonify({"error": error_detail}), 502  # Bad Gateway or appropriate error
     except Exception as e:
         logger.exception(f"Unexpected error in lesson_chat route: {e}")
+        return jsonify({"error": "An internal server error occurred."}), 500
+
+
+# --- NEW Generate Exercise POST Route ---
+@lessons_bp.route(
+    "/exercise/<syllabus_id>/<int:module_index>/<int:lesson_index>", methods=["POST"]
+)
+@login_required
+def generate_exercise_proxy(syllabus_id: str, module_index: int, lesson_index: int):
+    """
+    Handles the 'Generate Exercise' request from the frontend, forwards it
+    to the backend API, and returns the generated exercise or an error.
+    """
+    if "user" not in session:
+        return jsonify({"error": "User not logged in"}), 401
+
+    logger.info(
+        f"Received generate exercise request for lesson {syllabus_id}/{module_index}/{lesson_index}"
+    )
+
+    try:
+        api_url = current_app.config["API_URL"]
+        # This is the ACTUAL backend endpoint URL
+        backend_exercise_url = (
+            f"{api_url}/lesson/exercise/{syllabus_id}/{module_index}/{lesson_index}"
+        )
+        headers = {"Authorization": f"Bearer {session['user']['access_token']}"}
+
+        # Forward the POST request to the backend API (no body needed for this one)
+        backend_response = requests.post(
+            backend_exercise_url,
+            headers=headers,
+            timeout=60,  # Timeout for potentially long AI generation
+        )
+
+        # Check if the backend request was successful
+        backend_response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
+
+        # Return the JSON response (containing the exercise or error) from the backend
+        response_data = backend_response.json()
+        logger.info(
+            f"Received backend response for exercise generation: {response_data}"
+        )
+        return jsonify(response_data)
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error calling backend generate exercise API: {e}", exc_info=True)
+        error_detail = "Failed to communicate with the exercise generation service."
+        if e.response is not None:
+            try:
+                error_json = e.response.json()
+                # Use 'detail' from FastAPI or 'error' from the backend response model
+                error_detail = error_json.get(
+                    "detail", error_json.get("error", error_detail)
+                )
+            except ValueError:
+                error_detail = f"{error_detail} Status: {e.response.status_code}"
+
+        return jsonify({"error": error_detail}), 502  # Bad Gateway or appropriate error
+    except Exception as e:
+        logger.exception(f"Unexpected error in generate_exercise_proxy route: {e}")
         return jsonify({"error": "An internal server error occurred."}), 500
 
 

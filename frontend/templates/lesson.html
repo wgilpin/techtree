@@ -338,7 +338,7 @@ document.addEventListener('DOMContentLoaded', function() {
                  throw new Error("Missing necessary lesson identifiers.");
             }
 
-            const fullUrl = `/lesson${url}/${syllabusId}/${moduleIndex}/${lessonIndex}`; // Construct full URL
+            const fullUrl = `/lesson${url}/${syllabusId}/${moduleIndex}/${lessonIndex}`; // Construct full URL (Reverted: Added /lesson prefix back)
 
             const response = await fetch(fullUrl, {
                 method: 'POST',

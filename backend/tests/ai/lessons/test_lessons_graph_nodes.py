@@ -2,9 +2,8 @@
 """tests for backend/ai/lessons/lessons_graph.py node actions"""
 # pylint: disable=protected-access, unused-argument, invalid-name
 
-import json
-from unittest.mock import ANY, MagicMock, patch, AsyncMock # Import AsyncMock
-import pytest # Need pytest for async tests
+from unittest.mock import ANY, MagicMock, patch, AsyncMock  # Import AsyncMock
+import pytest  # Need pytest for async tests
 
 from google.api_core.exceptions import ResourceExhausted
 
@@ -12,67 +11,84 @@ from google.api_core.exceptions import ResourceExhausted
 from backend.ai.lessons import nodes
 from backend.models import (
     AssessmentQuestion,
-    EvaluationResult,
     Exercise,
     GeneratedLessonContent,
     LessonState,
-    Option, # Added Option import
+    Option,  # Added Option import
 )
 
 
 # Mock dependencies that are loaded at module level or used in __init__
 # NOTE: Patches moved to individual methods to avoid Pylint confusion
+# Removed @pytest.mark.asyncio from class level
 class TestLessonAINodes:
     """Tests for the node action methods in LessonAI."""
 
     # --- Tests for generate_chat_response ---
 
     # Patches updated to target the 'nodes' module
+    @pytest.mark.asyncio # Added decorator
     @patch("backend.ai.lessons.nodes.load_prompt")
-    @patch("backend.ai.lessons.nodes.call_with_retry")
-    @patch("backend.ai.lessons.nodes.llm_model") # Patch the imported MODEL instance in nodes
-    @patch("backend.ai.lessons.nodes.logger", MagicMock()) # Patch logger in nodes
-    def test_generate_chat_response_success(
+    @patch(
+        "backend.ai.lessons.nodes.call_llm_plain_text", new_callable=AsyncMock
+    )  # Patch plain text call
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())  # Patch logger in nodes
+    async def test_generate_chat_response_success(
         self,
-        MockLlmModel,
-        MockCallWithRetry,
-        MockLoadPrompt,
+        mock_call_llm,
+        mock_load_prompt,
     ):
         """Test successful chat response generation."""
-        # No longer need LessonAI instance or its init patches (StateGraph, load_dotenv)
-        MockLoadPrompt.return_value = "mocked_chat_prompt"
-        MockLlmModel_response = MagicMock()
-        MockLlmModel_response.text = "This is the AI response."
-        MockCallWithRetry.return_value = MockLlmModel_response
+        mock_load_prompt.return_value = "mocked_chat_prompt"
+        mock_call_llm.return_value = (
+            "This is the AI response."  # Plain text returns string
+        )
 
         initial_history = [{"role": "user", "content": "Tell me more."}]
+        # Use a simplified state structure matching LessonState TypedDict
         state: LessonState = {
+            "topic": "Chatting",
+            "knowledge_level": "beginner",
+            "syllabus": None,
             "lesson_title": "Chat Lesson",
-            "user_id": "chat_user",
-            "generated_content": GeneratedLessonContent( # Ensure valid content
-                topic="Chatting",
-                level="beginner",
-                exposition_content="Some exposition.",
-                # active_exercises=[], # Removed in model
-                # knowledge_assessment=[], # Removed in model
+            "module_title": "Module Chat",
+            "generated_content": GeneratedLessonContent(
+                exposition_content="Some exposition."
             ),
+            "user_responses": [],
+            "user_performance": {},
+            "user_id": "chat_user",
+            "lesson_uid": "chat_lesson_uid",
+            "created_at": "sometime",
+            "updated_at": "sometime",
             "conversation_history": initial_history,
-            # Other fields...
+            "current_interaction_mode": "chatting",
+            "current_exercise_index": None,
+            "current_quiz_question_index": None,
+            "generated_exercises": [],
+            "generated_assessment_questions": [],
+            "generated_exercise_ids": [],
+            "generated_assessment_question_ids": [],
+            "error_message": None,
+            "active_exercise": None,
+            "active_assessment": None,
+            "potential_answer": None,
         }
 
         # Call the node function directly
-        result = nodes.generate_chat_response(state)
+        result = await nodes.generate_chat_response(state)  # Await the async node
 
-        MockLoadPrompt.assert_called_once_with(
+        mock_load_prompt.assert_called_once_with(
             "chat_response",
+            user_message="Tell me more.",
+            conversation_history="",  # History before last message is empty
+            topic="Chatting",
             lesson_title="Chat Lesson",
-            exposition="Some exposition.",
-            history_json=json.dumps(initial_history, indent=2),
+            user_level="beginner",
+            exposition_summary="Some exposition.",
+            active_task_context="None",
         )
-        # Check that call_with_retry was called with the model's method and the prompt
-        MockCallWithRetry.assert_called_once_with(
-            MockLlmModel.generate_content, "mocked_chat_prompt"
-        )
+        mock_call_llm.assert_called_once_with("mocked_chat_prompt", max_retries=3)
 
         assert "conversation_history" in result
         new_history = result["conversation_history"]
@@ -80,144 +96,203 @@ class TestLessonAINodes:
         assert new_history[0] == initial_history[0]  # Original message preserved
         assert new_history[1]["role"] == "assistant"
         assert new_history[1]["content"] == "This is the AI response."
+        assert result["current_interaction_mode"] == "chatting"  # Mode should be set
 
     # Remove LessonAI init patches, update logger patch target
+    @pytest.mark.asyncio # Added decorator
     @patch("backend.ai.lessons.nodes.logger", MagicMock())
-    def test_generate_chat_response_no_user_message(self):
+    async def test_generate_chat_response_no_user_message(self):
         """Test chat response generation when no user message precedes."""
-        # lesson_ai = LessonAI() # Removed
         initial_history = [{"role": "assistant", "content": "Welcome!"}]
         state: LessonState = {
             "conversation_history": initial_history,
-            "generated_content": GeneratedLessonContent(), # Provide minimal valid content
-            # Other fields...
+            "generated_content": GeneratedLessonContent(),  # Provide minimal valid content
+            # Fill in other required LessonState fields
+            "topic": "Test",
+            "knowledge_level": "beginner",
+            "syllabus": None,
+            "lesson_title": "Test",
+            "module_title": "Test",
+            "user_responses": [],
+            "user_performance": {},
+            "user_id": "test",
+            "lesson_uid": "test",
+            "created_at": "t",
+            "updated_at": "t",
+            "current_interaction_mode": "chatting",
+            "current_exercise_index": None,
+            "current_quiz_question_index": None,
+            "generated_exercises": [],
+            "generated_assessment_questions": [],
+            "generated_exercise_ids": [],
+            "generated_assessment_question_ids": [],
+            "error_message": None,
+            "active_exercise": None,
+            "active_assessment": None,
+            "potential_answer": None,
         }
 
         # Patch logger warning where it's used
         with patch("backend.ai.lessons.nodes.logger.warning") as mock_warning:
             # Call node function directly
-            result = nodes.generate_chat_response(state)
+            result = await nodes.generate_chat_response(state)
 
-            # Check only for the specific warning about no preceding user message
+            # Check only for the specific warning about no user message
             mock_warning.assert_called_once_with(
-                'generate_chat_response called without a preceding user message.'
+                f"Cannot generate chat response: No user message found for user {state['user_id']}."
             )
-            assert "conversation_history" in result
-            new_history = result["conversation_history"]
-            assert len(new_history) == 2
-            assert new_history[1]["role"] == "assistant"
-            assert "specific I can help you with" in new_history[1]["content"]
+            # State should remain unchanged if no user message
+            assert result == state
 
     # Update patches to target 'nodes' module
+    @pytest.mark.asyncio # Added decorator
     @patch("backend.ai.lessons.nodes.load_prompt")
     @patch(
-        "backend.ai.lessons.nodes.call_with_retry", # Target nodes
+        "backend.ai.lessons.nodes.call_llm_plain_text",  # Target nodes, plain text call
+        new_callable=AsyncMock,
         side_effect=ResourceExhausted("Quota exceeded"),
     )
-    @patch("backend.ai.lessons.nodes.llm_model") # Target nodes
-    @patch("backend.ai.lessons.nodes.logger", MagicMock()) # Target nodes
-    def test_generate_chat_response_resource_exhausted(
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())  # Target nodes
+    async def test_generate_chat_response_resource_exhausted(
         self,
-        MockLlmModel,
-        MockCallWithRetry,
-        MockLoadPrompt,
+        mock_call_llm,
+        mock_load_prompt,
     ):
         """Test chat response generation handling ResourceExhausted."""
-        # lesson_ai = LessonAI() # Removed
-        MockLoadPrompt.return_value = "mocked_chat_prompt"
+        mock_load_prompt.return_value = "mocked_chat_prompt"
 
         initial_history = [{"role": "user", "content": "Tell me more."}]
         state: LessonState = {
+            "topic": "Chatting",
+            "knowledge_level": "beginner",
+            "syllabus": None,
             "lesson_title": "Chat Lesson",
-            "user_id": "chat_user",
-            "generated_content": GeneratedLessonContent( # Ensure valid content
-                topic="Chatting",
-                level="beginner",
-                exposition_content="Some exposition.",
-                # active_exercises=[], # Removed
-                # knowledge_assessment=[], # Removed
+            "module_title": "Module Chat",
+            "generated_content": GeneratedLessonContent(
+                exposition_content="Some exposition."
             ),
-            "conversation_history": initial_history,
-        }
-
-        # Patch logger where it's used (nodes module)
-        with patch("backend.ai.lessons.nodes.logger.error") as mock_error:
-             # Call node function directly
-            result = nodes.generate_chat_response(state)
-
-            mock_error.assert_called_once()
-            assert "conversation_history" in result
-            new_history = result["conversation_history"]
-            assert len(new_history) == 2
-            assert new_history[1]["role"] == "assistant"
-            # Expect the generic error message now, as ResourceExhausted is caught by `except Exception`
-            assert "Sorry, I encountered an error" in new_history[1]["content"]
-
-    # Update patches to target 'nodes' module
-    @patch(
-        "backend.ai.lessons.nodes.load_prompt", # Target nodes
-        side_effect=Exception("Prompt loading failed"),
-    )
-    @patch("backend.ai.lessons.nodes.call_with_retry") # Target nodes
-    @patch("backend.ai.lessons.nodes.llm_model") # Target nodes
-    @patch("backend.ai.lessons.nodes.logger", MagicMock()) # Target nodes
-    def test_generate_chat_response_generic_exception(
-        self,
-        MockLlmModel,
-        MockCallWithRetry,
-        MockLoadPrompt_exc,
-    ):
-        """Test chat response generation handling a generic exception."""
-        # lesson_ai = LessonAI() # Removed
-
-        initial_history = [{"role": "user", "content": "Tell me more."}]
-        state: LessonState = {
-            "lesson_title": "Chat Lesson",
+            "user_responses": [],
+            "user_performance": {},
             "user_id": "chat_user",
-            "generated_content": GeneratedLessonContent( # Ensure valid content
-                topic="Chatting",
-                level="beginner",
-                exposition_content="Some exposition.",
-                # active_exercises=[], # Removed
-                # knowledge_assessment=[], # Removed
-            ),
+            "lesson_uid": "chat_lesson_uid",
+            "created_at": "t",
+            "updated_at": "t",
             "conversation_history": initial_history,
+            "current_interaction_mode": "chatting",
+            "current_exercise_index": None,
+            "current_quiz_question_index": None,
+            "generated_exercises": [],
+            "generated_assessment_questions": [],
+            "generated_exercise_ids": [],
+            "generated_assessment_question_ids": [],
+            "error_message": None,
+            "active_exercise": None,
+            "active_assessment": None,
+            "potential_answer": None,
         }
 
         # Patch logger where it's used (nodes module)
         with patch("backend.ai.lessons.nodes.logger.error") as mock_error:
             # Call node function directly
-            result = nodes.generate_chat_response(state)
+            result = await nodes.generate_chat_response(state)
 
             mock_error.assert_called_once()
-            # call_with_retry should not have been called if load_prompt failed
-            MockCallWithRetry.assert_not_called()
+            assert "LLM call failed" in mock_error.call_args[0][0]
             assert "conversation_history" in result
             new_history = result["conversation_history"]
             assert len(new_history) == 2
             assert new_history[1]["role"] == "assistant"
-            assert "Sorry, I encountered an error" in new_history[1]["content"]
-
-    # --- Tests for evaluate_chat_answer ---
+            # Corrected Assertion: Expect the fallback from the except Exception block
+            assert (
+                "Sorry, I'm having trouble understanding right now."
+                in new_history[1]["content"]
+            )
 
     # Update patches to target 'nodes' module
-    @patch("backend.ai.lessons.nodes.load_prompt")
-    @patch("backend.ai.lessons.nodes.call_llm_with_json_parsing")
-    # Removed broad logger mock to allow debug logs
-    def test_evaluate_chat_answer_exercise_correct(
+    @pytest.mark.asyncio # Added decorator
+    @patch(
+        "backend.ai.lessons.nodes.load_prompt",  # Target nodes
+        side_effect=Exception("Prompt loading failed"),
+    )
+    @patch(
+        "backend.ai.lessons.nodes.call_llm_plain_text", new_callable=AsyncMock
+    )  # Target nodes
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())  # Target nodes
+    async def test_generate_chat_response_generic_exception(
         self,
         mock_call_llm,
-        MockLoadPrompt,
+        mock_load_prompt_exc,
+    ):
+        """Test chat response generation handling a generic exception."""
+        initial_history = [{"role": "user", "content": "Tell me more."}]
+        state: LessonState = {
+            "topic": "Chatting",
+            "knowledge_level": "beginner",
+            "syllabus": None,
+            "lesson_title": "Chat Lesson",
+            "module_title": "Module Chat",
+            "generated_content": GeneratedLessonContent(
+                exposition_content="Some exposition."
+            ),
+            "user_responses": [],
+            "user_performance": {},
+            "user_id": "chat_user",
+            "lesson_uid": "chat_lesson_uid",
+            "created_at": "t",
+            "updated_at": "t",
+            "conversation_history": initial_history,
+            "current_interaction_mode": "chatting",
+            "current_exercise_index": None,
+            "current_quiz_question_index": None,
+            "generated_exercises": [],
+            "generated_assessment_questions": [],
+            "generated_exercise_ids": [],
+            "generated_assessment_question_ids": [],
+            "error_message": None,
+            "active_exercise": None,
+            "active_assessment": None,
+            "potential_answer": None,
+        }
+
+        # Patch logger where it's used (nodes module)
+        with patch("backend.ai.lessons.nodes.logger.error") as mock_error:
+            # Call node function directly
+            result = await nodes.generate_chat_response(state)
+
+            mock_error.assert_called_once()
+            assert (
+                "LLM call failed" in mock_error.call_args[0][0]
+            )  # Error is now in LLM call block
+            mock_call_llm.assert_not_called()  # LLM call shouldn't happen if prompt load fails
+            assert "conversation_history" in result
+            new_history = result["conversation_history"]
+            assert len(new_history) == 2
+            assert new_history[1]["role"] == "assistant"
+            assert (
+                "Sorry, I'm having trouble understanding right now."
+                in new_history[1]["content"]
+            )  # Default fallback
+
+    # --- Tests for evaluate_answer --- # Corrected function name
+
+    # Update patches to target 'nodes' module
+    @pytest.mark.asyncio # Added decorator
+    @patch("backend.ai.lessons.nodes.load_prompt")
+    @patch(
+        "backend.ai.lessons.nodes.call_llm_plain_text", new_callable=AsyncMock
+    )  # Use plain text call
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())  # Patch logger
+    async def test_evaluate_answer_exercise_correct(  # Corrected function name
+        self,
+        mock_call_llm,
+        mock_load_prompt,
     ):
         """Test evaluating a correct exercise answer."""
-        # lesson_ai = LessonAI() # Removed
-        MockLoadPrompt.return_value = "mocked_eval_prompt"
-        mock_eval_result = EvaluationResult(
-            score=1.0, is_correct=True, feedback="Spot on!", explanation=""
-        )
-        mock_call_llm.return_value = mock_eval_result
+        mock_load_prompt.return_value = "mocked_eval_prompt"
+        # Plain text call returns string feedback
+        mock_call_llm.return_value = "Spot on!"
 
-        exercise = Exercise( # Use correct_answer
+        exercise = Exercise(  # Use correct_answer
             id="ex_eval", type="short_answer", question="2+2?", correct_answer="4"
         )
         initial_history = [
@@ -226,306 +301,410 @@ class TestLessonAINodes:
         ]
         state: LessonState = {
             "user_id": "eval_user",
-            "current_interaction_mode": "doing_exercise",
-            "current_exercise_id": "ex_eval", # Use ID tracking
-            "generated_content": GeneratedLessonContent( # Ensure valid content
-                topic="Eval",
-                level="beginner",
-                exposition_content="",
-                # active_exercises=[exercise], # No longer in content
-                # knowledge_assessment=[],
-            ),
-            "generated_exercises": [exercise], # Add to state list
+            "current_interaction_mode": "submit_answer",  # Mode should be submit
+            "active_exercise": exercise,  # Set active exercise directly
+            "active_assessment": None,
+            "potential_answer": "4",  # Answer stored in state
+            "generated_content": GeneratedLessonContent(),  # Minimal content
             "conversation_history": initial_history,
+            # Fill other required fields
+            "topic": "Eval",
+            "knowledge_level": "beginner",
+            "syllabus": None,
+            "lesson_title": "Eval",
+            "module_title": "Eval",
             "user_responses": [],
-            # Other fields...
+            "user_performance": {},
+            "lesson_uid": "eval",
+            "created_at": "t",
+            "updated_at": "t",
+            "current_exercise_index": None,
+            "current_quiz_question_index": None,
+            "generated_exercises": [exercise],
+            "generated_assessment_questions": [],
+            "generated_exercise_ids": ["ex_eval"],
+            "generated_assessment_question_ids": [],
+            "error_message": None,
         }
 
         # Call node function directly
-        result = nodes.evaluate_chat_answer(state)
+        result = await nodes.evaluate_answer(state)  # Corrected function name
 
-        # Check prompt loading was called (it should be now)
-        MockLoadPrompt.assert_called_once_with(
+        mock_load_prompt.assert_called_once_with(
             "evaluate_answer",
-            question_type="exercise",
-            prompt_context=ANY,  # Context is complex, just check it was called
+            task_type="Exercise",
+            task_details=ANY,  # Context is complex, just check it was called
+            correct_answer_details="Correct Answer/Criteria: 4",
+            user_answer="4",
         )
-        mock_call_llm.assert_called_once_with(
-            "mocked_eval_prompt", validation_model=EvaluationResult
-        )
+        mock_call_llm.assert_called_once_with("mocked_eval_prompt", max_retries=2)
 
         assert "conversation_history" in result
         new_history = result["conversation_history"]
-        assert len(new_history) == 4  # Original + User Answer + AI Feedback + Follow-up
-        assert new_history[-2]["role"] == "assistant" # Feedback is second to last
-        assert new_history[-2]["content"] == "Spot on!"
-        assert new_history[-1]["role"] == "assistant" # Follow-up is last
-        assert "next exercise" in new_history[-1]["content"]
+        assert len(new_history) == 3  # Original + User Answer + AI Feedback
+        assert new_history[-1]["role"] == "assistant"  # Feedback is last
+        assert new_history[-1]["content"] == "Spot on!"
 
-        assert result.get("current_interaction_mode") == "chatting" # Mode reset after eval
-        assert "user_responses" in result
-        assert len(result["user_responses"]) == 1
-        response_record = result["user_responses"][0]
-        assert response_record["question_id"] == "ex_eval"
-        assert response_record["response"] == "4"
-        assert response_record["evaluation"]["is_correct"] is True
+        assert (
+            result.get("current_interaction_mode") == "chatting"
+        )  # Mode reset after eval
+        assert result.get("active_exercise") is None  # Active task cleared
+        assert result.get("potential_answer") is None  # Answer cleared
 
     # Update patches to target 'nodes' module
+    @pytest.mark.asyncio # Added decorator
     @patch("backend.ai.lessons.nodes.load_prompt")
-    @patch("backend.ai.lessons.nodes.call_llm_with_json_parsing")
-    # Removed broad logger mock to allow debug logs
-    def test_evaluate_chat_answer_quiz_incorrect(
+    @patch(
+        "backend.ai.lessons.nodes.call_llm_plain_text", new_callable=AsyncMock
+    )  # Use plain text call
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())  # Patch logger
+    async def test_evaluate_answer_quiz_incorrect(  # Corrected function name
         self,
         mock_call_llm,
-        MockLoadPrompt,
+        mock_load_prompt,
     ):
         """Test evaluating an incorrect quiz answer with explanation."""
-        # lesson_ai = LessonAI() # Removed
-        MockLoadPrompt.return_value = "mocked_eval_prompt"
-        mock_eval_result = EvaluationResult(
-            score=0.0,
-            is_correct=False,
-            feedback="Not quite.",
-            explanation="Python is a language.",
-        )
-        mock_call_llm.return_value = mock_eval_result
+        mock_load_prompt.return_value = "mocked_eval_prompt"
+        # Simulate LLM feedback including explanation
+        mock_call_llm.return_value = "Not quite. *Explanation:* Python is a language."
 
-        question = AssessmentQuestion( # Use question_text, List[Option], correct_answer_id
-            id="q_eval",
-            type="multiple_choice",
-            question_text="What is Python?",
-            options=[Option(id="A", text="Snake"), Option(id="B", text="Language")],
-            correct_answer_id="B",
+        question = (
+            AssessmentQuestion(  # Use question_text, List[Option], correct_answer_id
+                id="q_eval",
+                type="multiple_choice",
+                question_text="What is Python?",
+                options=[Option(id="A", text="Snake"), Option(id="B", text="Language")],
+                correct_answer_id="B",
+                correct_answer="Language",  # Add correct answer text for prompt context
+            )
         )
         initial_history = [
-            {"role": "assistant", "content": "Quiz: What is Python? A) Snake B) Language"},
-            {"role": "user", "content": "A"}, # Incorrect answer
+            {
+                "role": "assistant",
+                "content": "Quiz: What is Python? A) Snake B) Language",
+            },
+            {"role": "user", "content": "A"},  # Incorrect answer
         ]
         state: LessonState = {
             "user_id": "eval_user_quiz",
-            "current_interaction_mode": "taking_quiz",
-            "current_assessment_question_id": "q_eval", # Use ID tracking
-            "generated_content": GeneratedLessonContent( # Ensure valid content
-                topic="Eval Quiz",
-                level="beginner",
-                exposition_content="",
-                # active_exercises=[],
-                # knowledge_assessment=[question], # No longer in content
-            ),
-            "generated_assessment_questions": [question], # Add to state list
+            "current_interaction_mode": "submit_answer",  # Mode should be submit
+            "active_exercise": None,
+            "active_assessment": question,  # Set active assessment
+            "potential_answer": "A",  # Answer stored in state
+            "generated_content": GeneratedLessonContent(),  # Minimal content
             "conversation_history": initial_history,
+            # Fill other required fields
+            "topic": "Eval Quiz",
+            "knowledge_level": "beginner",
+            "syllabus": None,
+            "lesson_title": "Eval Quiz",
+            "module_title": "Eval Quiz",
             "user_responses": [],
-            # Other fields...
+            "user_performance": {},
+            "lesson_uid": "eval_q",
+            "created_at": "t",
+            "updated_at": "t",
+            "current_exercise_index": None,
+            "current_quiz_question_index": None,
+            "generated_exercises": [],
+            "generated_assessment_questions": [question],
+            "generated_exercise_ids": [],
+            "generated_assessment_question_ids": ["q_eval"],
+            "error_message": None,
         }
 
         # Call node function directly
-        result = nodes.evaluate_chat_answer(state)
+        result = await nodes.evaluate_answer(state)  # Corrected function name
 
-        MockLoadPrompt.assert_called_once_with(
+        mock_load_prompt.assert_called_once_with(
             "evaluate_answer",
-            question_type="assessment",
-            prompt_context=ANY,
+            task_type="Assessment Question",
+            task_details=ANY,
+            correct_answer_details="Correct Answer/Criteria: Language",
+            user_answer="A",
         )
-        mock_call_llm.assert_called_once_with(
-            "mocked_eval_prompt", validation_model=EvaluationResult
-        )
+        mock_call_llm.assert_called_once_with("mocked_eval_prompt", max_retries=2)
 
         assert "conversation_history" in result
         new_history = result["conversation_history"]
-        # Should only have feedback, no automatic follow-up on incorrect
-        assert len(new_history) == 3
+        assert len(new_history) == 3  # Original + User Answer + AI Feedback
         assert new_history[-1]["role"] == "assistant"
         assert "Not quite." in new_history[-1]["content"]
         assert "*Explanation:* Python is a language." in new_history[-1]["content"]
 
         assert result.get("current_interaction_mode") == "chatting"
-        assert "user_responses" in result
-        assert len(result["user_responses"]) == 1
-        response_record = result["user_responses"][0]
-        assert response_record["question_id"] == "q_eval"
-        assert response_record["response"] == "A"
-        assert response_record["evaluation"]["is_correct"] is False
+        assert result.get("active_assessment") is None  # Active task cleared
+        assert result.get("potential_answer") is None  # Answer cleared
 
     # Remove LessonAI init patches, update logger patch target
+    @pytest.mark.asyncio # Added decorator
     @patch("backend.ai.lessons.nodes.logger", MagicMock())
-    def test_evaluate_chat_answer_no_user_message(self):
-        """Test evaluation attempt without a preceding user message."""
-        # lesson_ai = LessonAI() # Removed
+    async def test_evaluate_answer_no_user_answer(self):  # Corrected function name
+        """Test evaluation attempt without a user answer in state."""
         initial_history = [{"role": "assistant", "content": "Question?"}]
         state: LessonState = {
-            "user_id": "eval_user_no_msg",
-            "current_interaction_mode": "doing_exercise",
-            "current_exercise_id": "ex", # Use ID tracking
-            "generated_content": GeneratedLessonContent(), # Provide minimal valid content
-            "generated_exercises": [Exercise(id="ex", type="short_answer")], # Add to state
-            # knowledge_assessment=[],
+            "user_id": "eval_user_no_ans",
+            "current_interaction_mode": "submit_answer",  # Mode is submit
+            "active_exercise": Exercise(id="ex", type="short_answer"),  # Active task
+            "active_assessment": None,
+            "potential_answer": None,  # No answer in state
+            "generated_content": GeneratedLessonContent(),  # Minimal content
             "conversation_history": initial_history,
+            # Fill other required fields
+            "topic": "Eval",
+            "knowledge_level": "beginner",
+            "syllabus": None,
+            "lesson_title": "Eval",
+            "module_title": "Eval",
             "user_responses": [],
-        }
-
-        # Patch logger where it's used (nodes module)
-        with patch("backend.ai.lessons.nodes.logger.warning") as mock_warning:
-            # Call node function directly
-            result = nodes.evaluate_chat_answer(state)
-
-            # Check that the specific warning about no preceding user message was logged
-            mock_warning.assert_any_call(
-                f"evaluate_chat_answer called without a preceding user message for user {state['user_id']}."
-            )
-            assert "conversation_history" in result
-            new_history = result["conversation_history"]
-            assert len(new_history) == 2
-            assert new_history[1]["role"] == "assistant"
-            assert "haven't provided an answer yet" in new_history[1]["content"]
-            # Mode should remain unchanged if no answer provided
-            assert result.get("current_interaction_mode") == "doing_exercise"
-
-    # Remove LessonAI init patches, update logger patch target
-    @patch("backend.ai.lessons.nodes.logger", MagicMock())
-    def test_evaluate_chat_answer_question_not_found(self):
-        """Test evaluation when the question cannot be found (e.g., bad ID)."""
-        # lesson_ai = LessonAI() # Removed
-        initial_history = [{"role": "user", "content": "My answer"}]
-        state: LessonState = {
-            "user_id": "eval_user_no_q",
-            "current_interaction_mode": "doing_exercise",
-            "current_exercise_id": "non_existent_id", # Bad ID
-            "generated_content": GeneratedLessonContent(),
-            "generated_exercises": [Exercise(id="ex", type="short_answer")], # Add to state
-            # knowledge_assessment=[],
-            "conversation_history": initial_history,
-            "user_responses": [],
+            "user_performance": {},
+            "lesson_uid": "eval",
+            "created_at": "t",
+            "updated_at": "t",
+            "current_exercise_index": None,
+            "current_quiz_question_index": None,
+            "generated_exercises": [Exercise(id="ex", type="short_answer")],
+            "generated_assessment_questions": [],
+            "generated_exercise_ids": ["ex"],
+            "generated_assessment_question_ids": [],
+            "error_message": None,
         }
 
         # Patch logger where it's used (nodes module)
         with patch("backend.ai.lessons.nodes.logger.error") as mock_error:
             # Call node function directly
-            result = nodes.evaluate_chat_answer(state)
+            result = await nodes.evaluate_answer(state)  # Corrected function name
 
-            mock_error.assert_called_once()
-            assert "Could not find question for evaluation" in mock_error.call_args[0][0]
+            # Check that the specific error about no answer was logged
+            mock_error.assert_called_once_with(
+                f"Cannot evaluate: No user answer found in state for user {state['user_id']}."
+            )
             assert "conversation_history" in result
             new_history = result["conversation_history"]
-            assert len(new_history) == 2
+            assert len(new_history) == 2  # Original + Error message
             assert new_history[1]["role"] == "assistant"
-            assert "Sorry, I lost track" in new_history[1]["content"]
-            assert result.get("current_interaction_mode") == "chatting" # Mode reset on error
+            assert "Sorry, I couldn't find your answer" in new_history[1]["content"]
+            # Mode should revert to chatting on error
+            assert result.get("current_interaction_mode") == "chatting"
+
+    # Remove LessonAI init patches, update logger patch target
+    @pytest.mark.asyncio # Added decorator
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())
+    async def test_evaluate_answer_no_active_task(self):  # Corrected function name
+        """Test evaluation when there is no active exercise or assessment."""
+        initial_history = [{"role": "user", "content": "My answer"}]
+        state: LessonState = {
+            "user_id": "eval_user_no_task",
+            "current_interaction_mode": "submit_answer",  # Mode is submit
+            "active_exercise": None,  # No active task
+            "active_assessment": None,
+            "potential_answer": "My answer",  # User provided answer
+            "generated_content": GeneratedLessonContent(),
+            "conversation_history": initial_history,
+            # Fill other required fields
+            "topic": "Eval",
+            "knowledge_level": "beginner",
+            "syllabus": None,
+            "lesson_title": "Eval",
+            "module_title": "Eval",
+            "user_responses": [],
+            "user_performance": {},
+            "lesson_uid": "eval",
+            "created_at": "t",
+            "updated_at": "t",
+            "current_exercise_index": None,
+            "current_quiz_question_index": None,
+            "generated_exercises": [],
+            "generated_assessment_questions": [],
+            "generated_exercise_ids": [],
+            "generated_assessment_question_ids": [],
+            "error_message": None,
+        }
+
+        # Patch logger where it's used (nodes module)
+        with patch("backend.ai.lessons.nodes.logger.error") as mock_error:
+            # Call node function directly
+            result = await nodes.evaluate_answer(state)  # Corrected function name
+
+            mock_error.assert_called_once_with(
+                "Cannot evaluate: No active exercise or assessment"
+                f" found for user {state['user_id']}."
+            )
+            assert "conversation_history" in result
+            new_history = result["conversation_history"]
+            assert len(new_history) == 2  # User answer + Error message
+            assert new_history[1]["role"] == "assistant"
+            assert (
+                "There doesn't seem to be an active question"
+                in new_history[1]["content"]
+            )
+            assert (
+                result.get("current_interaction_mode") == "chatting"
+            )  # Mode reset on error
 
     # Update patches to target 'nodes' module
+    @pytest.mark.asyncio # Added decorator
     @patch("backend.ai.lessons.nodes.load_prompt")
     @patch(
-        "backend.ai.lessons.nodes.call_llm_with_json_parsing", return_value=None # Target nodes
+        "backend.ai.lessons.nodes.call_llm_plain_text",
+        new_callable=AsyncMock,
+        return_value=None,  # Target nodes, plain text
     )
-    # Removed broad logger mock to allow debug logs
-    def test_evaluate_chat_answer_llm_failure(
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())  # Patch logger
+    async def test_evaluate_answer_llm_failure(  # Corrected function name
         self,
         mock_call_llm,
-        MockLoadPrompt,
+        mock_load_prompt,
     ):
         """Test evaluation when the LLM call/parsing fails."""
-        # lesson_ai = LessonAI() # Removed
-        MockLoadPrompt.return_value = "mocked_eval_prompt"
+        mock_load_prompt.return_value = "mocked_eval_prompt"
 
-        exercise = Exercise( # Use correct_answer
+        exercise = Exercise(  # Use correct_answer
             id="ex_eval_fail", type="short_answer", question="?", correct_answer="!"
         )
         initial_history = [{"role": "user", "content": "answer"}]
         state: LessonState = {
             "user_id": "eval_user_fail",
-            "current_interaction_mode": "doing_exercise",
-            "current_exercise_id": "ex_eval_fail", # Use ID tracking
-            "generated_content": GeneratedLessonContent(), # Ensure valid content
-            "generated_exercises": [exercise], # Add to state
-            # knowledge_assessment=[]
+            "current_interaction_mode": "submit_answer",  # Mode is submit
+            "active_exercise": exercise,  # Active task
+            "active_assessment": None,
+            "potential_answer": "answer",  # User answer
+            "generated_content": GeneratedLessonContent(),  # Minimal content
             "conversation_history": initial_history,
+            # Fill other required fields
+            "topic": "Eval",
+            "knowledge_level": "beginner",
+            "syllabus": None,
+            "lesson_title": "Eval",
+            "module_title": "Eval",
             "user_responses": [],
+            "user_performance": {},
+            "lesson_uid": "eval",
+            "created_at": "t",
+            "updated_at": "t",
+            "current_exercise_index": None,
+            "current_quiz_question_index": None,
+            "generated_exercises": [exercise],
+            "generated_assessment_questions": [],
+            "generated_exercise_ids": ["ex_eval_fail"],
+            "generated_assessment_question_ids": [],
+            "error_message": None,
         }
 
         # Patch logger where it's used (nodes module)
-        with patch("backend.ai.lessons.nodes.logger.error") as mock_log_error:
+        with patch("backend.ai.lessons.nodes.logger.warning") as mock_log_warning:
             # Call node function directly
-            result = nodes.evaluate_chat_answer(state)
+            result = await nodes.evaluate_answer(state)  # Corrected function name
 
-            MockLoadPrompt.assert_called_once() # Should be called now
+            mock_load_prompt.assert_called_once()
             mock_call_llm.assert_called_once()
-            # Check if the specific error for LLM failure was logged
-            assert any("Failed to get valid evaluation from LLM" in call.args[0] for call in mock_log_error.call_args_list)
+            # Check if the specific warning for LLM failure was logged
+            mock_log_warning.assert_called_once_with(
+                "LLM returned None for evaluation feedback."
+            )
 
             assert "conversation_history" in result
             new_history = result["conversation_history"]
-            assert len(new_history) == 2 # User answer + Fallback feedback
-            assert new_history[1]["role"] == "assistant"
-            assert "Sorry, I encountered an error while evaluating" in new_history[1]["content"]
+            # Corrected Assertion: History length should be 2 (user + fallback)
+            assert len(new_history) == 2
+            assert new_history[-1]["role"] == "assistant"
+            assert (
+                "Sorry, I couldn't evaluate your answer" in new_history[-1]["content"]
+            )
 
             assert result.get("current_interaction_mode") == "chatting"
-            assert "user_responses" in result
-            assert len(result["user_responses"]) == 1
-            response_record = result["user_responses"][0]
-            assert response_record["evaluation"]["is_correct"] is False # Fallback is incorrect
+            assert result.get("active_exercise") is None  # Task cleared even on error
+            assert result.get("potential_answer") is None  # Answer cleared
 
     # Update patches to target 'nodes' module
+    @pytest.mark.asyncio # Added decorator
     @patch(
-        "backend.ai.lessons.nodes.load_prompt", # Target nodes
+        "backend.ai.lessons.nodes.load_prompt",  # Target nodes
         side_effect=Exception("LLM Error"),
     )
-    @patch("backend.ai.lessons.nodes.call_llm_with_json_parsing") # Target nodes
-    # Removed broad logger mock to allow debug logs
-    def test_evaluate_chat_answer_llm_exception(
+    @patch(
+        "backend.ai.lessons.nodes.call_llm_plain_text", new_callable=AsyncMock
+    )  # Target nodes, plain text
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())  # Patch logger
+    async def test_evaluate_answer_llm_exception(  # Corrected function name
         self,
         mock_call_llm,
-        MockLoadPrompt_exc,
+        mock_load_prompt_exc,
     ):
         """Test evaluation when an exception occurs during LLM call."""
-        # lesson_ai = LessonAI() # Removed
-
-        exercise = Exercise( # Use correct_answer
+        exercise = Exercise(  # Use correct_answer
             id="ex_eval_exc", type="short_answer", question="?", correct_answer="!"
         )
         initial_history = [{"role": "user", "content": "answer"}]
         state: LessonState = {
             "user_id": "eval_user_exc",
-            "current_interaction_mode": "doing_exercise",
-            "current_exercise_id": "ex_eval_exc", # Use ID tracking
-            "generated_content": GeneratedLessonContent(), # Ensure valid content
-            "generated_exercises": [exercise], # Add to state
-            # knowledge_assessment=[]
+            "current_interaction_mode": "submit_answer",  # Mode is submit
+            "active_exercise": exercise,  # Active task
+            "active_assessment": None,
+            "potential_answer": "answer",  # User answer
+            "generated_content": GeneratedLessonContent(),  # Minimal content
             "conversation_history": initial_history,
+            # Fill other required fields
+            "topic": "Eval",
+            "knowledge_level": "beginner",
+            "syllabus": None,
+            "lesson_title": "Eval",
+            "module_title": "Eval",
             "user_responses": [],
+            "user_performance": {},
+            "lesson_uid": "eval",
+            "created_at": "t",
+            "updated_at": "t",
+            "current_exercise_index": None,
+            "current_quiz_question_index": None,
+            "generated_exercises": [exercise],
+            "generated_assessment_questions": [],
+            "generated_exercise_ids": ["ex_eval_exc"],
+            "generated_assessment_question_ids": [],
+            "error_message": None,
         }
 
         # Patch logger where it's used (nodes module)
         with patch("backend.ai.lessons.nodes.logger.error") as mock_log_error:
             # Call node function directly
-            result = nodes.evaluate_chat_answer(state)
+            result = await nodes.evaluate_answer(state)  # Corrected function name
 
-            MockLoadPrompt_exc.assert_called_once()  # Prompt load failed
-            mock_call_llm.assert_not_called() # LLM call shouldn't happen
+            mock_load_prompt_exc.assert_called_once()  # Prompt load failed
+            mock_call_llm.assert_not_called()  # LLM call shouldn't happen
             # Check if the specific error for prompt loading failure was logged
-            assert any("Error in evaluation prompt loading/formatting" in call.args[0] for call in mock_log_error.call_args_list)
+            mock_log_error.assert_called_once()
+            assert (
+                "LLM call failed during answer evaluation"
+                in mock_log_error.call_args[0][0]
+            )
 
             assert "conversation_history" in result
             new_history = result["conversation_history"]
-            assert len(new_history) == 2 # User answer + Fallback feedback
-            assert new_history[1]["role"] == "assistant"
-            assert "Sorry, I encountered an error while evaluating" in new_history[1]["content"]
+            # Corrected Assertion: History length should be 2 (user + fallback)
+            assert len(new_history) == 2
+            assert new_history[-1]["role"] == "assistant"
+            assert (
+                "Sorry, I couldn't evaluate your answer" in new_history[-1]["content"]
+            )
 
             assert result.get("current_interaction_mode") == "chatting"
-            assert "user_responses" in result
-            assert len(result["user_responses"]) == 1
-            response_record = result["user_responses"][0]
-            assert response_record["evaluation"]["is_correct"] is False # Fallback is incorrect
+            assert result.get("active_exercise") is None  # Task cleared
+            assert result.get("potential_answer") is None  # Answer cleared
 
     # --- Tests for generate_new_exercise ---
 
-    @pytest.mark.asyncio # Mark test as async
+    # Removed @pytest.mark.asyncio - This function is synchronous
     @patch("backend.ai.lessons.nodes.load_prompt")
-    @patch("backend.ai.lessons.nodes.call_llm_with_json_parsing", new_callable=AsyncMock) # Use AsyncMock
+    @patch("backend.ai.lessons.nodes.call_llm_with_json_parsing")  # No AsyncMock needed
     @patch("backend.ai.lessons.nodes.logger", MagicMock())
-    async def test_generate_new_exercise_success(self, mock_call_llm, mock_load_prompt):
+    def test_generate_new_exercise_success(self, mock_call_llm, mock_load_prompt):
         """Test successful generation of a new exercise."""
         mock_load_prompt.return_value = "mocked_gen_ex_prompt"
         mock_new_exercise = Exercise(
-            id="ex_new_1", type="short_answer", instructions="New exercise?", correct_answer="Yes"
+            id="ex_new_1",
+            type="short_answer",
+            instructions="New exercise?",
+            correct_answer="Yes",
         )
         mock_call_llm.return_value = mock_new_exercise
 
@@ -536,14 +715,33 @@ class TestLessonAINodes:
             "lesson_title": "Gen Ex",
             "knowledge_level": "intermediate",
             "module_title": "Module Gen",
-            "generated_content": GeneratedLessonContent(exposition_content="Lesson content here."),
+            "generated_content": GeneratedLessonContent(
+                exposition_content="Lesson content here."
+            ),
             "generated_exercises": [],
             "generated_exercise_ids": [],
             "conversation_history": initial_history,
-            "current_interaction_mode": "chatting", # Assume user just requested
+            "current_interaction_mode": "chatting",  # Assume user just requested
+            # Fill other required fields
+            "syllabus": None,
+            "user_responses": [],
+            "user_performance": {},
+            "lesson_uid": "gen_ex",
+            "created_at": "t",
+            "updated_at": "t",
+            "current_exercise_index": None,
+            "current_quiz_question_index": None,
+            "generated_assessment_questions": [],
+            "generated_assessment_question_ids": [],
+            "error_message": None,
+            "active_exercise": None,
+            "active_assessment": None,
+            "potential_answer": None,
         }
 
-        updated_state, generated_exercise = await nodes.generate_new_exercise(state)
+        updated_state, generated_exercise = nodes.generate_new_exercise(
+            state
+        )  # No await
 
         mock_load_prompt.assert_called_once_with(
             "generate_exercises",
@@ -552,27 +750,40 @@ class TestLessonAINodes:
             user_level="intermediate",
             exposition_summary="Lesson content here.",
             syllabus_context="Module: Module Gen, Lesson: Gen Ex",
-            existing_exercise_descriptions_json='[]'
+            existing_exercise_descriptions_json="[]",
         )
-        mock_call_llm.assert_called_once_with( # Changed from assert_awaited_once_with
+        mock_call_llm.assert_called_once_with(
             "mocked_gen_ex_prompt", validation_model=Exercise, max_retries=2
         )
 
         assert generated_exercise == mock_new_exercise
-        assert updated_state["generated_exercises"] == [mock_new_exercise]
+        assert (
+            updated_state["active_exercise"] == mock_new_exercise
+        )  # Check active exercise
         assert updated_state["generated_exercise_ids"] == ["ex_new_1"]
-        assert updated_state["current_interaction_mode"] == "doing_exercise"
-        assert updated_state["current_exercise_id"] == "ex_new_1"
-        assert len(updated_state["conversation_history"]) == 2 # Initial + Presentation
+        assert (
+            updated_state["current_interaction_mode"] == "awaiting_answer"
+        )  # Mode updated
+        # assert updated_state["current_exercise_id"] == "ex_new_1" # ID tracking removed from state
+        assert len(updated_state["conversation_history"]) == 2  # Initial + Presentation
         assert updated_state["conversation_history"][-1]["role"] == "assistant"
-        assert "Okay, here's a new exercise" in updated_state["conversation_history"][-1]["content"]
-        assert "New exercise?" in updated_state["conversation_history"][-1]["content"]
+        assert (
+            "Okay, I've generated a new"
+            in updated_state["conversation_history"][-1]["content"]
+        )
+        # Corrected assertion: check for space instead of underscore
+        assert (
+            "short answer exercise"
+            in updated_state["conversation_history"][-1]["content"]
+        )
 
-    @pytest.mark.asyncio
+    # Removed @pytest.mark.asyncio - This function is synchronous
     @patch("backend.ai.lessons.nodes.load_prompt")
-    @patch("backend.ai.lessons.nodes.call_llm_with_json_parsing", new_callable=AsyncMock, return_value=None) # Use AsyncMock
+    @patch(
+        "backend.ai.lessons.nodes.call_llm_with_json_parsing", return_value=None
+    )  # No AsyncMock
     @patch("backend.ai.lessons.nodes.logger", MagicMock())
-    async def test_generate_new_exercise_llm_failure(self, mock_call_llm, mock_load_prompt):
+    def test_generate_new_exercise_llm_failure(self, mock_call_llm, mock_load_prompt):
         """Test failure during LLM call for exercise generation."""
         mock_load_prompt.return_value = "mocked_gen_ex_prompt"
         initial_history = [{"role": "assistant", "content": "What next?"}]
@@ -582,36 +793,63 @@ class TestLessonAINodes:
             "lesson_title": "Gen Ex Fail",
             "knowledge_level": "intermediate",
             "module_title": "Module Gen",
-            "generated_content": GeneratedLessonContent(exposition_content="Lesson content here."),
+            "generated_content": GeneratedLessonContent(
+                exposition_content="Lesson content here."
+            ),
             "generated_exercises": [],
             "generated_exercise_ids": [],
             "conversation_history": initial_history,
             "current_interaction_mode": "chatting",
+            # Fill other required fields
+            "syllabus": None,
+            "user_responses": [],
+            "user_performance": {},
+            "lesson_uid": "gen_ex_fail",
+            "created_at": "t",
+            "updated_at": "t",
+            "current_exercise_index": None,
+            "current_quiz_question_index": None,
+            "generated_assessment_questions": [],
+            "generated_assessment_question_ids": [],
+            "error_message": None,
+            "active_exercise": None,
+            "active_assessment": None,
+            "potential_answer": None,
         }
 
-        updated_state, generated_exercise = await nodes.generate_new_exercise(state)
+        updated_state, generated_exercise = nodes.generate_new_exercise(
+            state
+        )  # No await
 
-        mock_call_llm.assert_called_once() # Changed from assert_awaited_once
+        mock_call_llm.assert_called_once()
         assert generated_exercise is None
-        assert updated_state["generated_exercises"] == [] # Should not be updated
+        assert updated_state["active_exercise"] is None  # Should not be updated
         assert updated_state["generated_exercise_ids"] == []
-        assert updated_state["current_interaction_mode"] == "chatting" # Mode reset
-        assert "current_exercise_id" not in updated_state # ID should not be set
-        assert len(updated_state["conversation_history"]) == 2 # Initial + Error message
+        assert updated_state["current_interaction_mode"] == "chatting"  # Mode reset
+        # assert "current_exercise_id" not in updated_state # ID tracking removed
+        assert (
+            len(updated_state["conversation_history"]) == 2
+        )  # Initial + Error message
         assert updated_state["conversation_history"][-1]["role"] == "assistant"
-        assert "Sorry, I wasn't able to generate an exercise" in updated_state["conversation_history"][-1]["content"]
-        assert updated_state["error_message"] == "Failed to generate exercise."
+        assert (
+            "Sorry, I wasn't able to generate an exercise"
+            in updated_state["conversation_history"][-1]["content"]
+        )
+        assert updated_state["error_message"] == "Exercise generation failed."
 
-    @pytest.mark.asyncio
+    # Removed @pytest.mark.asyncio - This function is synchronous
     @patch("backend.ai.lessons.nodes.load_prompt")
-    @patch("backend.ai.lessons.nodes.call_llm_with_json_parsing", new_callable=AsyncMock) # Use AsyncMock
+    @patch("backend.ai.lessons.nodes.call_llm_with_json_parsing")  # No AsyncMock
     @patch("backend.ai.lessons.nodes.logger", MagicMock())
-    async def test_generate_new_exercise_duplicate_id(self, mock_call_llm, mock_load_prompt):
+    def test_generate_new_exercise_duplicate_id(self, mock_call_llm, mock_load_prompt):
         """Test discarding exercise if LLM returns a duplicate ID."""
         mock_load_prompt.return_value = "mocked_gen_ex_prompt"
         # Simulate LLM returning an exercise with an ID that already exists
         mock_duplicate_exercise = Exercise(
-            id="ex_existing", type="short_answer", instructions="Duplicate?", correct_answer="No"
+            id="ex_existing",
+            type="short_answer",
+            instructions="Duplicate?",
+            correct_answer="No",
         )
         mock_call_llm.return_value = mock_duplicate_exercise
 
@@ -622,36 +860,67 @@ class TestLessonAINodes:
             "lesson_title": "Gen Ex Dup",
             "knowledge_level": "intermediate",
             "module_title": "Module Gen",
-            "generated_content": GeneratedLessonContent(exposition_content="Lesson content here."),
-            "generated_exercises": [], # Start empty
-            "generated_exercise_ids": ["ex_existing"], # Pre-populate with the ID
+            "generated_content": GeneratedLessonContent(
+                exposition_content="Lesson content here."
+            ),
+            "generated_exercises": [],  # Start empty
+            "generated_exercise_ids": ["ex_existing"],  # Pre-populate with the ID
             "conversation_history": initial_history,
             "current_interaction_mode": "chatting",
+            # Fill other required fields
+            "syllabus": None,
+            "user_responses": [],
+            "user_performance": {},
+            "lesson_uid": "gen_ex_dup",
+            "created_at": "t",
+            "updated_at": "t",
+            "current_exercise_index": None,
+            "current_quiz_question_index": None,
+            "generated_assessment_questions": [],
+            "generated_assessment_question_ids": [],
+            "error_message": None,
+            "active_exercise": None,
+            "active_assessment": None,
+            "potential_answer": None,
         }
 
-        updated_state, generated_exercise = await nodes.generate_new_exercise(state)
+        updated_state, generated_exercise = nodes.generate_new_exercise(
+            state
+        )  # No await
 
-        mock_call_llm.assert_called_once() # Changed from assert_awaited_once
-        assert generated_exercise is None # Exercise should be discarded
-        assert updated_state["generated_exercises"] == [] # List remains empty
-        assert updated_state["generated_exercise_ids"] == ["ex_existing"] # ID list unchanged
+        mock_call_llm.assert_called_once()
+        assert generated_exercise is None  # Exercise should be discarded
+        assert updated_state["active_exercise"] is None  # List remains empty
+        assert updated_state["generated_exercise_ids"] == [
+            "ex_existing"
+        ]  # ID list unchanged
         assert updated_state["current_interaction_mode"] == "chatting"
-        assert "current_exercise_id" not in updated_state
-        assert len(updated_state["conversation_history"]) == 2 # Initial + Error message
+        # assert "current_exercise_id" not in updated_state # ID tracking removed
+        assert (
+            len(updated_state["conversation_history"]) == 2
+        )  # Initial + Error message
         # Correct assertion to match the actual error message in the node
-        assert "Sorry, I couldn't come up with a new exercise" in updated_state["conversation_history"][-1]["content"]
+        assert (
+            "Sorry, I couldn't come up with a new exercise"
+            in updated_state["conversation_history"][-1]["content"]
+        )
 
-    # --- Tests for generate_new_assessment_question ---
+    # --- Tests for generate_new_assessment --- # Corrected function name
 
-    @pytest.mark.asyncio
+    # Removed @pytest.mark.asyncio - This function is synchronous
     @patch("backend.ai.lessons.nodes.load_prompt")
-    @patch("backend.ai.lessons.nodes.call_llm_with_json_parsing", new_callable=AsyncMock) # Use AsyncMock
+    @patch("backend.ai.lessons.nodes.call_llm_with_json_parsing")  # No AsyncMock
     @patch("backend.ai.lessons.nodes.logger", MagicMock())
-    async def test_generate_new_assessment_question_success(self, mock_call_llm, mock_load_prompt):
+    def test_generate_new_assessment_success(
+        self, mock_call_llm, mock_load_prompt
+    ):  # Corrected function name
         """Test successful generation of a new assessment question."""
         mock_load_prompt.return_value = "mocked_gen_q_prompt"
         mock_new_question = AssessmentQuestion(
-            id="q_new_1", type="true_false", question_text="Is this new?", correct_answer_id="True"
+            id="q_new_1",
+            type="true_false",
+            question_text="Is this new?",
+            correct_answer_id="True",
         )
         mock_call_llm.return_value = mock_new_question
 
@@ -662,14 +931,33 @@ class TestLessonAINodes:
             "lesson_title": "Gen Q",
             "knowledge_level": "intermediate",
             "module_title": "Module Gen",
-            "generated_content": GeneratedLessonContent(exposition_content="Lesson content here."),
+            "generated_content": GeneratedLessonContent(
+                exposition_content="Lesson content here."
+            ),
             "generated_assessment_questions": [],
             "generated_assessment_question_ids": [],
             "conversation_history": initial_history,
             "current_interaction_mode": "chatting",
+            # Fill other required fields
+            "syllabus": None,
+            "user_responses": [],
+            "user_performance": {},
+            "lesson_uid": "gen_q",
+            "created_at": "t",
+            "updated_at": "t",
+            "current_exercise_index": None,
+            "current_quiz_question_index": None,
+            "generated_exercises": [],
+            "generated_exercise_ids": [],
+            "error_message": None,
+            "active_exercise": None,
+            "active_assessment": None,
+            "potential_answer": None,
         }
 
-        updated_state, generated_question = await nodes.generate_new_assessment_question(state)
+        updated_state, generated_question = nodes.generate_new_assessment(
+            state
+        )  # Corrected function name, no await
 
         mock_load_prompt.assert_called_once_with(
             "generate_assessment",
@@ -677,21 +965,31 @@ class TestLessonAINodes:
             lesson_title="Gen Q",
             user_level="intermediate",
             exposition_summary="Lesson content here.",
-            syllabus_context="Module: Module Gen, Lesson: Gen Q",
-            existing_question_descriptions_json='[]'
+            # syllabus_context="Module: Module Gen, Lesson: Gen Q", # Removed from prompt call
+            existing_question_descriptions_json="[]",
         )
-        mock_call_llm.assert_called_once_with( # Changed from assert_awaited_once_with
+        mock_call_llm.assert_called_once_with(
             "mocked_gen_q_prompt", validation_model=AssessmentQuestion, max_retries=2
         )
 
         assert generated_question == mock_new_question
-        assert updated_state["generated_assessment_questions"] == [mock_new_question]
+        assert (
+            updated_state["active_assessment"] == mock_new_question
+        )  # Check active assessment
+        # Corrected assertion: Check the ID list update
         assert updated_state["generated_assessment_question_ids"] == ["q_new_1"]
-        assert updated_state["current_interaction_mode"] == "taking_quiz"
-        assert updated_state["current_assessment_question_id"] == "q_new_1"
-        assert len(updated_state["conversation_history"]) == 2 # Initial + Presentation
+        assert (
+            updated_state["current_interaction_mode"] == "awaiting_answer"
+        )  # Mode updated
+        # assert updated_state["current_assessment_question_id"] == "q_new_1" # ID tracking removed
+        assert len(updated_state["conversation_history"]) == 2  # Initial + Presentation
         assert updated_state["conversation_history"][-1]["role"] == "assistant"
-        assert "Okay, here's an assessment question" in updated_state["conversation_history"][-1]["content"]
-        assert "Is this new?" in updated_state["conversation_history"][-1]["content"]
+        assert (
+            "Okay, here's an assessment question"
+            in updated_state["conversation_history"][-1]["content"]
+        )
+        assert (
+            "true false" in updated_state["conversation_history"][-1]["content"]
+        )  # Check space, not underscore
 
-    # Add similar failure/duplicate tests for generate_new_assessment_question if desired...
+    # Add similar failure/duplicate tests for generate_new_assessment if desired...

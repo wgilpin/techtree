@@ -1,501 +1,326 @@
-"""
-Node logic functions for the lesson AI graph.
-
-These functions are designed to be called by the langgraph StateGraph
-and operate on the LessonState.
-"""
+# backend/ai/lessons/nodes.py
+"""LangGraph nodes for lesson interaction graph."""
 
 import json
-import uuid # For generating fallback IDs
-from datetime import datetime
-from typing import Any, Dict, List, Optional, Union, Tuple # Added Tuple
+import logging
+import uuid
+# Ensure Union is imported from typing
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-from pydantic import ValidationError
-
-from backend.ai.llm_utils import call_llm_with_json_parsing, call_with_retry
-from backend.ai.llm_utils import MODEL as llm_model
+from backend.ai.llm_utils import call_llm_with_json_parsing, call_llm_plain_text
 from backend.ai.prompt_loader import load_prompt
-from backend.logger import logger
 from backend.models import (
     AssessmentQuestion,
-    EvaluationResult,
+    ChatMessage,
     Exercise,
     GeneratedLessonContent,
-    IntentClassificationResult,
-    LessonState,
-    Option, # Import Option model
+    IntentClassificationResult, # Corrected import name
 )
 
+logger = logging.getLogger(__name__)
 
-def start_conversation(state: LessonState) -> Dict[str, Any]:
+# --- Constants ---
+MAX_HISTORY_TURNS = 10  # Limit conversation history length for prompts
+
+
+# --- Helper Functions ---
+def _truncate_history(history: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    """Truncates conversation history to the last MAX_HISTORY_TURNS."""
+    return history[-MAX_HISTORY_TURNS:]
+
+
+def _format_history_for_prompt(history: List[Dict[str, str]]) -> str:
+    """Formats conversation history into a simple string for prompts."""
+    formatted = []
+    for msg in history:
+        role = msg.get("role", "unknown")
+        content = msg.get("content", "")
+        formatted.append(f"{role.capitalize()}: {content}")
+    return "\n".join(formatted)
+
+
+# --- Node Functions ---
+
+
+async def classify_intent(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Generates the initial AI welcome message.
-    Corresponds to the _start_conversation node logic.
+    Classifies the user's intent based on the latest message and conversation history.
+
+    Updates the state with the classified intent ('chatting', 'request_exercise',
+    'request_assessment', 'submit_answer', 'unknown').
     """
-    lesson_title: str = state.get("lesson_title", "this lesson")
-    user_id: str = state.get("user_id", "unknown_user")
-    history: List[Dict[str, str]] = state.get("conversation_history", [])
-
-    logger.debug(
-        f"Starting conversation for user {user_id}, lesson '{lesson_title}'"
-    )
-
-    # Check if history is already present (shouldn't be if this is truly the start)
-    if history:
-        logger.warning(
-            f"start_conversation called but history is not empty for user {user_id}."
-            " Returning current state."
-        )
-        return {}  # Return no changes if history exists
-
-    # Construct the initial message
-    welcome_content: str = (
-        f"Welcome to the lesson on **'{lesson_title}'**! 👋\n\n"
-        "I'm here to help you learn. You can:\n"
-        "- Ask me questions about the introduction or topic.\n"
-        "- Request an 'exercise' to practice.\n"
-        "- Ask to take the 'quiz' when you feel ready.\n\n"
-        "What would you like to do first?"
-    )
-
-    initial_message: Dict[str, str] = {
-        "role": "assistant",
-        "content": welcome_content,
-    }
-
-    return {
-        "conversation_history": [
-            initial_message
-        ],  # Start history with this message
-        "current_interaction_mode": "chatting",
-    }
-
-
-def process_user_message(state: LessonState) -> Dict[str, Any]:
-    """
-    Graph node: Placeholder for initial processing if needed.
-    Currently, the main logic happens in routing.
-    Corresponds to the _process_user_message node logic.
-    """
-    # In the original code, this node was essentially a pass-through.
-    # The routing logic (_route_message_logic) handled the decision-making.
-    # We keep it as a potential hook for future pre-processing.
-    logger.debug("Processing user message node executed.")
-    # No state changes are made here by default.
-    return {}
-
-# --- Other node functions will be added below ---
-
-
-def route_message_logic(state: LessonState) -> str:
-    """
-    Determines the next node based on interaction mode and user message intent.
-    Corresponds to the _route_message_logic conditional edge logic.
-    """
-    mode: str = state.get("current_interaction_mode", "chatting")
-    history: List[Dict[str, str]] = state.get("conversation_history", [])
-    last_message: Dict[str, str] = history[-1] if history else {}
-    user_id: str = state.get("user_id", "unknown_user")
-
-    logger.debug(
-        f"Routing message for user {user_id}. Mode: {mode}. "
-        f"Last message: '{last_message.get('content', '')[:50]}...'"
-    )
-
-    # 1. Check Mode First: If user is answering an exercise/quiz
-    if mode == "doing_exercise" or mode == "taking_quiz":
-        logger.debug("Mode is exercise/quiz, routing to evaluation.")
-        return "evaluate_chat_answer"
-
-    # 2. LLM Intent Classification (if mode is 'chatting')
-    if mode == "chatting":
-        if not last_message or last_message.get("role") != "user":
-            logger.warning(
-                "Routing in 'chatting' mode without a preceding user message."
-                " Defaulting to chat response."
-            )
-            return "generate_chat_response"
-
-        user_input: str = last_message.get("content", "")
-        # Limit history for prompt efficiency
-        history_for_prompt: List[Dict[str, str]] = history[
-            -5:
-        ]  # Last 5 messages (user + assistant)
-
-        try:
-            # Load and format the prompt
-            prompt: str = load_prompt(
-                "intent_classification",
-                history_json=json.dumps(history_for_prompt, indent=2),
-                user_input=user_input,
-            )
-            # LLM call and JSON parsing/validation
-            result: Optional[IntentClassificationResult] = (
-                call_llm_with_json_parsing(
-                    prompt, validation_model=IntentClassificationResult
-                )
-            )
-
-            if result and isinstance(result, IntentClassificationResult):
-                intent: str = result.intent
-                logger.info(f"Classified intent: {intent}")
-
-                # 3. Route Based on Intent
-                if intent == "request_exercise":
-                    logger.debug("Routing to generate_new_exercise")
-                    return "generate_new_exercise" # Route to the new generation node
-                elif intent == "request_quiz":
-                    logger.debug("Routing to generate_new_assessment_question")
-                    return "generate_new_assessment_question" # Route to the new generation node
-                elif intent == "ask_question" or intent == "other_chat":
-                    return "generate_chat_response"
-                else:
-                    logger.warning(
-                        f"Unknown or unexpected intent '{intent}'. Defaulting to chat response."
-                    )
-                    return "generate_chat_response"
-            else:
-                # Handle cases where LLM call failed, JSON parsing failed, or validation failed
-                logger.warning(
-                    "Failed to get valid intent classification from LLM. "
-                    "Defaulting to chat response."
-                )
-                return "generate_chat_response"
-
-        except Exception as e:
-            logger.error(
-                f"Error during intent classification LLM call: {e}", exc_info=True
-            )
-            # Fallback to default chat response on error
-            return "generate_chat_response"
-    else:
-        # Should not happen if modes are handled correctly, but default just in case
-        logger.warning(
-            f"Routing encountered unexpected mode '{mode}'. Defaulting to chat response."
-        )
-        return "generate_chat_response"
-
-
-def generate_chat_response(state: LessonState) -> Dict[str, Any]:
-    """
-    Generates a conversational response using the AI based on history and context.
-    Corresponds to the _generate_chat_response node logic.
-    """
+    logger.info("Classifying user intent.")
     history: List[Dict[str, str]] = state.get("conversation_history", [])
     user_id: str = state.get("user_id", "unknown_user")
-    lesson_title: str = state.get("lesson_title", "this lesson")
-    # Get the full exposition content and ensure it's a Pydantic model
-    raw_generated_content: Optional[Union[Dict, GeneratedLessonContent]] = state.get(
-        "generated_content"
-    )
-    generated_content: Optional[GeneratedLessonContent] = state.get("generated_content") # Directly get the object
-    exposition: Optional[str] = "No exposition available."
 
-    # Validation is now handled in the service layer before state is passed to the graph.
-    # We can assume generated_content is either a valid object or None.
-    if not isinstance(generated_content, GeneratedLessonContent) and generated_content is not None:
-         logger.error(f"generate_chat_response received unexpected type for generated_content: {type(generated_content)}")
-         generated_content = None # Treat as None if type is wrong
-    elif generated_content is None:
-         logger.warning("generate_chat_response received None for generated_content.")
+    if not history or history[-1].get("role") != "user":
+        logger.warning(f"Cannot classify intent: No user message found for user {user_id}.")
+        state["current_interaction_mode"] = "chatting"  # Default if no user message
+        return state
 
+    last_user_message = history[-1].get("content", "")
+    truncated_history = _truncate_history(history[:-1])  # History *before* last message
+    formatted_history = _format_history_for_prompt(truncated_history)
+
+    # --- Context Extraction (Similar to generate_chat_response) ---
+    topic: str = state.get("topic", "Unknown Topic")
+    lesson_title: str = state.get("lesson_title", "Unknown Lesson")
+    user_level: str = state.get("knowledge_level", "beginner")
+    generated_content: Optional[GeneratedLessonContent] = state.get("generated_content")
+    active_exercise: Optional[Exercise] = state.get("active_exercise")
+    active_assessment: Optional[AssessmentQuestion] = state.get("active_assessment")
+
+    exposition_summary = ""
     if generated_content and generated_content.exposition_content:
-        # Assuming exposition_content can be complex, convert to string representation
-        # Adjust this if a specific format (like markdown) is needed for the prompt
-        exposition = str(generated_content.exposition_content)
+        exposition_summary = str(generated_content.exposition_content)[:500] # Limit length
 
-    logger.debug(
-        f"Generating chat response for user {user_id} in lesson '{lesson_title}'"
-    )
+    active_task_context = "None"
+    if active_exercise:
+        active_task_context = f"Active Exercise: {active_exercise.type} - {active_exercise.instructions or active_exercise.question}"
+    elif active_assessment:
+        active_task_context = f"Active Assessment Question: {active_assessment.type} - {active_assessment.question_text}"
 
-    ai_response_content: str
-    if not history or history[-1].get("role") != "user":
-        logger.warning(
-            "generate_chat_response called without a preceding user message."
+    # --- Call LLM for Intent Classification ---
+    intent_classification: Optional[IntentClassificationResult] = None # Use corrected type hint
+    try:
+        prompt = load_prompt(
+            "intent_classification",
+            user_message=last_user_message,
+            conversation_history=formatted_history,
+            topic=topic,
+            lesson_title=lesson_title,
+            user_level=user_level,
+            exposition_summary=exposition_summary,
+            active_task_context=active_task_context,
         )
-        ai_response_content = (
-            "Is there something specific I can help you with regarding the lesson?"
+
+        # Use call_llm_with_json_parsing to get a validated IntentClassificationResult object
+        intent_classification = await call_llm_with_json_parsing(
+            prompt, validation_model=IntentClassificationResult, max_retries=3 # Use corrected model
         )
+
+    except Exception as e:
+        logger.error(f"LLM call/parsing failed during intent classification: {e}", exc_info=True)
+        # Fallback to default intent if classification fails
+        state["current_interaction_mode"] = "chatting"
+        return state
+
+    # --- Update State with Classified Intent ---
+    if intent_classification and intent_classification.intent:
+        classified_intent = intent_classification.intent.lower()
+        logger.info(f"Classified intent for user {user_id}: {classified_intent}")
+
+        # Map classified intent to interaction mode
+        if "exercise" in classified_intent:
+            state["current_interaction_mode"] = "request_exercise"
+        elif "assessment" in classified_intent:
+            state["current_interaction_mode"] = "request_assessment"
+        elif "answer" in classified_intent or "submit" in classified_intent:
+             # Check if there's an active task to submit against
+            if active_exercise or active_assessment:
+                state["current_interaction_mode"] = "submit_answer"
+                # Store the potential answer for the evaluation node
+                state["potential_answer"] = last_user_message
+            else:
+                 # Treat as chat if there's nothing active to answer
+                logger.info("User tried to submit answer, but no active task. Treating as chat.")
+                state["current_interaction_mode"] = "chatting"
+        elif "chat" in classified_intent or "question" in classified_intent:
+            state["current_interaction_mode"] = "chatting"
+        else:
+            logger.warning(f"Unknown intent classified: {classified_intent}. Defaulting to chatting.")
+            state["current_interaction_mode"] = "chatting" # Default for unknown intents
     else:
-        # Limit history for prompt efficiency
-        history_for_prompt: List[Dict[str, str]] = history[-10:]  # Last 10 messages
+        logger.error(f"Intent classification failed for user {user_id}. Defaulting to chatting.")
+        state["current_interaction_mode"] = "chatting" # Default if classification fails completely
 
-        try:
-            # Load and format the prompt
-            prompt: str = load_prompt(
-                "chat_response",
-                lesson_title=lesson_title,
-                exposition=exposition or "",  # Ensure exposition is not None
-                history_json=json.dumps(history_for_prompt, indent=2),
-            )
-            # Use call_with_retry from llm_utils with the imported llm_model
-            # Note: Assuming llm_model is correctly imported and configured
-            response: Any = call_with_retry(llm_model.generate_content, prompt)
-            ai_response_content = response.text
-            logger.debug(f"Generated chat response: {ai_response_content[:100]}...")
-        # except ResourceExhausted: # Handled by call_with_retry
-        #     logger.error(...)
-        #     ai_response_content = "..."
-        except Exception as e:
-            logger.error(
-                f"Error during chat response LLM call/prompt loading: {e}",
-                exc_info=True,
-            )
-            ai_response_content = """
-            Sorry, I encountered an error trying to generate a response. Please try again."""
-
-    # Format the response and update history
-    ai_message: Dict[str, str] = {
-        "role": "assistant",
-        "content": ai_response_content,
-    }
-    updated_history: List[Dict[str, str]] = history + [ai_message]
-
-    return {"conversation_history": updated_history}
+    return state
 
 
-def evaluate_chat_answer(state: LessonState) -> Dict[str, Any]:
+async def generate_chat_response(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Evaluates a user's answer provided in the chat using an LLM.
-    Corresponds to the _evaluate_chat_answer node logic.
+    Generates a chat response based on the conversation history and context.
+
+    Assumes the intent is 'chatting'. Appends the AI's response to the
+    conversation history in the state.
     """
-    mode: str = state.get("current_interaction_mode")
+    logger.info("Generating chat response.")
     history: List[Dict[str, str]] = state.get("conversation_history", [])
     user_id: str = state.get("user_id", "unknown_user")
-    # raw_generated_content: Optional[Union[Dict, GeneratedLessonContent]] = state.get( # No longer needed
-    #     "generated_content"
-    # )
-    generated_content: Optional[GeneratedLessonContent] = state.get("generated_content") # Retrieve from state
-    user_responses: List[Dict] = state.get(
-        "user_responses", []
-    )
-
-    # Validation is now handled in the service layer.
-    # Assume generated_content is a valid object or None.
-    if not isinstance(generated_content, GeneratedLessonContent) and generated_content is not None:
-         logger.error(f"evaluate_chat_answer received unexpected type for generated_content: {type(generated_content)}")
-         generated_content = None # Treat as None if type is wrong
-    elif generated_content is None:
-         logger.warning("evaluate_chat_answer received None for generated_content.")
 
     if not history or history[-1].get("role") != "user":
-        logger.warning(
-            f"evaluate_chat_answer called without a preceding user message for user {user_id}."
+        logger.warning(f"Cannot generate chat response: No user message found for user {user_id}.")
+        # Optionally add a default message if needed, or just return state
+        return state
+
+    last_user_message = history[-1].get("content", "")
+    truncated_history = _truncate_history(history[:-1]) # History *before* last message
+    formatted_history = _format_history_for_prompt(truncated_history)
+
+    # --- Extract Context ---
+    topic: str = state.get("topic", "Unknown Topic")
+    lesson_title: str = state.get("lesson_title", "Unknown Lesson")
+    user_level: str = state.get("knowledge_level", "beginner")
+    generated_content: Optional[GeneratedLessonContent] = state.get("generated_content")
+    active_exercise: Optional[Exercise] = state.get("active_exercise")
+    active_assessment: Optional[AssessmentQuestion] = state.get("active_assessment")
+
+    exposition_summary = ""
+    if generated_content and generated_content.exposition_content:
+         # Convert ExpositionContent to string for summary
+        exposition_summary = str(generated_content.exposition_content)[:1000] # Limit length
+
+    active_task_context = "None"
+    if active_exercise:
+        active_task_context = f"Active Exercise: {active_exercise.type} - {active_exercise.instructions or active_exercise.question}"
+    elif active_assessment:
+        active_task_context = f"Active Assessment Question: {active_assessment.type} - {active_assessment.question_text}"
+
+    # --- Call LLM for Chat Response ---
+    ai_response_content = "Sorry, I'm having trouble understanding right now." # Default fallback
+    try:
+        prompt = load_prompt(
+            "chat_response",
+            user_message=last_user_message,
+            conversation_history=formatted_history,
+            topic=topic,
+            lesson_title=lesson_title,
+            user_level=user_level,
+            exposition_summary=exposition_summary,
+            active_task_context=active_task_context,
         )
-        ai_message: Dict[str, str] = {
-            "role": "assistant",
-            "content": """
-                It looks like you haven't provided an answer yet.
-                Please provide your answer to the question.""",
-        }
-        return {
-            "conversation_history": history + [ai_message],
-            "current_interaction_mode": mode,
-            "user_responses": user_responses,
-        }
 
-    user_answer: str = history[-1].get("content", "")
-    question: Optional[Union[Exercise, AssessmentQuestion]] = None
-    question_type: Optional[str] = None
-    question_index: int = -1
-    question_id_str: str = "unknown"
-    current_exercise_id: Optional[str] = None
-    current_assessment_question_id: Optional[str] = None
-
-    # Identify the question being answered using ID from state
-    if mode == "doing_exercise":
-        question_type = "exercise"
-        current_exercise_id = state.get("current_exercise_id")
-        if current_exercise_id:
-            logger.debug(f"Evaluate: Looking for exercise with ID: {current_exercise_id}")
-            generated_exercises: List[Exercise] = state.get("generated_exercises", [])
-            # Find the exercise by ID
-            question = next((ex for ex in generated_exercises if ex.id == current_exercise_id), None)
-            if question:
-                question_id_str = question.id
-                logger.debug(f"Evaluate: Found exercise by ID: {question_id_str}")
-            else:
-                 logger.warning(f"Evaluate: Exercise with ID {current_exercise_id} not found in state list.")
+        # Use call_llm_plain_text for direct chat response
+        ai_response_content_result = await call_llm_plain_text(prompt, max_retries=3)
+        # Ensure response is not None before creating ChatMessage
+        if ai_response_content_result is None:
+            ai_response_content = "Sorry, I couldn't generate a response." # More specific fallback
         else:
-            logger.warning("Evaluate: Mode is 'doing_exercise' but 'current_exercise_id' is missing from state.")
+            ai_response_content = ai_response_content_result
 
-    elif mode == "taking_quiz":
-        question_type = "assessment"
-        current_assessment_question_id = state.get("current_assessment_question_id")
-        if current_assessment_question_id:
-            logger.debug(f"Evaluate: Looking for assessment question with ID: {current_assessment_question_id}")
-            generated_questions: List[AssessmentQuestion] = state.get("generated_assessment_questions", [])
-            # Find the question by ID
-            question = next((q for q in generated_questions if q.id == current_assessment_question_id), None)
-            if question:
-                question_id_str = question.id
-                logger.debug(f"Evaluate: Found assessment question by ID: {question_id_str}")
-            else:
-                logger.warning(f"Evaluate: Assessment question with ID {current_assessment_question_id} not found in state list.")
-        else:
-            logger.warning("Evaluate: Mode is 'taking_quiz' but 'current_assessment_question_id' is missing from state.")
-    else:
-        logger.warning(f"Evaluate: Unexpected mode '{mode}' when trying to find question.")
+    except Exception as e:
+        logger.error(f"LLM call failed during chat response generation: {e}", exc_info=True)
+        # Keep the default fallback message
 
-    if question is None:
-        logger.error(
-            "Could not find question for evaluation using ID. "
-            f"Mode: {mode}, ExerciseID: {current_exercise_id}, QuestionID: {current_assessment_question_id}, User: {user_id}"
-        )
-        ai_message = {
-            "role": "assistant",
-            "content": """
-                Sorry, I lost track of which question you were answering.
-                Could you clarify or ask to try again?""",
-        }
-        return {
-            "conversation_history": history + [ai_message],
-            "current_interaction_mode": "chatting",
-            "user_responses": user_responses,
-        }
+    # --- Update State ---
+    ai_message = ChatMessage(role="assistant", content=ai_response_content)
+    state["conversation_history"] = history + [ai_message.model_dump()] # Append new AI message
+    state["current_interaction_mode"] = "chatting" # Ensure mode is reset/confirmed
 
-    # Prepare prompt context
-    prompt_context: str = "" # Initialize prompt_context
-    try: # Add try block around context building
-        question_text: str = getattr(question, "question_text", None) or getattr(
-            question, "instructions", "N/A"
-        )
+    logger.info(f"Generated chat response for user {user_id}.")
+    return state
 
-        # Determine expected solution based on question type and available fields
-        expected_solution: str = "N/A"
-        if isinstance(question, Exercise):
-            expected_solution = getattr(question, "correct_answer", None) or getattr(question, "explanation", "N/A")
-        elif isinstance(question, AssessmentQuestion):
-            expected_solution = getattr(question, "correct_answer_id", None) or getattr(question, "correct_answer", None) or getattr(question, "explanation", "N/A")
 
-        prompt_context = f"Question/Instructions:\n{question_text}\n" # Assign initial part
-        q_type: str = question.type
-        if q_type == "multiple_choice" and question.options and isinstance(question.options, list):
-            # Safely format options only if it's a non-empty list of Option objects
-            valid_options = [opt for opt in question.options if isinstance(opt, Option)]
-            if valid_options:
-                options_str = "\n".join(
-                    [f"- {opt.id}) {opt.text}" for opt in valid_options]
-                )
-            else:
-                options_str = "[Options formatting error]"
-                logger.warning(f"MC question {getattr(question, 'id', 'unknown')} has invalid options format: {question.options}")
-            prompt_context += f"""
-                \nOptions:\n{options_str}\n\nThe user should respond with
-                the key/letter or the full text of the correct option."""
-        elif q_type == "true_false":
-            prompt_context += \
-                "\nOptions:\n- True\n- False\n\nThe user should respond with 'True' or 'False'."
-        elif q_type == "ordering" and getattr(
-            question, "items", None
-        ):
-            items_list: str = "\n".join([f"- {item}" for item in question.items])
-            prompt_context += f"""
-                        \nItems to order:\n{items_list}\n\n
-                        The user should respond with the items in the correct order."""
-        prompt_context += f"""
-                    \n\nExpected Answer/Solution Context (if available):\n
-                    {expected_solution}\n\nUser's Answer:\n{user_answer}"""
-    except Exception as context_err: # Add except block
-        logger.error(f"Error building prompt context for evaluation: {context_err}", exc_info=True)
-        # Fallback context
-        prompt_context = f"Error building context. User Answer: {user_answer}"
+async def evaluate_answer(state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Evaluates the user's submitted answer against the active exercise or assessment question.
 
-    # Call LLM for evaluation
-    evaluation_result_obj: Optional[EvaluationResult] = None
-    evaluation_result: Dict[str, Any]
+    Updates the state with feedback and clears the active task if evaluation is successful.
+    """
+    logger.info("Evaluating user answer.")
+    history: List[Dict[str, str]] = state.get("conversation_history", [])
+    user_id: str = state.get("user_id", "unknown_user")
+    user_answer: Optional[str] = state.get("potential_answer") # Get answer from state
+
+    if not user_answer:
+        logger.error(f"Cannot evaluate: No user answer found in state for user {user_id}.")
+        # Add error message to history?
+        ai_message = ChatMessage(role="assistant", content="Sorry, I couldn't find your answer to evaluate.")
+        state["conversation_history"] = history + [ai_message.model_dump()]
+        state["current_interaction_mode"] = "chatting" # Revert to chat
+        return state
+
+    active_exercise: Optional[Exercise] = state.get("active_exercise")
+    active_assessment: Optional[AssessmentQuestion] = state.get("active_assessment")
+
+    if not active_exercise and not active_assessment:
+        logger.error(f"Cannot evaluate: No active exercise or assessment found for user {user_id}.")
+        ai_message = ChatMessage(role="assistant", content="There doesn't seem to be an active question or exercise to answer right now.")
+        state["conversation_history"] = history + [ai_message.model_dump()]
+        state["current_interaction_mode"] = "chatting" # Revert to chat
+        return state
+
+    # --- Prepare Context for Evaluation Prompt ---
+    task_type = ""
+    task_details = ""
+    correct_answer_details = "" # Optional, might not always be available/needed for LLM eval
+
+    if active_exercise:
+        task_type = "Exercise"
+        task_details = f"Type: {active_exercise.type}\nInstructions/Question: {active_exercise.instructions or active_exercise.question}"
+        if active_exercise.options:
+             task_details += f"\nOptions: {json.dumps([opt.model_dump() for opt in active_exercise.options])}"
+        if active_exercise.correct_answer:
+            correct_answer_details = f"Correct Answer/Criteria: {active_exercise.correct_answer}"
+        # Add items for ordering tasks
+        if active_exercise.type == 'ordering' and active_exercise.items:
+            task_details += f"\nItems to Order: {json.dumps(active_exercise.items)}"
+
+    elif active_assessment:
+        task_type = "Assessment Question"
+        task_details = f"Type: {active_assessment.type}\nQuestion: {active_assessment.question_text}"
+        if active_assessment.options:
+            task_details += f"\nOptions: {json.dumps([opt.model_dump() for opt in active_assessment.options])}"
+        if active_assessment.correct_answer:
+            correct_answer_details = f"Correct Answer/Criteria: {active_assessment.correct_answer}"
+
+    # --- Call LLM for Evaluation ---
+    evaluation_feedback = "Sorry, I couldn't evaluate your answer at this time." # Default fallback
     try:
         prompt = load_prompt(
             "evaluate_answer",
-            question_type=question_type or "question",  # Provide default
-            prompt_context=prompt_context,
+            task_type=task_type,
+            task_details=task_details,
+            correct_answer_details=correct_answer_details, # May be empty
+            user_answer=user_answer,
         )
-        evaluation_result_obj = call_llm_with_json_parsing(
-            prompt, validation_model=EvaluationResult
-        )
-        if not evaluation_result_obj:
-            logger.error(
-                f"Failed to get valid evaluation from LLM for q_id {question_id_str}."
-            )
+
+        # Use call_llm_plain_text for evaluation feedback
+        evaluation_feedback_result = await call_llm_plain_text(prompt, max_retries=2)
+        if evaluation_feedback_result is not None:
+            evaluation_feedback = evaluation_feedback_result
+        else:
+            logger.warning("LLM returned None for evaluation feedback.")
+            # Keep the default fallback message
+
     except Exception as e:
-        logger.error(
-            f"Error in evaluation prompt loading/formatting for q_id {question_id_str}: {e}",
-            exc_info=True,
-        )
+        logger.error(f"LLM call failed during answer evaluation: {e}", exc_info=True)
+        # Keep the default fallback message
 
-    # Use fallback if evaluation failed, otherwise convert model to dict
-    if evaluation_result_obj is None:
-        evaluation_result = {
-            "score": 0.0,
-            "is_correct": False,
-            "feedback": """
-                Sorry, I encountered an error while evaluating your answer.
-                Let's move on for now.""",
-            "explanation": "",
-        }
-    else:
-        evaluation_result = evaluation_result_obj.model_dump()
-        logger.info(
-            f"Parsed evaluation for q_id {question_id_str}: "
-            f"Score={evaluation_result['score']}, Correct={evaluation_result['is_correct']}"
-        )
+    # --- Update State ---
+    ai_message = ChatMessage(role="assistant", content=evaluation_feedback)
+    state["conversation_history"] = history + [ai_message.model_dump()] # Append feedback
 
-    # Create assistant feedback message
-    feedback_text: str = evaluation_result["feedback"]
-    if not evaluation_result["is_correct"] and evaluation_result.get("explanation"):
-        feedback_text += f"\n\n*Explanation:* {evaluation_result['explanation']}"
-    ai_feedback_message: Dict[str, str] = {
-        "role": "assistant",
-        "content": feedback_text,
-    }
-    updated_history: List[Dict[str, str]] = history + [ai_feedback_message]
+    # Clear the active task and potential answer regardless of evaluation success/failure?
+    # Or only clear if evaluation was positive? Let's clear it for now to avoid re-evaluation.
+    state["active_exercise"] = None
+    state["active_assessment"] = None
+    state["potential_answer"] = None
+    state["current_interaction_mode"] = "chatting" # Revert to chat after evaluation
 
-    # Record the evaluation attempt
-    user_response_record: Dict[str, Any] = {
-        "question_id": question_id_str,
-        "question_type": question_type,
-        "response": user_answer,
-        "evaluation": evaluation_result,
-        "timestamp": datetime.now().isoformat(),
-    }
-    updated_user_responses: List[Dict] = user_responses + [user_response_record]
-
-    # Decide next step and potentially add follow-up message
-    # In the refactored design, the graph simply returns the state.
-    # The LessonService will decide the *actual* next step (next question, chat, etc.)
-    # based on the evaluation result and adaptivity rules.
-    # For now, we just reset the mode to 'chatting' as a default transition after evaluation.
-    next_mode: str = "chatting"
-    follow_up_text: Optional[str] = None
-
-    # Add a simple follow-up prompt if correct, otherwise just the feedback.
-    # More complex logic (like suggesting next exercise/quiz based on score)
-    # belongs in the LessonService.
-    if evaluation_result["is_correct"]:
-        if mode == "doing_exercise":
-            follow_up_text = \
-                "That's correct! Would you like the next exercise, or something else?"
-        elif mode == "taking_quiz":
-            follow_up_text = "Correct! Ready for the next quiz question?"
-
-        if follow_up_text:
-            ai_followup_message: Dict[str, str] = {
-                "role": "assistant",
-                "content": follow_up_text,
-            }
-            updated_history.append(ai_followup_message)
-    # else: # If incorrect, feedback message is already added
-
-    return {
-        "conversation_history": updated_history,
-        "current_interaction_mode": next_mode, # Default transition
-        "user_responses": updated_user_responses,
-    }
+    logger.info(f"Generated evaluation feedback for user {user_id}.")
+    return state
 
 
-async def generate_new_exercise(state: LessonState) -> Tuple[LessonState, Optional[Exercise]]:
+# --- On-Demand Generation Nodes ---
+
+# Define a type alias for the return type for clarity
+GenerateNodeReturnType = Tuple[Dict[str, Any], Optional[Union[Exercise, AssessmentQuestion]]]
+
+# Note: These generation functions now return the state AND the generated item
+# This allows the service layer to access the generated item directly if needed.
+
+# Changed to synchronous as the awaited call was synchronous
+def generate_new_exercise(state: Dict[str, Any]) -> GenerateNodeReturnType:
     """
-    Generates a new, unique exercise based on lesson context and presents it.
+    Generates a new, unique exercise based on the lesson context.
+
+    Updates the state by adding the new exercise to 'active_exercise' and
+    its ID to 'generated_exercise_ids'. Appends a confirmation message
+    to the conversation history.
+
+    Returns:
+        Tuple[Dict[str, Any], Optional[Exercise]]: The updated state and the generated Exercise object (or None).
     """
     logger.info("Attempting to generate a new exercise.")
     history: List[Dict[str, str]] = state.get("conversation_history", [])
@@ -538,8 +363,8 @@ async def generate_new_exercise(state: LessonState) -> Tuple[LessonState, Option
         )
 
         # Use call_llm_with_json_parsing to get a validated Exercise object
-        # Making this async as call_llm_with_json_parsing might be async
-        new_exercise = await call_llm_with_json_parsing(
+        # REMOVED await as call_llm_with_json_parsing is synchronous
+        new_exercise = call_llm_with_json_parsing(
             prompt, validation_model=Exercise, max_retries=2 # Allow fewer retries for generation
         )
 
@@ -568,69 +393,44 @@ async def generate_new_exercise(state: LessonState) -> Tuple[LessonState, Option
 
         logger.info(f"Successfully generated new exercise with ID: {new_exercise.id}")
 
-        # Update state lists
-        updated_exercises = state.get("generated_exercises", []) + [new_exercise]
-        updated_exercise_ids = existing_exercise_ids + [new_exercise.id]
+        # Update state
+        state["active_exercise"] = new_exercise # Set as the currently active one
+        state["active_assessment"] = None # Clear any active assessment
+        state["generated_exercise_ids"] = existing_exercise_ids + [new_exercise.id]
 
-        # Format presentation message
-        exercise_type: str = new_exercise.type
-        question_text: str = (
-            new_exercise.question
-            or new_exercise.instructions
-            or "No instructions provided."
+        # Add confirmation message to history
+        confirmation_message = ChatMessage(
+            role="assistant",
+            content=f"Okay, I've generated a new {new_exercise.type.replace('_', ' ')} exercise for you. Please see below and provide your answer in the chat."
         )
-        message_parts: List[str] = [
-            f"Okay, here's a new exercise for you!",
-            f"**Type:** {exercise_type.replace('_', ' ').capitalize()}",
-            f"**Instructions:**\n{question_text}",
-        ]
-        # Add items for ordering exercises
-        if exercise_type == "ordering" and new_exercise.items:
-            items_list: str = "\n".join([f"- {item}" for item in new_exercise.items])
-            message_parts.append(f"\n**Items to order:**\n{items_list}")
-        # Add options for multiple choice
-        elif exercise_type == "multiple_choice" and new_exercise.options:
-             options_str = "\n".join([f"- {opt.id}) {opt.text}" for opt in new_exercise.options])
-             message_parts.append(f"\n**Options:**\n{options_str}")
-             message_parts.append("\nPlease respond with the letter/key of your chosen answer (e.g., 'A').")
-        else:
-             message_parts.append("\nPlease provide your answer.")
+        state["conversation_history"] = history + [confirmation_message.model_dump()]
+        state["current_interaction_mode"] = "awaiting_answer" # Mode expecting an answer
 
-        ai_response_content: str = "\n\n".join(message_parts)
-        ai_message: Dict[str, str] = {
-            "role": "assistant",
-            "content": ai_response_content,
-        }
+        return state, new_exercise # Return updated state and the new exercise object
 
-        # Update state dictionary
-        state["generated_exercises"] = updated_exercises
-        state["generated_exercise_ids"] = updated_exercise_ids
-        state["conversation_history"] = history + [ai_message]
-        state["current_interaction_mode"] = "doing_exercise"
-        # We need a way to track *which* exercise is being answered now.
-        # Let's add a temporary field, maybe 'current_exercise_id'?
-        state["current_exercise_id"] = new_exercise.id # Track the ID of the presented exercise
-        state["error_message"] = None # Clear any previous error
-
-        return state, new_exercise
-
-    else:
-        # Handle LLM failure or invalid JSON
-        logger.error(f"Failed to generate or validate a new exercise for user {user_id}.")
-        ai_message = {
-            "role": "assistant",
-            "content": "Sorry, I wasn't able to generate an exercise right now. Please try again later or ask me a question."
-        }
-        state["conversation_history"] = history + [ai_message]
-        state["current_interaction_mode"] = "chatting"
-        state["error_message"] = "Failed to generate exercise." # Store error state
-
+    else: # Handle generation failure
+        logger.error(f"Failed to generate a valid new exercise for user {user_id}.")
+        ai_message = ChatMessage(
+            role="assistant",
+            content="Sorry, I wasn't able to generate an exercise for you right now. Please try again later or ask me something else."
+        )
+        state["conversation_history"] = history + [ai_message.model_dump()]
+        state["current_interaction_mode"] = "chatting" # Revert to chat
+        state["error_message"] = "Exercise generation failed." # Add error flag/message
         return state, None # Return original state and None exercise
 
 
-async def generate_new_assessment_question(state: LessonState) -> Tuple[LessonState, Optional[AssessmentQuestion]]:
+# Changed to synchronous as the awaited call was synchronous
+def generate_new_assessment(state: Dict[str, Any]) -> GenerateNodeReturnType:
     """
-    Generates a new, unique assessment question based on lesson context and presents it.
+    Generates a new, unique assessment question based on the lesson context.
+
+    Updates the state by adding the new question to 'active_assessment' and
+    its ID to 'generated_assessment_ids'. Appends a confirmation message
+    to the conversation history.
+
+    Returns:
+        Tuple[Dict[str, Any], Optional[AssessmentQuestion]]: The updated state and the generated AssessmentQuestion object (or None).
     """
     logger.info("Attempting to generate a new assessment question.")
     history: List[Dict[str, str]] = state.get("conversation_history", [])
@@ -640,50 +440,49 @@ async def generate_new_assessment_question(state: LessonState) -> Tuple[LessonSt
     topic: str = state.get("topic", "Unknown Topic")
     lesson_title: str = state.get("lesson_title", "Unknown Lesson")
     user_level: str = state.get("knowledge_level", "beginner")
-    syllabus: Optional[Dict] = state.get("syllabus")
     generated_content: Optional[GeneratedLessonContent] = state.get("generated_content")
-    existing_question_ids: List[str] = state.get("generated_assessment_question_ids", [])
+    existing_assessment_ids: List[str] = state.get("generated_assessment_ids", [])
 
     # Basic validation
     if not generated_content or not generated_content.exposition_content:
-        logger.error(f"Cannot generate assessment question: Missing exposition content for user {user_id}.")
-        state["error_message"] = "Sorry, I couldn't generate a question because the lesson content is missing."
+        logger.error(f"Cannot generate assessment: Missing exposition content for user {user_id}.")
+        state["error_message"] = "Sorry, I couldn't generate an assessment question because the lesson content is missing."
         return state, None
 
     exposition_summary = str(generated_content.exposition_content)[:1000]
-    syllabus_context = f"Module: {state.get('module_title', 'N/A')}, Lesson: {lesson_title}"
-    # TODO: Add more syllabus context if needed
 
     # --- 2. Call LLM ---
-    new_question: Optional[AssessmentQuestion] = None
+    new_assessment: Optional[AssessmentQuestion] = None
     try:
         prompt = load_prompt(
-            "generate_assessment", # Use the assessment prompt
+            "generate_assessment", # Use the correct prompt file name
             topic=topic,
             lesson_title=lesson_title,
             user_level=user_level,
             exposition_summary=exposition_summary,
-            syllabus_context=syllabus_context,
-            existing_question_descriptions_json=json.dumps(existing_question_ids) # Pass existing IDs
+            existing_question_descriptions_json=json.dumps(existing_assessment_ids)
         )
 
-        # Use call_llm_with_json_parsing for validation
-        # Making this async as call_llm_with_json_parsing might be async
-        new_question = await call_llm_with_json_parsing(
+        # Use call_llm_with_json_parsing to get a validated AssessmentQuestion object
+        # REMOVED await as call_llm_with_json_parsing is synchronous
+        new_assessment = call_llm_with_json_parsing(
             prompt, validation_model=AssessmentQuestion, max_retries=2
         )
 
     except Exception as e:
-        logger.error(f"LLM call/parsing failed during assessment question generation: {e}", exc_info=True)
+        logger.error(f"LLM call/parsing failed during assessment generation: {e}", exc_info=True)
+        # Fall through
 
     # --- 3. Process Result & Update State ---
-    if new_question and isinstance(new_question, AssessmentQuestion):
-        if not new_question.id:
-            new_question.id = f"quiz_{uuid.uuid4().hex[:6]}"
-            logger.warning(f"Generated assessment question lacked ID, assigned fallback: {new_question.id}")
+    if new_assessment and isinstance(new_assessment, AssessmentQuestion):
+        # Ensure ID exists
+        if not new_assessment.id:
+            new_assessment.id = f"as_{uuid.uuid4().hex[:6]}"
+            logger.warning(f"Generated assessment lacked ID, assigned fallback: {new_assessment.id}")
 
-        if new_question.id in existing_question_ids:
-            logger.warning(f"LLM generated an assessment question with a duplicate ID ({new_question.id}). Discarding.")
+        # Check for duplicates
+        if new_assessment.id in existing_assessment_ids:
+            logger.warning(f"LLM generated an assessment with a duplicate ID ({new_assessment.id}). Discarding.")
             ai_message = {
                 "role": "assistant",
                 "content": "Sorry, I couldn't come up with a new assessment question right now. Would you like to try again or ask something else?"
@@ -692,73 +491,31 @@ async def generate_new_assessment_question(state: LessonState) -> Tuple[LessonSt
             state["current_interaction_mode"] = "chatting"
             return state, None
 
-        logger.info(f"Successfully generated new assessment question with ID: {new_question.id}")
+        logger.info(f"Successfully generated new assessment question with ID: {new_assessment.id}")
 
-        # Update state lists
-        updated_questions = state.get("generated_assessment_questions", []) + [new_question]
-        updated_question_ids = existing_question_ids + [new_question.id]
+        # Update state
+        state["active_assessment"] = new_assessment # Set as active
+        state["active_exercise"] = None # Clear active exercise
+        # Correctly append the new ID to the list
+        state["generated_assessment_question_ids"] = existing_assessment_ids + [new_assessment.id]
 
-        # Format presentation message
-        question_type: str = new_question.type
-        question_text: str = new_question.question_text
-        message_parts: List[str] = [
-            f"Okay, here's an assessment question for you:",
-            f"{question_text}",
-        ]
-        options_lines: List[str] = []
-        if question_type == "multiple_choice" and new_question.options:
-            options_lines = [f"- {opt.id}) {opt.text}" for opt in new_question.options]
-            options_lines.append("\nPlease respond with the letter/key of your chosen answer (e.g., 'A').")
-        elif question_type == "true_false":
-            options_lines = ["- True", "- False", "\nPlease respond with 'True' or 'False'."]
+        # Add confirmation message
+        confirmation_message = ChatMessage(
+            role="assistant",
+            content=f"Okay, here's an assessment question for you ({new_assessment.type.replace('_', ' ')}). Please see below and provide your answer in the chat."
+        )
+        state["conversation_history"] = history + [confirmation_message.model_dump()]
+        state["current_interaction_mode"] = "awaiting_answer"
 
-        if options_lines:
-             options_text: str = "\n".join(options_lines)
-             message_parts.append(f"\n{options_text}")
-        else: # Short answer
-             message_parts.append("\nPlease provide your answer.")
+        return state, new_assessment
 
-
-        ai_response_content: str = "\n\n".join(message_parts)
-        ai_message: Dict[str, str] = {
-            "role": "assistant",
-            "content": ai_response_content,
-        }
-
-        # Update state dictionary
-        state["generated_assessment_questions"] = updated_questions
-        state["generated_assessment_question_ids"] = updated_question_ids
-        state["conversation_history"] = history + [ai_message]
-        state["current_interaction_mode"] = "taking_quiz"
-        # Add field to track current question ID
-        state["current_assessment_question_id"] = new_question.id
-        state["error_message"] = None
-
-        return state, new_question
-
-    else:
-        # Handle LLM failure or invalid JSON
-        logger.error(f"Failed to generate or validate a new assessment question for user {user_id}.")
-        ai_message = {
-            "role": "assistant",
-            "content": "Sorry, I wasn't able to generate an assessment question right now. Please try again later or ask me a question."
-        }
-        state["conversation_history"] = history + [ai_message]
+    else: # Handle generation failure
+        logger.error(f"Failed to generate a valid new assessment question for user {user_id}.")
+        ai_message = ChatMessage(
+            role="assistant",
+            content="Sorry, I wasn't able to generate an assessment question for you right now. Please try again later or ask me something else."
+        )
+        state["conversation_history"] = history + [ai_message.model_dump()]
         state["current_interaction_mode"] = "chatting"
-        state["error_message"] = "Failed to generate assessment question."
-
+        state["error_message"] = "Assessment generation failed."
         return state, None
-
-
-def update_progress(state: LessonState) -> Dict[str, Any]:
-    """
-    Graph node: Placeholder for updating/saving user progress.
-
-    Note: As per the refactored design, progress saving is intended to be handled
-    externally by the LessonService after a graph turn completes.
-    This node performs no state modifications by default. It serves as a designated
-    endpoint for the graph turn before returning control to the service layer.
-    """
-    logger.debug("Update progress node executed (placeholder).")
-    # No state changes are made here.
-    return {}

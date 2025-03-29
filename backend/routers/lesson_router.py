@@ -14,7 +14,8 @@ from backend.dependencies import (
     get_exposition_service,  # New
 )
 from backend.logger import logger
-from backend.models import User, GeneratedLessonContent, Exercise, AssessmentQuestion
+# Import ChatMessage from models now
+from backend.models import User, GeneratedLessonContent, Exercise, AssessmentQuestion, ChatMessage
 
 # Import the new service types for type hinting
 from backend.services.lesson_interaction_service import LessonInteractionService
@@ -31,15 +32,12 @@ class ChatMessageRequest(BaseModel):
     message: str
 
 
-class ChatMessage(BaseModel):
-    """Model for a single message in the conversation history."""
-    role: str
-    content: str
+# REMOVED local ChatMessage definition (lines 34-37)
 
 
 class ChatTurnResponse(BaseModel):
     """Response model for a chat turn, containing AI responses."""
-    responses: List[ChatMessage]
+    responses: List[ChatMessage] # This now refers to the imported ChatMessage
     error: Optional[str] = None
 
 
@@ -200,7 +198,12 @@ async def handle_chat_message(
         if "error" in result:
             return ChatTurnResponse(responses=[], error=result["error"])
         else:
-            return ChatTurnResponse(responses=result.get("responses", []))
+            # Ensure the response structure matches ChatTurnResponse
+            # The service should return a dict with a 'responses' key containing a list of dicts
+            # that match the ChatMessage structure.
+            responses_list = result.get("responses", [])
+            # Validate/convert if necessary, though Pydantic handles it if types match
+            return ChatTurnResponse(responses=responses_list)
     except ValueError as e:
         logger.error(f"Value error in handle_chat_message: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e

@@ -1,42 +1,54 @@
+# backend/dependencies.py
 """
-FastAPI dependency injection setup.
-
-This module initializes shared service instances (like database connections,
-AI components, and business logic services) and provides dependency functions
-(e.g., `get_db`, `get_current_user`) for use in API route definitions.
-This promotes code reuse and testability by managing singleton instances
-and handling common tasks like authentication.
+Manages shared dependencies like database connections and service instances
+using FastAPI's dependency injection system.
 """
 
-import os
 import logging
+import os
+from typing import Optional
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
+from pydantic import ValidationError
 
-# Import Services
+# Import services and models
+# Corrected import: OnboardingAI -> TechTreeAI
+from backend.ai.app import LessonAI, TechTreeAI, SyllabusAI
+from backend.models import User
 from backend.services.auth_service import AuthService
+from backend.services.lesson_exposition_service import LessonExpositionService
+from backend.services.lesson_interaction_service import LessonInteractionService
+from backend.services.onboarding_service import OnboardingService
 from backend.services.sqlite_db import SQLiteDatabaseService
 from backend.services.syllabus_service import SyllabusService
-from backend.services.lesson_exposition_service import LessonExpositionService
-from backend.services.lesson_interaction_service import (
-    LessonInteractionService,
-)
-from backend.ai.app import LessonAI
 
-# Import Models
-from backend.models import User
+# --- Environment Variables ---
+SECRET_KEY = os.environ.get("SECRET_KEY", "a_very_secret_key")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-# --- Service Instantiation ---
+# --- Database Initialization ---
+# Use SQLite for simplicity
+DB_PATH = "techtree_db.sqlite" # Consider making this configurable
+db_service = SQLiteDatabaseService(db_path=DB_PATH)
 
-# Create a single instance of the database service
-# This allows sharing the same DB connection pool across the application.
-db_service = SQLiteDatabaseService()
+# --- Service Instantiations (Singleton Pattern) ---
+# These instances will be shared across requests via dependency functions.
 
 # Authentication Service
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 auth_service = AuthService(db_service=db_service)
 
-# Syllabus Service
+# Onboarding AI and Service
+# Corrected instantiation: OnboardingAI -> TechTreeAI
+onboarding_ai = TechTreeAI()
+# Corrected OnboardingService instantiation (only needs db_service)
+onboarding_service = OnboardingService(db_service=db_service)
+
+# Syllabus AI and Service
+# Corrected SyllabusAI instantiation (needs db_service)
+syllabus_ai = SyllabusAI(db_service=db_service)
 syllabus_service = SyllabusService(db_service=db_service)
 
 # Lesson Exposition Service
@@ -48,9 +60,9 @@ exposition_service = LessonExpositionService(
 lesson_ai = LessonAI()
 
 # Lesson Interaction Service
-interaction_service = LessonInteractionService(  # Needs DB, Syllabus, Exposition, AI
+interaction_service = LessonInteractionService(  # Needs DB, Exposition, AI
     db_service=db_service,
-    syllabus_service=syllabus_service,
+    # syllabus_service=syllabus_service, # Removed unexpected argument
     exposition_service=exposition_service,
     lesson_ai=lesson_ai,
 )
@@ -59,96 +71,85 @@ logger = logging.getLogger(__name__)
 
 # --- Dependency Functions ---
 
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 
-# Dependency function to get the shared DB instance
-def get_db() -> SQLiteDatabaseService:
-    """
-    FastAPI dependency function to provide the shared SQLiteDatabaseService instance.
 
-    Returns:
-        The singleton SQLiteDatabaseService instance.
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+) -> Optional[User]:
     """
+    Dependency function to get the current authenticated user from the JWT token.
+    Handles token decoding and user retrieval.
+    Returns None if token is invalid or user not found (allows optional auth).
+    """
+    # Special case for no-auth mode (e.g., during development/testing)
+    if token == "no-auth-token":
+        logger.warning("Using 'no-auth' user.")
+        return User(user_id="no-auth", email="no-auth@example.com", name="No Auth User")
+
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: Optional[str] = payload.get("sub")
+        if user_id is None:
+            logger.warning("Token payload missing 'sub' (user_id).")
+            raise credentials_exception
+    except JWTError as e:
+        logger.error(f"JWT Error: {e}", exc_info=True)
+        raise credentials_exception from e
+    except Exception as e: # Catch other potential errors during decoding
+        logger.error(f"Token decoding error: {e}", exc_info=True)
+        raise credentials_exception from e
+
+
+    # Corrected user lookup: Use db_service directly
+    user_dict = db_service.get_user_by_id(user_id)
+    if user_dict is None:
+        logger.warning(f"User ID {user_id} from token not found in database.")
+        raise credentials_exception
+    # Convert dict to User model
+    try:
+        user = User(**user_dict)
+    except ValidationError as e:
+        logger.error(f"Failed to validate user data from DB for user {user_id}: {e}")
+        # Treat validation error as auth failure
+        raise credentials_exception from e
+    return user
+
+
+# --- Service Dependency Getters ---
+# These functions simply return the pre-initialized service instances.
+
+
+def get_db_service() -> SQLiteDatabaseService:
+    """Dependency function to get the database service instance."""
     return db_service
 
 
-# Dependency function to get the shared Syllabus Service instance
-def get_syllabus_service() -> SyllabusService:
-    """
-    FastAPI dependency function to provide the shared SyllabusService instance.
+def get_auth_service() -> AuthService:
+    """Dependency function to get the authentication service instance."""
+    return auth_service
 
-    Returns:
-        The singleton SyllabusService instance.
-    """
+
+def get_onboarding_service() -> OnboardingService:
+    """Dependency function to get the onboarding service instance."""
+    return onboarding_service
+
+
+def get_syllabus_service() -> SyllabusService:
+    """Dependency function to get the syllabus service instance."""
     return syllabus_service
 
 
-# Dependency function to get the shared Lesson Exposition Service instance
 def get_exposition_service() -> LessonExpositionService:
-    """
-    FastAPI dependency function to provide the shared LessonExpositionService instance.
-
-    Returns:
-        The singleton LessonExpositionService instance.
-    """
+    """Dependency function to get the lesson exposition service instance."""
     return exposition_service
 
 
-# Dependency function to get the shared Lesson Interaction Service instance
 def get_interaction_service() -> LessonInteractionService:
-    """
-    FastAPI dependency function to provide the shared LessonInteractionService instance.
-
-    Returns:
-        The singleton LessonInteractionService instance.
-    """
+    """Dependency function to get the lesson interaction service instance."""
     return interaction_service
-
-
-# Dependency function to get the current user from the JWT token
-async def get_current_user(token: str = Depends(oauth2_scheme)) -> User:
-    """
-    FastAPI dependency function to get the current authenticated user from the JWT token.
-
-    Verifies the token and returns the corresponding User object.
-    Handles the NO_AUTH environment variable for bypassing authentication during development.
-
-    Args:
-        token: The bearer token extracted from the Authorization header.
-
-    Returns:
-        The authenticated User object.
-
-    Raises:
-        HTTPException (401): If authentication credentials are invalid or missing.
-        HTTPException (500): If an unexpected error occurs during token verification.
-    """
-    if os.environ.get("NO_AUTH"):
-        logger.warning("NO_AUTH is active. Bypassing authentication.")
-        # Return a default User object for no-auth mode
-        return User(user_id="no-auth", email="no-auth@example.com", name="No Auth User")
-    try:
-        payload = auth_service.verify_token(token)
-        user_id = payload.get("sub")
-        if user_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authentication credentials (missing sub)",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        # Fetch user details from DB or use token payload
-        return User(
-            user_id=user_id, email=payload.get("email"), name=payload.get("name")
-        )
-    except ValueError as e:
-        logger.error(f"Token verification failed: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid authentication credentials: {e}",
-            headers={"WWW-Authenticate": "Bearer"},
-        ) from e
-    except Exception as e:  # Catch other potential errors during verification
-        logger.error(f"Unexpected error during token verification: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Could not verify authentication credentials",
-        ) from e

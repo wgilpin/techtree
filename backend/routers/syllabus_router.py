@@ -1,234 +1,191 @@
-"""Router for syllabus endpoints"""
-
-# pylint: disable=logging-fstring-interpolation
-
+# Improved code for backend/routers/syllabus_router.py
+import logging
 from typing import Any, Dict, List, Optional
 
-# Import necessary dependencies
-from fastapi import Depends  # Add Depends
-from fastapi import APIRouter, HTTPException, Response, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, status # Use status constants
+from pydantic import BaseModel, Field # Field can be used for better validation/docs
 
-from backend.dependencies import get_current_user, get_db
-from backend.logger import logger
+# Assuming get_db_service is NOT directly needed here if SyllabusService handles it
+from backend.dependencies import get_current_user, get_syllabus_service
+# Removed unused get_db_service import
 from backend.models import User
-from backend.services.sqlite_db import SQLiteDatabaseService
+# Removed unused SQLiteDatabaseService import
 from backend.services.syllabus_service import SyllabusService
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
-# Removed direct instantiation of syllabus_service
 
+# --- Pydantic Models ---
 
-def get_syllabus_service(
-    db: SQLiteDatabaseService = Depends(get_db),
-) -> SyllabusService:
-    """Dependency function to get SyllabusService instance"""
-    return SyllabusService(db_service=db)
-
-
-# Models
+# Consider adding example values or more specific field constraints if applicable
 class SyllabusRequest(BaseModel):
-    """
-    Request model for creating a syllabus.
-    """
-
-    topic: str
-    knowledge_level: str
-
+    """Request model for generating a syllabus."""
+    topic: str = Field(..., json_schema_extra={"example": "Introduction to Python"})
+    level: str = Field(..., json_schema_extra={"example": "Beginner"})
+    user_id: Optional[str] = Field(None, json_schema_extra={"example": "user_abc_123"}) # Optional user ID
 
 class Module(BaseModel):
-    """
-    Model representing a module within a syllabus.
-    """
-
-    title: str
-    summary: str
-    lessons: List[Dict[str, Any]]
-
-
-class SyllabusContent(BaseModel):
-    """
-    Model representing the content of a syllabus.
-    """
-
-    title: str
-    description: str
-    modules: List[Module]
-
+    """Represents a single module within a syllabus."""
+    # Define structure more explicitly if known, e.g.:
+    module_id: str = Field(..., json_schema_extra={"example": "mod_1"})
+    title: str = Field(..., json_schema_extra={"example": "Module 1: Getting Started"})
+    content: Dict[str, Any] # Or a more specific model
 
 class SyllabusResponse(BaseModel):
-    """
-    Response model for a syllabus.
-    """
+    """Response model for a generated syllabus."""
+    syllabus_id: str = Field(..., json_schema_extra={"example": "sy_xyz_789"})
+    topic: str = Field(..., json_schema_extra={"example": "Introduction to Python"})
+    level: str = Field(..., json_schema_extra={"example": "Beginner"})
+    # Use the specific Module model for better type safety and documentation
+    modules: List[Module]
 
-    syllabus_id: str
-    topic: str
-    level: str
-    content: Dict[str, Any]
-    is_new: bool
+class SyllabusSummary(BaseModel):
+    """Summary model for listing syllabi."""
+    syllabus_id: str = Field(..., json_schema_extra={"example": "sy_xyz_789"})
+    topic: str = Field(..., json_schema_extra={"example": "Introduction to Python"})
+    level: str = Field(..., json_schema_extra={"example": "Beginner"})
 
-
-class ModuleResponse(BaseModel):
-    """
-    Response model for a module.
-    """
-
-    title: str
-    summary: str
-    lessons: List[Dict[str, Any]]
+class SyllabusListResponse(BaseModel):
+    """Response model for listing available syllabi."""
+    syllabi: List[SyllabusSummary]
 
 
-class LessonSummary(BaseModel):
-    """
-    Model for a lesson summary.
-    """
+# --- Helper Functions (Optional) ---
+# If validation logic becomes complex, extract it to helper functions
 
-    title: str
-    summary: Optional[str] = None
-    duration: Optional[str] = None
+# --- Syllabus Routes ---
 
-
-# Routes
-@router.post("/create", response_model=SyllabusResponse)
-# Inject SyllabusService
-async def create_syllabus(
-    syllabus_req: SyllabusRequest,
-    current_user: Optional[User] = Depends(get_current_user),
-    response: Response = None,
+@router.post(
+    "/generate",
+    response_model=SyllabusResponse,
+    status_code=status.HTTP_201_CREATED, # Use 201 for resource creation
+    summary="Generate a new syllabus", # Add summary for docs
+    description="Generates a new syllabus based on topic and level, optionally personalized.", # Add description
+)
+async def generate_syllabus(
+    request_body: SyllabusRequest,
+    # db_service removed - assuming SyllabusService handles its DB dependency
     syllabus_service: SyllabusService = Depends(get_syllabus_service),
+    # current_user: User = Depends(get_current_user) # Uncomment if auth is needed
 ):
     """
-    Create a new syllabus based on topic and knowledge level.
+    Generates a new syllabus based on the topic and level.
+    Optionally personalizes based on user ID if provided.
     """
+    # Use structured logging if possible
     logger.info(
-        "Entering create_syllabus endpoint for topic:"
-        f" {syllabus_req.topic}, level: {syllabus_req.knowledge_level}"
+        "Generating syllabus request received",
+        extra={
+            "topic": request_body.topic,
+            "level": request_body.level,
+            "user_id": request_body.user_id,
+        },
     )
-
-    user_id = current_user.user_id if current_user else None
-    if current_user and current_user.user_id == "no-auth":
-        response.headers["X-No-Auth"] = "true"
-
     try:
-        result = await syllabus_service.create_syllabus(
-            syllabus_req.topic, syllabus_req.knowledge_level, user_id
+        # Await the service call as it likely involves I/O (DB, AI model)
+        syllabus_data = await syllabus_service.get_or_generate_syllabus(
+            topic=request_body.topic,
+            level=request_body.level,
+            user_id=request_body.user_id,
         )
-        return result
-    except Exception as e:
+
+        # Ideally, syllabus_service returns a Pydantic model or raises specific
+        # exceptions for failures (e.g., GenerationError, ValidationError).
+        # If it returns a dict, validation is needed here.
+        if not syllabus_data:
+             logger.error("Syllabus service returned empty data.")
+             raise HTTPException(
+                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                 detail="Failed to generate syllabus data.",
+             )
+
+        # Validate the structure (or let Pydantic handle it if service returns model)
+        # This assumes syllabus_data is a dict matching SyllabusResponse structure
+        # Pydantic will raise validation errors if the structure is wrong when creating SyllabusResponse
+        return SyllabusResponse(**syllabus_data)
+
+    except ValueError as e: # Catch specific expected errors from the service
+        logger.warning(f"Validation error generating syllabus: {e}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error creating syllabus: {str(e)}",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid input: {e}"
         ) from e
-
-
-@router.get("/{syllabus_id}", response_model=SyllabusResponse)
-# Inject SyllabusService
-async def get_syllabus(
-    syllabus_id: str, syllabus_service: SyllabusService = Depends(get_syllabus_service)
-):
-    """
-    Get a syllabus by ID.
-    """
-    logger.info(f"Entering get_syllabus endpoint for syllabus_id: {syllabus_id}")
-    try:
-        syllabus = await syllabus_service.get_syllabus(syllabus_id)
-        # Add is_new field to match response model
-        syllabus["is_new"] = False
-        return syllabus
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
-    except Exception as e:
+    except HTTPException as http_exc: # Re-raise HTTP exceptions directly
+        raise http_exc
+    except Exception as e: # Catch unexpected errors
+        logger.error(f"Unexpected error generating syllabus: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error retrieving syllabus: {str(e)}",
-        ) from e
-
-
-@router.get("/topic/{topic}/level/{level}", response_model=SyllabusResponse)
-# Inject SyllabusService
-async def get_syllabus_by_topic_level(
-    topic: str,
-    level: str,
-    current_user: Optional[User] = Depends(get_current_user),
-    response: Response = None,
-    syllabus_service: SyllabusService = Depends(get_syllabus_service),
-):
-    """
-    Get a syllabus by topic and level.
-    """
-    logger.info(
-        f"Entering get_syllabus_by_topic_level endpoint for topic: {topic}, level: {level}"
-    )
-    user_id = current_user.user_id if current_user else None
-    if current_user and current_user.user_id == "no-auth":
-        response.headers["X-No-Auth"] = "true"
-
-    try:
-        result = await syllabus_service.get_syllabus_by_topic_level(
-            topic, level, user_id
-        )
-        return result
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error retrieving syllabus: {str(e)}",
-        ) from e
-
-
-@router.get("/{syllabus_id}/module/{module_index}", response_model=ModuleResponse)
-# Inject SyllabusService
-async def get_module_details(
-    syllabus_id: str,
-    module_index: int,
-    syllabus_service: SyllabusService = Depends(get_syllabus_service),
-):
-    """
-    Get details for a specific module in the syllabus.
-    """
-    logger.info(
-        "Entering get_module_details endpoint for syllabus_id:"
-        f" {syllabus_id}, module_index: {module_index}"
-    )
-
-    try:
-        module = await syllabus_service.get_module_details(syllabus_id, module_index)
-        return module
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error retrieving module details: {str(e)}",
+            detail="An internal server error occurred during syllabus generation.",
         ) from e
 
 
 @router.get(
-    "/{syllabus_id}/module/{module_index}/lesson/{lesson_index}",
-    response_model=LessonSummary,
+    "/{syllabus_id}",
+    response_model=SyllabusResponse,
+    summary="Get syllabus by ID",
+    description="Retrieves a specific syllabus by its unique ID.",
+    responses={ # Add specific responses for docs
+        status.HTTP_404_NOT_FOUND: {"description": "Syllabus not found"},
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+    }
 )
-# Inject SyllabusService
-async def get_lesson_summary(
+async def get_syllabus_by_id(
     syllabus_id: str,
-    module_index: int,
-    lesson_index: int,
+    # db_service removed
     syllabus_service: SyllabusService = Depends(get_syllabus_service),
+    # current_user: User = Depends(get_current_user) # Uncomment if auth needed
 ):
     """
-    Get summary for a specific lesson in the syllabus.
+    Retrieves a specific syllabus by its unique ID.
     """
-    logger.info(
-        "Entering get_lesson_summary endpoint for syllabus_id:"
-        f" {syllabus_id}, module_index: {module_index}, lesson_index: {lesson_index}"
-    )
+    logger.info(f"Retrieving syllabus with ID: {syllabus_id}")
     try:
-        lesson = await syllabus_service.get_lesson_details(
-            syllabus_id, module_index, lesson_index
+        # Await the service call assuming it might involve I/O
+        syllabus_data = await syllabus_service.get_syllabus_by_id(syllabus_id)
+
+        if syllabus_data is None:
+            logger.warning(f"Syllabus with ID '{syllabus_id}' not found.")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Syllabus with ID '{syllabus_id}' not found.",
+            )
+
+        # Let Pydantic validate the structure when creating the response object
+        # This assumes syllabus_data is a dict matching SyllabusResponse structure
+        return SyllabusResponse(**syllabus_data)
+
+    except HTTPException as http_exc: # Re-raise known HTTP errors
+        raise http_exc
+    except Exception as e: # Catch unexpected errors
+        logger.error(
+            f"Unexpected error retrieving syllabus {syllabus_id}: {e}", exc_info=True
         )
-        return lesson
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
-    except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error retrieving lesson summary: {str(e)}",
+            detail="An internal server error occurred while retrieving the syllabus.",
         ) from e
+
+
+# Optional: Add a route to list available syllabi if needed
+# @router.get(
+#     "/",
+#     response_model=SyllabusListResponse,
+#     summary="List available syllabi",
+# )
+# async def list_syllabi(
+#     syllabus_service: SyllabusService = Depends(get_syllabus_service),
+#     # Add pagination parameters if needed: skip: int = 0, limit: int = 100
+# ):
+#     """Lists available syllabi summaries."""
+#     logger.info("Listing available syllabi")
+#     try:
+#         # Assuming service method exists and returns list of dicts/objects
+#         syllabi_data = await syllabus_service.list_syllabi_summaries() # Example method
+#         return SyllabusListResponse(syllabi=[SyllabusSummary(**s) for s in syllabi_data])
+#     except Exception as e:
+#         logger.error(f"Unexpected error listing syllabi: {e}", exc_info=True)
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail="An internal server error occurred while listing syllabi.",
+#         ) from e

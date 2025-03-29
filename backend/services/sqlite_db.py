@@ -744,6 +744,59 @@ class SQLiteDatabaseService:
 
         return None
 
+    def get_lesson_id(self, syllabus_id: str, module_index: int, lesson_index: int) -> Optional[int]:
+        """
+        Retrieves the primary key (lesson_id) of a lesson based on its indices.
+
+        Args:
+            syllabus_id (str): The ID of the syllabus.
+            module_index (int): The index of the module within the syllabus.
+            lesson_index (int): The index of the lesson within the module.
+
+        Returns:
+            Optional[int]: The lesson_id if found, otherwise None.
+        """
+        try:
+            # Get the module_id
+            module_query = """
+                SELECT module_id FROM modules
+                WHERE syllabus_id = ? AND module_index = ?
+            """
+            module_result = self.execute_query(
+                module_query, (syllabus_id, module_index), fetch_one=True
+            )
+
+            if not module_result:
+                logger.warning(
+                    f"Module not found for syllabus {syllabus_id}, index {module_index}"
+                )
+                return None
+
+            module_id = module_result["module_id"]
+
+            # Get the lesson_id
+            lesson_query = """
+                SELECT lesson_id FROM lessons
+                WHERE module_id = ? AND lesson_index = ?
+            """
+            lesson_result = self.execute_query(
+                lesson_query, (module_id, lesson_index), fetch_one=True
+            )
+
+            if not lesson_result:
+                logger.warning(
+                    f"Lesson not found for module {module_id}, index {lesson_index}"
+                )
+                return None
+
+            lesson_id = lesson_result["lesson_id"]
+            # Assuming lesson_id is an integer based on schema/usage elsewhere
+            return int(lesson_id) if lesson_id is not None else None
+
+        except Exception as e:
+            logger.error(f"Error retrieving lesson ID: {str(e)}", exc_info=True)
+            raise
+
     def get_lesson_by_id(self, lesson_id):
         """
         Retrieves a lesson by its ID.

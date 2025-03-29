@@ -21,3 +21,4 @@ uv.lock
 techtree.db-wal
 techtree.db-shm
 /techtree.db
+techtree_db.sqlite

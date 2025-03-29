@@ -222,8 +222,8 @@ class SyllabusService:
 
         lesson_data = module["lessons"][lesson_index]
 
-        # Fetch the corresponding lesson ID from the lessons table
-        lesson_db_id = self.db_service.get_lesson_id_by_indices(
+        # Fetch the corresponding lesson ID from the lessons table using the new method
+        lesson_db_id = self.db_service.get_lesson_id(
             syllabus_id, module_index, lesson_index
         )
 

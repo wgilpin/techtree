@@ -1,183 +1,245 @@
 # backend/tests/ai/lessons/test_lessons_graph_routing.py
-"""tests for backend/ai/lessons/lessons_graph.py routing logic"""
+"""Tests for backend/ai/lessons/nodes.py intent classification logic"""
 # pylint: disable=protected-access, unused-argument, invalid-name
 
-import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch, AsyncMock  # Import AsyncMock
 
 import pytest
 
-from backend.models import IntentClassificationResult, LessonState
-# Import the nodes module instead of LessonAI for direct function calls
+from backend.models import (
+    IntentClassificationResult,
+    LessonState,
+    Exercise,
+    GeneratedLessonContent,
+)
+
+# Import the nodes module for direct function calls
 from backend.ai.lessons import nodes
 
 
-class TestLessonAIRouting:
-    """Tests for the routing logic (nodes.route_message_logic)."""
+# Define default history as a constant for clarity and potential reuse
+DEFAULT_INITIAL_HISTORY = [{"role": "assistant", "content": "Hello"}]
 
-    # Remove LessonAI init patches, update logger patch target
-    @patch("backend.ai.lessons.nodes.logger", MagicMock())
-    @pytest.mark.parametrize("mode", ["doing_exercise", "taking_quiz"])
-    def test_route_message_logic_evaluation_mode(self, mode):
-        """Test routing when mode requires evaluation."""
-        # lesson_ai = LessonAI() # Removed
-        state: LessonState = {
-            "current_interaction_mode": mode,
-            "conversation_history": [{"role": "user", "content": "My answer"}],
-            # Other state fields...
+
+@pytest.mark.asyncio
+class TestLessonAIIntentClassification:  # Renamed class
+    """Tests for the intent classification logic (nodes.classify_intent)."""
+
+    # Basic state setup helper
+    def _get_base_state(
+        self, user_message: str = "Test message", history: list | None = None
+    ) -> LessonState:
+        """
+        Creates a base LessonState dictionary for testing.
+
+        Args:
+            user_message: The user message to add to the history. If None, no user message is added.
+            history: optional existing conversation history list. If None, a default is used.
+
+        Returns:
+            A LessonState dictionary populated with base values and the constructed history.
+        """
+        # Create a copy of the history to avoid mutating the input list.
+        # Use the default if history is None.
+        # Use list() constructor for clarity in creating a shallow copy.
+        current_history = (
+            list(history) if history is not None else list(DEFAULT_INITIAL_HISTORY)
+        )
+
+        # Append the user message if provided
+        if user_message:
+            current_history.append({"role": "user", "content": user_message})
+
+        # Provide a more complete base state matching LessonState TypedDict
+        return {
+            "topic": "Testing",
+            "knowledge_level": "beginner",
+            "syllabus": None,
+            "lesson_title": "Intent Test",
+            "module_title": "Module Test",
+            "generated_content": GeneratedLessonContent(
+                exposition_content="Some content."
+            ),
+            "user_responses": [],
+            "user_performance": {},
+            "user_id": "intent_user",
+            "lesson_uid": "intent_test_uid",
+            "created_at": "t",
+            "updated_at": "t",
+            "conversation_history": current_history,  # Use the processed history
+            "current_interaction_mode": "chatting",  # Initial mode before classification
+            "current_exercise_index": None,
+            "current_quiz_question_index": None,
+            "generated_exercises": [],
+            "generated_assessment_questions": [],
+            "generated_exercise_ids": [],
+            "generated_assessment_question_ids": [],
+            "error_message": None,
+            "active_exercise": None,
+            "active_assessment": None,
+            "potential_answer": None,
         }
-        # Call node function directly
-        route = nodes.route_message_logic(state)
-        assert route == "evaluate_chat_answer"
 
-    # Remove LessonAI init patches, update logger patch target
-    @patch("backend.ai.lessons.nodes.logger", MagicMock())
-    def test_route_message_logic_chatting_no_user_message(self):
-        """Test routing in chatting mode with no preceding user message."""
-        # lesson_ai = LessonAI() # Removed
-        state: LessonState = {
-            "current_interaction_mode": "chatting",
-            "conversation_history": [{"role": "assistant", "content": "Hi there!"}],
-            # Other state fields...
-        }
-        # Patch logger where it's used (nodes module)
-        with patch("backend.ai.lessons.nodes.logger.warning") as mock_warning:
-            # Call node function directly
-            route = nodes.route_message_logic(state)
-            assert route == "generate_chat_response"
-            mock_warning.assert_called_once()
-
-    # Update patches to target 'nodes' module
     @patch("backend.ai.lessons.nodes.load_prompt")
-    @patch("backend.ai.lessons.nodes.call_llm_with_json_parsing")
+    @patch(
+        "backend.ai.lessons.nodes.call_llm_with_json_parsing", new_callable=AsyncMock
+    )
     @patch("backend.ai.lessons.nodes.logger", MagicMock())
     @pytest.mark.parametrize(
-        "intent, expected_route",
+        "intent, user_message, expected_mode",
         [
-            ("request_exercise", "generate_new_exercise"), # Updated expected route
-            ("request_quiz", "generate_new_assessment_question"), # Updated expected route
-            ("ask_question", "generate_chat_response"),
-            ("other_chat", "generate_chat_response"),
-            ("unknown_intent", "generate_chat_response"),  # Test default for unknown
+            ("request_exercise", "Give me an exercise", "request_exercise"),
+            ("request_assessment", "Quiz me", "request_assessment"),
+            ("ask_question", "What is this?", "chatting"),
+            ("other_chat", "Okay thanks", "chatting"),
+            ("unknown_intent", "Gibberish", "chatting"),  # Test default for unknown
+            # Test answer submission without active task -> chatting
+            ("submit_answer", "My answer is 5", "chatting"),
         ],
     )
-    # Removed MockStateGraph from parameters
-    def test_route_message_logic_chatting_intent_classification(
-        self, mock_call_llm, MockLoadPrompt, intent, expected_route
+    async def test_classify_intent_no_active_task(
+        self, mock_call_llm, mock_load_prompt, intent, user_message, expected_mode
     ):
-        """Test routing based on LLM intent classification."""
-        # lesson_ai = LessonAI() # Removed
-        MockLoadPrompt.return_value = "mocked_prompt"
+        """Test intent classification routing when no task is active."""
+        mock_load_prompt.return_value = "mocked_intent_prompt"
         mock_call_llm.return_value = IntentClassificationResult(intent=intent)
 
-        state: LessonState = {
-            "current_interaction_mode": "chatting",
-            "conversation_history": [
-                {"role": "assistant", "content": "Hello"},
-                {"role": "user", "content": "Give me an exercise"},
-            ],
-            "user_id": "test_user",
-            # Other state fields...
-        }
+        state = self._get_base_state(user_message=user_message)
 
-        # Call node function directly
-        route = nodes.route_message_logic(state)
+        # Call the classify_intent node function
+        result_state = await nodes.classify_intent(state)
 
-        MockLoadPrompt.assert_called_once_with(
+        mock_load_prompt.assert_called_once_with(
             "intent_classification",
-            history_json=json.dumps(state["conversation_history"], indent=2),
-            user_input="Give me an exercise",
+            user_message=user_message,
+            conversation_history=ANY,  # History formatting is complex, check presence
+            topic="Testing",
+            lesson_title="Intent Test",
+            user_level="beginner",
+            exposition_summary="Some content.",
+            active_task_context="None",  # No active task
         )
         mock_call_llm.assert_called_once_with(
-            "mocked_prompt", validation_model=IntentClassificationResult
+            "mocked_intent_prompt",
+            validation_model=IntentClassificationResult,
+            max_retries=3,
         )
-        assert route == expected_route
-        # Check warning for unknown intent
-        if intent == "unknown_intent":
-            # Reset mock for the second call check
-            mock_call_llm.reset_mock()
-            mock_call_llm.return_value = IntentClassificationResult(intent=intent)
-            # Patch logger warning where it's used (nodes module)
-            with patch(
-                "backend.ai.lessons.nodes.logger.warning"
-            ) as mock_warning:
-                nodes.route_message_logic(state)  # Call again to check warning
-                mock_warning.assert_called_once()
+        # Check the interaction mode set in the returned state
+        assert result_state["current_interaction_mode"] == expected_mode
+        # Check potential_answer is NOT set when mode isn't submit_answer
+        if expected_mode != "submit_answer":
+            assert result_state.get("potential_answer") is None
 
-    # Update patches to target 'nodes' module
     @patch("backend.ai.lessons.nodes.load_prompt")
-    @patch("backend.ai.lessons.nodes.call_llm_with_json_parsing")
-    @patch("backend.ai.lessons.nodes.logger", MagicMock())
-    def test_route_message_logic_chatting_intent_failure(
-        self, mock_call_llm, MockLoadPrompt
-    ):
-        """Test routing default when intent classification fails."""
-        # lesson_ai = LessonAI() # Removed
-        MockLoadPrompt.return_value = "mocked_prompt"
-        mock_call_llm.return_value = None  # Simulate LLM/parsing failure
-
-        state: LessonState = {
-            "current_interaction_mode": "chatting",
-            "conversation_history": [
-                {"role": "assistant", "content": "Hello"},
-                {"role": "user", "content": "Something weird"},
-            ],
-            "user_id": "test_user",
-            # Other state fields...
-        }
-        # Patch logger where it's used (nodes module)
-        with patch("backend.ai.lessons.nodes.logger.warning") as mock_warning:
-            # Call node function directly
-            route = nodes.route_message_logic(state)
-            assert route == "generate_chat_response"  # Default route
-            mock_warning.assert_called_once()
-
-    # Update patches to target 'nodes' module
     @patch(
-        "backend.ai.lessons.nodes.load_prompt", # Target nodes
-        side_effect=Exception("LLM Error"),
+        "backend.ai.lessons.nodes.call_llm_with_json_parsing", new_callable=AsyncMock
     )
-    @patch(
-        "backend.ai.lessons.nodes.call_llm_with_json_parsing" # Target nodes
-    )  # Need to patch this even if not called
-    @patch("backend.ai.lessons.nodes.logger", MagicMock()) # Target nodes
-    def test_route_message_logic_chatting_intent_exception(
-        self, mock_call_llm, MockLoadPrompt_exc
-    ):
-        """Test routing default when an exception occurs during intent classification."""
-        # lesson_ai = LessonAI() # Removed
-
-        state: LessonState = {
-            "current_interaction_mode": "chatting",
-            "conversation_history": [
-                {"role": "assistant", "content": "Hello"},
-                {"role": "user", "content": "Something weird"},
-            ],
-            "user_id": "test_user",
-            # Other state fields...
-        }
-        # Patch logger where it's used (nodes module)
-        with patch("backend.ai.lessons.nodes.logger.error") as mock_error:
-            # Call node function directly
-            route = nodes.route_message_logic(state)
-            assert route == "generate_chat_response"  # Default route
-            mock_error.assert_called_once()
-            mock_call_llm.assert_not_called()  # Ensure LLM call was skipped
-
-    # Remove LessonAI init patches, update logger patch target
     @patch("backend.ai.lessons.nodes.logger", MagicMock())
-    def test_route_message_logic_unexpected_mode(self):
-        """Test routing default for an unexpected interaction mode."""
-        # lesson_ai = LessonAI() # Removed
-        state: LessonState = {
-            "current_interaction_mode": "unexpected_mode",
-            "conversation_history": [{"role": "user", "content": "My answer"}],
-            "user_id": "test_user",
-            # Other state fields...
-        }
-        # Patch logger where it's used (nodes module)
-        with patch("backend.ai.lessons.nodes.logger.warning") as mock_warning:
-            # Call node function directly
-            route = nodes.route_message_logic(state)
-            assert route == "generate_chat_response"
-            mock_warning.assert_called_once()
+    @pytest.mark.parametrize(
+        "intent, user_message, expected_mode",
+        [
+            # If user submits an answer while task is active, mode should be submit_answer
+            ("submit_answer", "The answer is B", "submit_answer"),
+            # If user asks for exercise while one is active, classify intent as request_exercise
+            (
+                "request_exercise",
+                "Give me another exercise",
+                "request_exercise",
+            ),  # Corrected expected mode
+            # If user asks question while task is active, treat as chat
+            ("ask_question", "Why is B correct?", "chatting"),
+        ],
+    )
+    async def test_classify_intent_with_active_task(
+        self, mock_call_llm, mock_load_prompt, intent, user_message, expected_mode
+    ):
+        """Test intent classification routing when an exercise/assessment is active."""
+        mock_load_prompt.return_value = "mocked_intent_prompt"
+        mock_call_llm.return_value = IntentClassificationResult(intent=intent)
+
+        # Simulate an active exercise
+        active_exercise = Exercise(id="ex1", type="mc", question="Active Q")
+        state = self._get_base_state(user_message=user_message)
+        state["active_exercise"] = active_exercise
+
+        # Call the classify_intent node function
+        result_state = await nodes.classify_intent(state)
+
+        # Corrected assertion: Remove extra whitespace from active_task_context
+        expected_task_context = (
+            f"Active Exercise: {active_exercise.type} - {active_exercise.question}"
+        )
+        mock_load_prompt.assert_called_once_with(
+            "intent_classification",
+            user_message=user_message,
+            conversation_history=ANY,
+            topic="Testing",
+            lesson_title="Intent Test",
+            user_level="beginner",
+            exposition_summary="Some content.",
+            active_task_context=expected_task_context,
+        )
+        mock_call_llm.assert_called_once_with(
+            "mocked_intent_prompt",
+            validation_model=IntentClassificationResult,
+            max_retries=3,
+        )
+        assert result_state["current_interaction_mode"] == expected_mode
+        # Check potential_answer is set correctly for submit_answer mode
+        if expected_mode == "submit_answer":
+            assert result_state.get("potential_answer") == user_message
+        else:
+            assert result_state.get("potential_answer") is None
+
+    @patch("backend.ai.lessons.nodes.load_prompt")
+    @patch(
+        "backend.ai.lessons.nodes.call_llm_with_json_parsing",
+        new_callable=AsyncMock,
+        return_value=None,
+    )  # Simulate LLM failure
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())
+    async def test_classify_intent_llm_failure(self, mock_call_llm, mock_load_prompt):
+        """Test routing default when intent classification LLM call fails."""
+        mock_load_prompt.return_value = "mocked_intent_prompt"
+        state = self._get_base_state(user_message="Something weird")
+
+        # Patch logger error for assertion
+        with patch("backend.ai.lessons.nodes.logger.error") as mock_logger_error:
+            result_state = await nodes.classify_intent(state)
+
+            mock_call_llm.assert_called_once()
+            mock_logger_error.assert_called_once()  # Check error was logged
+            # Should default to chatting on failure
+            assert result_state["current_interaction_mode"] == "chatting"
+
+    @patch("backend.ai.lessons.nodes.load_prompt", side_effect=Exception("LLM Error"))
+    @patch(
+        "backend.ai.lessons.nodes.call_llm_with_json_parsing", new_callable=AsyncMock
+    )
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())
+    async def test_classify_intent_exception(self, mock_call_llm, mock_load_prompt_exc):
+        """Test routing default when an exception occurs during intent classification."""
+        state = self._get_base_state(user_message="Something weird")
+
+        # Patch logger error for assertion
+        with patch("backend.ai.lessons.nodes.logger.error") as mock_logger_error:
+            result_state = await nodes.classify_intent(state)
+
+            mock_load_prompt_exc.assert_called_once()  # Prompt load failed
+            mock_call_llm.assert_not_called()  # LLM call skipped
+            mock_logger_error.assert_called_once()  # Check error was logged
+            # Should default to chatting on exception
+            assert result_state["current_interaction_mode"] == "chatting"
+
+    @patch("backend.ai.lessons.nodes.logger", MagicMock())
+    async def test_classify_intent_no_user_message(self):
+        """Test classification when the last message isn't from the user."""
+        state = self._get_base_state(user_message=None)  # No user message added
+
+        # Patch logger warning for assertion
+        with patch("backend.ai.lessons.nodes.logger.warning") as mock_logger_warning:
+            result_state = await nodes.classify_intent(state)
+
+            mock_logger_warning.assert_called_once()  # Check warning was logged
+            # Should default to chatting if no user message
+            assert result_state["current_interaction_mode"] == "chatting"

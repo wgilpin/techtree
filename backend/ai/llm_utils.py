@@ -188,6 +188,49 @@ def call_llm_with_json_parsing(
         return parsed_json
 
 
+def call_llm_plain_text(
+    prompt: str, max_retries: int = 3, initial_delay: float = 1.0
+) -> Optional[str]:
+    """
+    Calls the configured LLM and returns the plain text response.
+
+    Args:
+        prompt: The prompt string to send to the LLM.
+        max_retries: Maximum retries for the LLM call (for quota errors).
+        initial_delay: Initial delay for retries.
+
+    Returns:
+        The plain text response string from the LLM, or None if the call fails
+        after retries.
+    """
+    if MODEL is None:
+        logger.error("LLM MODEL not configured. Cannot make API call.")
+        return None
+
+    try:
+        # Use call_with_retry for the actual API call
+        response = call_with_retry(
+            MODEL.generate_content,
+            prompt,
+            max_retries=max_retries,
+            initial_delay=initial_delay,
+        )
+        response_text = response.text
+        logger.debug(
+            f"Raw LLM response (plain text): {response_text[:500]}..."
+        )
+        return response_text
+
+    except ResourceExhausted:
+        logger.error(
+            "LLM call failed after multiple retries due to resource exhaustion."
+        )
+        return None
+    except Exception as e:
+        logger.error(f"LLM call failed with unexpected error: {e}", exc_info=True)
+        return None
+
+
 # Example Usage / Simple Test Block
 if __name__ == "__main__":
     #Runs simple tests when the script is executed directly.
@@ -204,6 +247,8 @@ if __name__ == "__main__":
     TEST_PROMPT_INVALID_MODEL = (
         'Respond with ONLY the following JSON: {"status_code": 200}'
     )
+    TEST_PROMPT_PLAIN = "Explain the concept of recursion in one sentence."
+
 
     print("\n--- Testing call_llm_with_json_parsing ---")
 
@@ -244,5 +289,15 @@ if __name__ == "__main__":
     if result4:
         print(f"Result: {result4}")
         print(f"Is dictionary: {isinstance(result4, dict)}")
+    else:
+        print("Failed.")
+
+    print("\n--- Testing call_llm_plain_text ---")
+    # Test 5: Plain text call
+    print("\nTest 5: Plain Text Call")
+    result5 = call_llm_plain_text(TEST_PROMPT_PLAIN)
+    if result5:
+        print(f"Result: {result5}")
+        print(f"Is string: {isinstance(result5, str)}")
     else:
         print("Failed.")
