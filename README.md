@@ -6,14 +6,14 @@ This project demonstrates a simple adaptive learning quiz using the Gemini API, 
 
 The Tech Tree application is an adaptive learning system that:
 
-1. Asks the user to choose a topic
-2. Searches the internet for information about the topic using the Tavily API
-3. Generates questions of varying difficulty (easy, medium, hard) based on the retrieved information
-4. Adjusts the difficulty based on the user's performance:
-   - If the user answers a question correctly, the difficulty increases
-   - If the user answers incorrectly, the difficulty remains the same
-   - If the user answers two questions incorrectly in a row, the quiz ends
-5. Provides a final assessment of the user's knowledge level based on a weighted score
+1.  Asks the user to choose a topic
+2.  Searches the internet for information about the topic using the Tavily API
+3.  Generates questions of varying difficulty (easy, medium, hard) based on the retrieved information
+4.  Adjusts the difficulty based on the user's performance:
+    *   If the user answers a question correctly, the difficulty increases
+    *   If the user answers incorrectly, the difficulty remains the same
+    *   If the user answers two questions incorrectly in a row, the quiz ends
+5.  Provides a final assessment of the user's knowledge level based on a weighted score
 
 The questions are generated based on the latest information available online, making them accurate and up-to-date.
 
@@ -101,24 +101,32 @@ The Streamlit app (`streamlit_app/app.py`) provides a more user-friendly chat-ba
 
 4.  **Create a `.env` file:**
 
-    Create a file named `.env` in the root directory of the project. Add the following lines to the file, replacing `YOUR_XXX_API_KEY` with your actual API keys and setting the backend API URL:
+    Create a file named `.env` in the root directory of the project. Add the following lines to the file, replacing `YOUR_XXX_API_KEY` and `YOUR_SECRET_KEY` with your actual keys and setting the backend API URL:
 
-    ```
+    ```dotenv
+    # Environment variables for TechTree
+
     # Required API Keys
     GEMINI_API_KEY=YOUR_GEMINI_API_KEY
     TAVILY_API_KEY=YOUR_TAVILY_API_KEY
 
     # URL for the backend API server (used by the Flask frontend)
     API_URL="http://localhost:8000"
+
+    # Secret key for signing JWT authentication tokens
+    # Ensure this is a strong, unique secret
+    SECRET_KEY=YOUR_SECRET_KEY
+
+    # Optional LangSmith Tracing
+    # LANGSMITH_TRACING=true
+    # LANGSMITH_ENDPOINT="https://api.smith.langchain.com"
+    # LANGSMITH_API_KEY=YOUR_LANGSMITH_API_KEY
+
+    # Optional Gemini Model Override
+    # GEMINI_MODEL=gemini-1.5-pro-latest
     ```
 
-    Recommended but not required is free [LangSmith](https://www.langchain.com/langsmith) tracing. To use it, add the lines
-
-    ```
-    LANGSMITH_TRACING=true
-    LANGSMITH_ENDPOINT="https://api.smith.langchain.com"
-    LANGSMITH_API_KEY=<YOUR LANGSMITH API KEY>
-    ```
+    **Note:** The `SECRET_KEY` is crucial for securing user authentication. Make sure it's a strong, randomly generated secret and keep it private.
 
 ## Running the application
 
