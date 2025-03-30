@@ -88,11 +88,6 @@ def deserialize_state_data(state_dict: Dict[str, Any]) -> LessonState:
             logger.error(f"Failed to deserialize active_assessment: {e}")
             deserialized_state["active_assessment"] = None
 
-    # Deserialize conversation_history (assuming dicts are okay)
-    if not isinstance(deserialized_state.get("conversation_history"), list):
-        logger.warning("Conversation history is not a list, resetting.")
-        deserialized_state["conversation_history"] = []
-
     # Deserialize generated_exercises
     if isinstance(deserialized_state.get("generated_exercises"), list):
         try:
@@ -223,7 +218,7 @@ class LessonInteractionService:
         syllabus_id: str,
         module_index: int,
         lesson_index: int,
-    ) -> Tuple[Optional[LessonState], Optional[GeneratedLessonContent]]:
+    ) -> Tuple[Optional[LessonState], Optional[GeneratedLessonContent], Optional[str]]: # Added progress_id
         """
         Loads existing lesson state or initializes a new one if not found.
         Also fetches the static lesson content.
@@ -326,7 +321,7 @@ class LessonInteractionService:
                 "lesson_uid": f"{syllabus_id}_{module_index}_{lesson_index}",
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "updated_at": datetime.now(timezone.utc).isoformat(),
-                "conversation_history": [],
+                # "conversation_history": [], # Removed, handled by separate table
                 "current_interaction_mode": "chatting",
                 "current_exercise_index": None,
                 "current_quiz_question_index": None,
@@ -369,7 +364,9 @@ class LessonInteractionService:
                 logger.error(f"Failed to save initial lesson state: {e}", exc_info=True)
                 raise RuntimeError("Failed to save initial lesson state.") from e
 
-        return lesson_state, lesson_content
+        # Get progress_id from the record (it might be None if initialization failed before saving)
+        progress_id = progress_record.get("progress_id") if progress_record else None
+        return lesson_state, lesson_content, progress_id
 
     async def get_or_create_lesson_state(
         self,
@@ -397,7 +394,8 @@ class LessonInteractionService:
         if user_id:
             # --- Authenticated User Flow ---
             try:
-                loaded_state, loaded_content = await self._load_or_initialize_state(
+                # Unpack 3 values, ignore progress_id with '_'
+                loaded_state, loaded_content, _ = await self._load_or_initialize_state(
                     user_id, syllabus_id, module_index, lesson_index
                 )
                 lesson_state = loaded_state
@@ -485,65 +483,133 @@ class LessonInteractionService:
             f"{syllabus_id}/{module_index}/{lesson_index}"
         )
         try:
-            # 1. Load current state
-            current_state, _ = await self._load_or_initialize_state(
+            # 1. Load current state and progress_id
+            current_state, _, progress_id = await self._load_or_initialize_state(
                 user_id, syllabus_id, module_index, lesson_index
             )
             if not current_state:
+                # Error already logged in _load_or_initialize_state if content failed
                 raise RuntimeError("Failed to load or initialize lesson state.")
+            if not progress_id:
+                 # This case happens if initialization failed before the first save
+                 logger.error(f"Failed to retrieve progress_id for user {user_id}, lesson {syllabus_id}/{module_index}/{lesson_index}. State might be new and unsaved.")
+                 raise RuntimeError("Failed to retrieve progress ID. Cannot process chat turn.")
 
-            # 2. Invoke the LessonAI graph
-            updated_state = self.lesson_ai.process_chat_turn(
-                current_state=current_state, user_message=user_message
+            # 2. Save incoming user message
+            try:
+                self.db_service.save_conversation_message(
+                    progress_id=progress_id,
+                    role="user",
+                    message_type="CHAT_USER", # Simplified user type
+                    content=user_message
+                )
+            except Exception as save_err:
+                 logger.error(f"Failed to save user message to history: {save_err}", exc_info=True)
+                 # Logged error, proceed with turn but history context might be incomplete
+
+            # 3. Get current history for AI context
+            history = self.db_service.get_conversation_history(progress_id)
+
+            # 4. Invoke the LessonAI graph (ASSUMES MODIFIED SIGNATURE AND RETURN VALUE)
+            # Pass history, expect updated state and list of new assistant messages back
+            # TODO: Modify LessonAI.process_chat_turn signature and implementation
+            updated_state, new_assistant_messages = self.lesson_ai.process_chat_turn(
+                current_state=current_state,
+                user_message=user_message,
+                history=history # Pass history to AI
             )
 
-            # 3. Save the updated state back to the database
+            # 5. Save new assistant messages to history
+            saved_assistant_messages_for_response = []
+            if isinstance(new_assistant_messages, list):
+                for msg_data in new_assistant_messages:
+                    if isinstance(msg_data, dict) and msg_data.get("role") == "assistant":
+                        # Determine message type based on interaction mode in updated_state
+                        interaction_mode = updated_state.get("current_interaction_mode", "chatting")
+                        message_type = "CHAT_ASSISTANT" # Default
+                        if interaction_mode == "awaiting_answer":
+                            # Check if feedback is related to exercise or assessment
+                            # This logic might need refinement based on how feedback is structured
+                            if updated_state.get("active_exercise"):
+                                message_type = "EXERCISE_FEEDBACK"
+                            elif updated_state.get("active_assessment"):
+                                message_type = "ASSESSMENT_FEEDBACK"
+                        elif interaction_mode == "error":
+                             message_type = "ERROR"
+                        # Add other specific types if needed (e.g., SYSTEM_INFO)
+
+                        try:
+                            self.db_service.save_conversation_message(
+                                progress_id=progress_id,
+                                role="assistant",
+                                message_type=message_type,
+                                content=msg_data.get("content", ""),
+                                metadata=msg_data.get("metadata") # Pass optional metadata if AI provides it
+                            )
+                            # Add to list to return to frontend
+                            saved_assistant_messages_for_response.append(
+                                {"role": "assistant", "content": msg_data.get("content", "")}
+                            )
+                        except Exception as save_err:
+                            logger.error(f"Failed to save assistant message to history: {save_err}", exc_info=True)
+                            # Add to response even if save failed, maybe with an indicator?
+                            saved_assistant_messages_for_response.append(
+                                {"role": "assistant", "content": f"[Save Error] {msg_data.get('content', '')}"}
+                            )
+
+            # 6. Save the updated state (without history) back to the database
             try:
-                # Cast before serializing
-                state_json = serialize_state_data(cast(LessonState, updated_state))
+                # Ensure state is serializable (should be handled by serialize_state_data)
+                # updated_state should be compatible with LessonState after graph execution
+                state_json = serialize_state_data(updated_state)
                 lesson_db_id = updated_state.get("lesson_db_id")
-                # Ensure lesson_db_id is int or None before saving
                 if lesson_db_id is not None and not isinstance(lesson_db_id, int):
-                     logger.error(f"Invalid lesson_db_id type ({type(lesson_db_id)}) before saving chat turn.")
-                     lesson_db_id = None # Or raise error
+                     logger.error(f"Invalid lesson_db_id type ({type(lesson_db_id)}) before saving state after chat turn.")
+                     lesson_db_id = None
+
+                # Determine status based on state if possible, otherwise default to in_progress
+                status = "in_progress" # TODO: Potentially update based on state logic
 
                 self.db_service.save_user_progress(
                     user_id=user_id,
                     syllabus_id=syllabus_id,
                     module_index=module_index,
                     lesson_index=lesson_index,
-                    status="in_progress",
+                    status=status,
                     lesson_id=lesson_db_id,
                     lesson_state_json=state_json,
+                    # score=updated_state.get("score") # Add score if relevant here
                 )
-                logger.info(f"Saved updated state for user {user_id}.")
+                logger.info(f"Saved updated state for user {user_id} after chat turn.")
             except Exception as e:
-                logger.error(f"Failed to save updated lesson state: {e}", exc_info=True)
-                raise RuntimeError("Failed to save updated lesson state.") from e
+                logger.error(f"Failed to save updated lesson state after chat turn: {e}", exc_info=True)
+                # Logged error, but proceed to return messages if any were generated
 
-            # 4. Prepare response for the router
-            new_messages = []
-            num_current_messages = len(current_state.get("conversation_history", []))
-            updated_history = updated_state.get("conversation_history", [])
-            if isinstance(updated_history, list) and len(updated_history) > num_current_messages:
-                for msg in updated_history[num_current_messages:]:
-                    if isinstance(msg, dict) and msg.get("role") == "assistant":
-                        new_messages.append(
-                            {"role": msg.get("role"), "content": msg.get("content")}
-                        )
-
+            # 7. Prepare response for the router
             error_message = updated_state.get("error_message")
-            response_payload: Dict[str, Any] = {"responses": new_messages}
+            response_payload: Dict[str, Any] = {"responses": saved_assistant_messages_for_response}
             if error_message:
+                # If there was an error message in the state, ensure it's included
+                # even if it wasn't saved as a separate history message of type ERROR
                 response_payload["error"] = error_message
+                # Optionally, save this error message to history as well
+                try:
+                     self.db_service.save_conversation_message(
+                         progress_id=progress_id, role="system", message_type="ERROR", content=error_message
+                     )
+                except Exception as save_err:
+                     logger.error(f"Failed to save error message to history: {save_err}", exc_info=True)
+
 
             return response_payload
 
         except ValueError as e:
             logger.error(f"Value error during chat turn: {e}", exc_info=True)
-            raise e
+            raise e # Re-raise specific value errors
         except Exception as e:
             logger.error(f"Unexpected error during chat turn: {e}", exc_info=True)
+            # Generic error response if something else went wrong
+            return {"responses": [], "error": "An internal server error occurred during chat processing."}
             return {"responses": [], "error": "An internal server error occurred."}
 
     async def generate_exercise(
@@ -552,7 +618,7 @@ class LessonInteractionService:
         syllabus_id: str,
         module_index: int,
         lesson_index: int,
-    ) -> Optional[Exercise]:
+    ) -> Dict[str, Any]: # Return dict for router
         """
         Handles the request to generate a new exercise on demand.
         """
@@ -561,21 +627,28 @@ class LessonInteractionService:
             f"{syllabus_id}/{module_index}/{lesson_index}"
         )
         try:
-            # 1. Load current state
-            current_state, _ = await self._load_or_initialize_state(
+            # 1. Load current state and progress_id
+            current_state, _, progress_id = await self._load_or_initialize_state(
                 user_id, syllabus_id, module_index, lesson_index
             )
             if not current_state:
                 raise RuntimeError("Failed to load or initialize lesson state.")
+            if not progress_id:
+                 logger.error(f"Failed to retrieve progress_id for user {user_id}, lesson {syllabus_id}/{module_index}/{lesson_index}.")
+                 raise RuntimeError("Failed to retrieve progress ID. Cannot generate exercise.")
 
             # 2. Call the generation node (cast state to Dict)
-            updated_state_dict, new_exercise_obj = nodes.generate_new_exercise(
+            # TODO: Ideally, modify node to not add messages to state directly
+            updated_state_dict, new_exercise_obj, assistant_message_dict = nodes.generate_new_exercise(
                 cast(Dict[str, Any], current_state)
             )
             updated_state = cast(LessonState, updated_state_dict) # Cast result back
 
-            # 3. Format and append exercise to conversation history BEFORE saving
+            # 3. Process generated exercise or failure message
             validated_exercise: Optional[Exercise] = None
+            assistant_message_content: Optional[str] = None
+            message_type: str = "SYSTEM_INFO" # Default type
+
             if isinstance(new_exercise_obj, Exercise):
                 validated_exercise = new_exercise_obj
             elif isinstance(new_exercise_obj, dict):
@@ -585,29 +658,40 @@ class LessonInteractionService:
                      logger.error("Failed to validate exercise dict returned from node.")
 
             if validated_exercise:
-                formatted_exercise_html = _format_exercise_for_chat_history(validated_exercise)
-                exercise_message = {
-                    "role": "assistant",
-                    "content": formatted_exercise_html,
-                    # Add timestamp or other metadata if needed
-                }
-                # Ensure conversation_history exists and is a list
-                if not isinstance(updated_state.get("conversation_history"), list):
-                    logger.warning("conversation_history missing or not a list, initializing.")
-                    updated_state["conversation_history"] = []
-                # Append the formatted exercise message
-                updated_state["conversation_history"].append(exercise_message)
-                logger.info("Appended generated exercise to conversation history.")
+                # Format and save exercise prompt
+                assistant_message_content = _format_exercise_for_chat_history(validated_exercise)
+                message_type = "EXERCISE_PROMPT"
+                logger.info(f"Generated exercise {validated_exercise.id} for progress {progress_id}")
             else:
-                logger.warning("No valid exercise object generated, cannot append to history.")
+                # Exercise generation failed or returned invalid object
+                error_msg_from_state = updated_state.get("error_message")
+                if error_msg_from_state:
+                     assistant_message_content = error_msg_from_state
+                     logger.warning(f"Exercise generation failed for progress {progress_id}. Using error message from state: {assistant_message_content}")
+                else:
+                     logger.warning(f"Exercise generation failed for progress {progress_id}, and no error message found in state.")
+                     assistant_message_content = "Sorry, I couldn't generate an exercise right now." # Generic fallback
+                message_type = "ERROR"
 
 
-            # 4. Save the updated state (which now includes the exercise message)
+            # 4. Save the assistant message (exercise or failure) to history
+            if assistant_message_content:
+                try:
+                    self.db_service.save_conversation_message(
+                        progress_id=progress_id,
+                        role="assistant",
+                        message_type=message_type,
+                        content=assistant_message_content,
+                        metadata={"exercise_id": validated_exercise.id} if validated_exercise else None
+                    )
+                except Exception as save_err:
+                    logger.error(f"Failed to save exercise/failure message to history: {save_err}", exc_info=True)
+                    # Continue, but the history record is missing
+
+            # 5. Save the updated state (without history)
             try:
-                # Cast before serializing
                 state_json = serialize_state_data(updated_state)
                 lesson_db_id = updated_state.get("lesson_db_id")
-                # Ensure lesson_db_id is int or None before saving
                 if lesson_db_id is not None and not isinstance(lesson_db_id, int):
                      logger.error(f"Invalid lesson_db_id type ({type(lesson_db_id)}) before saving exercise state.")
                      lesson_db_id = None
@@ -633,28 +717,22 @@ class LessonInteractionService:
                     "Failed to save state after exercise generation."
                 ) from e
 
-            # 4. Return the generated exercise object
-            if isinstance(new_exercise_obj, Exercise):
-                return new_exercise_obj
-            elif isinstance(new_exercise_obj, dict):
-                 try:
-                     return Exercise.model_validate(new_exercise_obj)
-                 except ValidationError:
-                     logger.error("Failed to validate exercise dict returned from node.")
-                     return None
-            else:
-                return None
+            # 6. Return the generated exercise object and the message content in a dict
+            return {
+                 "exercise": validated_exercise.model_dump(mode='json') if validated_exercise else None,
+                 "message": assistant_message_content # Return the message determined earlier
+            }
 
-        except ValueError as e:
-            logger.error(f"Value error during exercise generation: {e}", exc_info=True)
-            raise e
-        except Exception as e:
+        except ValueError as e: # Specific exception first
+             logger.error(f"Value error during exercise generation: {e}", exc_info=True)
+             # Return dict indicating failure
+             return {"exercise": None, "message": str(e)}
+        except Exception as e: # Generic exception last
             logger.error(
                 f"Unexpected error during exercise generation: {e}", exc_info=True
             )
-            raise RuntimeError(
-                "Failed to generate exercise due to an internal error."
-            ) from e
+            # Return dict indicating failure
+            return {"exercise": None, "message": "An internal server error occurred while generating the exercise."}
 
     async def generate_assessment_question(
         self,
@@ -662,29 +740,34 @@ class LessonInteractionService:
         syllabus_id: str,
         module_index: int,
         lesson_index: int,
-    ) -> Optional[AssessmentQuestion]:
+    ) -> Dict[str, Any]: # Changed return type to Dict
         """
         Handles the request to generate a new assessment question on demand.
+        Returns a dictionary containing the question object (if successful) and the message content.
         """
         logger.info(
             f"Generating assessment question for user {user_id}, lesson "
             f"{syllabus_id}/{module_index}/{lesson_index}"
         )
         try:
-            # 1. Load current state
-            current_state, _ = await self._load_or_initialize_state(
+            # 1. Load current state and progress_id
+            current_state, _, progress_id = await self._load_or_initialize_state(
                 user_id, syllabus_id, module_index, lesson_index
             )
             if not current_state:
                 raise RuntimeError("Failed to load or initialize lesson state.")
+            if not progress_id:
+                 logger.error(f"Failed to retrieve progress_id for user {user_id}, lesson {syllabus_id}/{module_index}/{lesson_index}.")
+                 raise RuntimeError("Failed to retrieve progress ID. Cannot generate assessment.")
 
             # 2. Call the generation node (cast state to Dict)
-            updated_state_dict, new_question_obj = nodes.generate_new_assessment(
+            # TODO: Ideally, modify node to not add messages to state directly
+            updated_state_dict, new_question_obj, assistant_message_dict = nodes.generate_new_assessment(
                 cast(Dict[str, Any], current_state)
             )
             updated_state = cast(LessonState, updated_state_dict) # Cast result back
 
-            # 3. Format and append assessment question to conversation history BEFORE saving
+            # 3. Process generated question object
             validated_question: Optional[AssessmentQuestion] = None
             if isinstance(new_question_obj, AssessmentQuestion):
                 validated_question = new_question_obj
@@ -694,21 +777,187 @@ class LessonInteractionService:
                  except ValidationError:
                      logger.error("Failed to validate assessment dict returned from node.")
 
-            if validated_question:
-                formatted_question_html = _format_assessment_question_for_chat_history(validated_question)
-                question_message = {
-                    "role": "assistant",
-                    "content": formatted_question_html,
-                }
-                # Ensure conversation_history exists and is a list
-                if not isinstance(updated_state.get("conversation_history"), list):
-                    logger.warning("conversation_history missing or not a list, initializing.")
-                    updated_state["conversation_history"] = []
-                # Append the formatted question message
-                updated_state["conversation_history"].append(question_message)
-                logger.info("Appended generated assessment question to conversation history.")
+            # 4. Determine message content and type from node's return
+            assistant_message_content: Optional[str] = None
+            message_type: str = "SYSTEM_INFO" # Default type
+            if isinstance(assistant_message_dict, dict):
+                assistant_message_content = assistant_message_dict.get("content")
+                # Infer type based on success/failure
+                if validated_question:
+                    message_type = "ASSESSMENT_PROMPT"
+                else:
+                    # Assume failure message is ERROR type if no question generated
+                    message_type = "ERROR"
             else:
-                logger.warning("No valid assessment question object generated, cannot append to history.")
+                # Fallback if node didn't return a message dict
+                logger.warning("Node generate_new_assessment did not return a message dictionary.")
+                if validated_question:
+                     assistant_message_content = "Generated assessment question." # Generic success
+                     message_type = "ASSESSMENT_PROMPT"
+                else:
+                     assistant_message_content = "Failed to generate assessment question." # Generic failure
+                     message_type = "ERROR"
+
+
+            # 5. Save the assistant message (question prompt or failure) to history
+            if assistant_message_content:
+                try:
+                    self.db_service.save_conversation_message(
+                        progress_id=progress_id,
+                        role="assistant",
+                        message_type=message_type,
+                        content=assistant_message_content,
+                        metadata={"assessment_question_id": validated_question.id} if validated_question else None
+                    )
+                except Exception as save_err:
+                    logger.error(f"Failed to save assessment/failure message to history: {save_err}", exc_info=True)
+                    # Continue, but history record is missing
+
+            # 6. Save the updated state (without history)
+            try:
+                state_json = serialize_state_data(updated_state)
+                lesson_db_id = updated_state.get("lesson_db_id")
+                if lesson_db_id is not None and not isinstance(lesson_db_id, int):
+                     logger.error(f"Invalid lesson_db_id type ({type(lesson_db_id)}) before saving assessment state.")
+                     lesson_db_id = None
+
+                self.db_service.save_user_progress(
+                    user_id=user_id,
+                    syllabus_id=syllabus_id,
+                    module_index=module_index,
+                    lesson_index=lesson_index,
+                    status="in_progress", # Assuming generating assessment keeps it in progress
+                    lesson_id=lesson_db_id,
+                    lesson_state_json=state_json,
+                )
+                logger.info(
+                    f"Saved updated state after assessment generation attempt for user {user_id}."
+                )
+            except Exception as e:
+                logger.error(f"Failed to save updated lesson state after assessment generation: {e}", exc_info=True)
+                # If state save fails, the generated assessment might be lost on next load
+
+            # 7. Return the generated question object (or None) and the message content
+            return {
+                 "question": validated_question.model_dump(mode='json') if validated_question else None,
+                 "message": assistant_message_content # Return the message shown to the user
+            }
+
+        except ValueError as e: # Specific exceptions first
+             logger.error(f"Value error during assessment generation: {e}", exc_info=True)
+             return {"question": None, "message": str(e)}
+        except Exception as e: # Generic exception last
+            logger.error(f"Unexpected error during assessment generation: {e}", exc_info=True)
+            return {"question": None, "message": "An internal server error occurred while generating the assessment question."}
+            if not current_state:
+                raise RuntimeError("Failed to load or initialize lesson state.")
+            if not progress_id:
+                 logger.error(f"Failed to retrieve progress_id for user {user_id}, lesson {syllabus_id}/{module_index}/{lesson_index}.")
+                 raise RuntimeError("Failed to retrieve progress ID. Cannot generate assessment.")
+
+            # 2. Call the generation node (cast state to Dict)
+            # TODO: Ideally, modify node to not add messages to state directly
+            updated_state_dict, new_question_obj, assistant_message_dict = nodes.generate_new_assessment(
+                cast(Dict[str, Any], current_state)
+            )
+            updated_state = cast(LessonState, updated_state_dict) # Cast result back
+
+            # 3. Process generated question or failure message
+            # Variables are defined within the if/else blocks below
+
+            if isinstance(new_question_obj, AssessmentQuestion):
+                validated_question = new_question_obj
+            elif isinstance(new_question_obj, dict):
+                 try:
+                     validated_question = AssessmentQuestion.model_validate(new_question_obj)
+                 except ValidationError:
+                     logger.error("Failed to validate assessment dict returned from node.")
+
+            if validated_question:
+                # Format and save assessment prompt
+                assistant_message_content = _format_assessment_question_for_chat_history(validated_question)
+                message_type = "ASSESSMENT_PROMPT"
+                logger.info(f"Generated assessment question {validated_question.id} for progress {progress_id}")
+            else:
+                # Extract failure message added by the node (assuming it adds one)
+                # This part is fragile and depends on node implementation
+                # We should ideally modify the node to return the message instead of relying on state diff
+                original_history = current_state.get("conversation_history", []) # History before node call (will be empty/None now)
+                current_history = updated_state.get("conversation_history", []) # History after node call (if node still modifies it)
+                if isinstance(current_history, list) and len(current_history) > len(original_history):
+                     last_message = current_history[-1]
+                     if isinstance(last_message, dict) and last_message.get("role") == "assistant":
+                         assistant_message_content = last_message.get("content")
+                         message_type = "ERROR"
+                         logger.warning(f"Assessment generation failed for progress {progress_id}. Extracted message: {assistant_message_content}")
+                     else:
+                          logger.warning(f"Assessment generation failed for progress {progress_id}, but no assistant message found in state diff.")
+                          assistant_message_content = "Sorry, I encountered an issue generating an assessment question."
+                          message_type = "ERROR"
+                else:
+                     # If node doesn't add to history anymore, check for error message in state
+                     error_msg_from_state = updated_state.get("error_message")
+                     if error_msg_from_state:
+                          assistant_message_content = error_msg_from_state
+                          message_type = "ERROR"
+                          logger.warning(f"Assessment generation failed for progress {progress_id}. Using error message from state: {assistant_message_content}")
+                     else:
+                          logger.warning(f"Assessment generation failed for progress {progress_id}, and no message found.")
+                          assistant_message_content = "Sorry, I couldn't generate an assessment question right now."
+                          message_type = "ERROR"
+
+
+            # 4. Save the assistant message (question or failure) to history
+            if assistant_message_content:
+                try:
+                    self.db_service.save_conversation_message(
+                        progress_id=progress_id,
+                        role="assistant",
+                        message_type=message_type,
+                        content=assistant_message_content,
+                        metadata={"assessment_question_id": validated_question.id} if validated_question else None
+                    )
+                except Exception as save_err:
+                    logger.error(f"Failed to save assessment/failure message to history: {save_err}", exc_info=True)
+                    # Continue, but history record is missing
+
+            # 5. Save the updated state (without history)
+            try:
+                state_json = serialize_state_data(updated_state)
+                lesson_db_id = updated_state.get("lesson_db_id")
+                if lesson_db_id is not None and not isinstance(lesson_db_id, int):
+                     logger.error(f"Invalid lesson_db_id type ({type(lesson_db_id)}) before saving assessment state.")
+                     lesson_db_id = None
+
+                self.db_service.save_user_progress(
+                    user_id=user_id,
+                    syllabus_id=syllabus_id,
+                    module_index=module_index,
+                    lesson_index=lesson_index,
+                    status="in_progress", # Assuming generating assessment keeps it in progress
+                    lesson_id=lesson_db_id,
+                    lesson_state_json=state_json,
+                )
+                logger.info(
+                    f"Saved updated state after assessment generation attempt for user {user_id}."
+                )
+            except Exception as e:
+                logger.error(f"Failed to save updated lesson state after assessment generation: {e}", exc_info=True)
+                # If state save fails, the generated assessment might be lost on next load
+
+            # 6. Return the generated question object (or None) and the message content
+            return {
+                 "question": validated_question.model_dump(mode='json') if validated_question else None,
+                 "message": assistant_message_content # Return the message shown to the user
+            }
+
+        except ValueError as e:
+             logger.error(f"Value error during assessment generation: {e}", exc_info=True)
+             # Return None or raise specific exception? Returning a dict indicates failure.
+             return {"question": None, "message": str(e)}
+        except Exception as e:
+            logger.error(f"Unexpected error during assessment generation: {e}", exc_info=True)
+            return {"question": None, "message": "An internal server error occurred while generating the assessment question."}
 
 
             # 4. Save the updated state (which now includes the assessment message)
@@ -824,10 +1073,10 @@ class LessonInteractionService:
             logger.info(f"Progress updated successfully for user {user_id}.")
             return {"status": "success", "progress_id": progress_id}
 
-        except ValueError as e:
+        except ValueError as e: # Specific exception first
             logger.error(f"Value error updating progress: {e}", exc_info=True)
             raise e
-        except Exception as e:
+        except Exception as e: # Generic exception last
             logger.error(f"Unexpected error updating progress: {e}", exc_info=True)
             raise RuntimeError(
                 "Failed to update progress due to an internal error."

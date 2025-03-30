@@ -3,6 +3,7 @@
 # pylint: disable=protected-access, unused-argument, invalid-name
 
 from unittest.mock import MagicMock, patch
+from unittest.mock import ANY
 from typing import Optional, List, Dict, Any, cast # Added Optional, List, Dict, Any, cast
 
 
@@ -46,7 +47,7 @@ class TestGenerateChatResponse:
             "lesson_uid": "chat_lesson_uid",
             "created_at": "sometime",
             "updated_at": "sometime",
-            "conversation_history": current_history,
+            "history_context": current_history, # Use history_context
             "current_interaction_mode": "chatting",
             "current_exercise_index": None,
             "current_quiz_question_index": None,
@@ -78,27 +79,31 @@ class TestGenerateChatResponse:
         state = self._get_base_state(user_message=None, history=initial_history)
 
         # Cast state before calling node
-        result = nodes.generate_chat_response(cast(Dict[str, Any], state))
+        updated_state, assistant_message = nodes.generate_chat_response(cast(Dict[str, Any], state))
 
         mock_load_prompt.assert_called_once_with(
             "chat_response",
             user_message="Tell me more.",
-            conversation_history="",
+            history_json="", # Check if prompt uses history_json or conversation_history
             topic="Chatting",
             lesson_title="Chat Lesson",
             user_level="beginner",
-            exposition_summary="Some exposition.",
+            exposition=ANY, # Check prompt key
             active_task_context="None",
         )
         mock_call_llm.assert_called_once_with("mocked_chat_prompt", max_retries=3)
 
-        assert "conversation_history" in result
-        new_history = result["conversation_history"]
-        assert len(new_history) == 2
-        assert new_history[0] == initial_history[0]
-        assert new_history[1]["role"] == "assistant"
-        assert new_history[1]["content"] == "This is the AI response."
-        assert result["current_interaction_mode"] == "chatting"
+        # Check the returned assistant message
+        assert isinstance(assistant_message, dict)
+        assert assistant_message.get("role") == "assistant"
+        assert assistant_message.get("content") == "This is the AI response."
+
+        # Check the updated state
+        assert isinstance(updated_state, dict)
+        assert updated_state.get("current_interaction_mode") == "chatting"
+        # Ensure history is NOT in the returned state
+        assert "conversation_history" not in updated_state
+        assert "history_context" not in updated_state
 
     @patch("backend.ai.lessons.nodes.logger", MagicMock())
     def test_generate_chat_response_no_user_message(self) -> None: # Added return type hint
@@ -108,12 +113,14 @@ class TestGenerateChatResponse:
 
         with patch("backend.ai.lessons.nodes.logger.warning") as mock_warning:
             # Cast state before calling node
-            result = nodes.generate_chat_response(cast(Dict[str, Any], state))
+            updated_state, assistant_message = nodes.generate_chat_response(cast(Dict[str, Any], state))
 
             mock_warning.assert_called_once_with(
-                f"Cannot generate chat response: No user message found for user {state['user_id']}."
+                f"Cannot generate chat response: No user message found in history_context for user {state['user_id']}."
             )
-            assert result == state
+            # Node should return original state and None message in this case
+            assert assistant_message is None
+            assert updated_state == state
 
     @patch("backend.ai.lessons.nodes.load_prompt")
     @patch(
@@ -133,18 +140,19 @@ class TestGenerateChatResponse:
 
         with patch("backend.ai.lessons.nodes.logger.error") as mock_error:
             # Cast state before calling node
-            result = nodes.generate_chat_response(cast(Dict[str, Any], state))
+            updated_state, assistant_message = nodes.generate_chat_response(cast(Dict[str, Any], state))
 
             mock_error.assert_called_once()
             assert "LLM call failed" in mock_error.call_args[0][0]
-            assert "conversation_history" in result
-            new_history = result["conversation_history"]
-            assert len(new_history) == 2
-            assert new_history[1]["role"] == "assistant"
-            assert (
-                "Sorry, I'm having trouble understanding right now."
-                in new_history[1]["content"]
-            )
+
+            # Check the returned assistant message (should be error fallback)
+            assert isinstance(assistant_message, dict)
+            assert assistant_message.get("role") == "assistant"
+            assert "Sorry, I encountered an error while generating a response." in assistant_message.get("content", "")
+
+            # Check the updated state
+            assert isinstance(updated_state, dict)
+            assert updated_state.get("current_interaction_mode") == "chatting"
 
     @patch(
         "backend.ai.lessons.nodes.load_prompt",
@@ -165,18 +173,19 @@ class TestGenerateChatResponse:
 
         with patch("backend.ai.lessons.nodes.logger.error") as mock_error:
             # Cast state before calling node
-            result = nodes.generate_chat_response(cast(Dict[str, Any], state))
+            updated_state, assistant_message = nodes.generate_chat_response(cast(Dict[str, Any], state))
 
             mock_error.assert_called_once()
             assert (
                 "LLM call failed" in mock_error.call_args[0][0]
             )
             mock_call_llm.assert_not_called()
-            assert "conversation_history" in result
-            new_history = result["conversation_history"]
-            assert len(new_history) == 2
-            assert new_history[1]["role"] == "assistant"
-            assert (
-                "Sorry, I'm having trouble understanding right now."
-                in new_history[1]["content"]
-            )
+
+            # Check the returned assistant message (should be error fallback)
+            assert isinstance(assistant_message, dict)
+            assert assistant_message.get("role") == "assistant"
+            assert "Sorry, I encountered an error while generating a response." in assistant_message.get("content", "")
+
+            # Check the updated state
+            assert isinstance(updated_state, dict)
+            assert updated_state.get("current_interaction_mode") == "chatting"

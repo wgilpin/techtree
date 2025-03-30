@@ -2,7 +2,8 @@
 
 # pylint: disable=broad-exception-caught,singleton-comparison
 
-from typing import Any, Dict, List, cast # Added cast
+from typing import Any, Dict, List, cast, Tuple, Optional # Added Tuple, Optional
+from typing import Tuple, Optional
 
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END # Added END import
@@ -86,34 +87,48 @@ class LessonAI:
 
     # --- Method to Handle Chat Turns (no changes needed here) ---
     def process_chat_turn(
-        self, current_state: LessonState, user_message: str
-    ) -> LessonState:
+        self, current_state: LessonState, user_message: str, history: List[Dict[str, Any]] # Added history
+    ) -> Tuple[LessonState, Optional[List[Dict[str, Any]]]]: # Return state and new messages
         """Processes one turn of the conversation."""
         if not current_state:
             raise ValueError("Current state must be provided for a chat turn.")
 
-        # Add user message to history before invoking graph
-        updated_history: List[Dict[str, str]] = current_state.get(
-            "conversation_history", []
-        ) + [{"role": "user", "content": user_message}]
+        # History is now passed in, user message is saved by service layer.
+        # We need to pass history to the nodes via the state during invocation.
+        # Note: This assumes nodes are modified to accept history via state['history_context']
+        #       and that LessonState is temporarily updated to include this key.
+        # TODO: Define 'history_context' key in LessonState or find alternative LangGraph context passing.
 
-        # Ensure input_state matches LessonState structure
-        # Cast to Dict for invoke, as LessonState is TypedDict
-        input_state: Dict[str, Any] = cast(Dict[str, Any], {
+        # Prepare input state for the graph, adding history temporarily
+        input_state_dict: Dict[str, Any] = cast(Dict[str, Any], {
             **current_state,
-            "conversation_history": updated_history,
+            "history_context": history, # Add history under a temporary key
+            # Ensure user_message is available if nodes need it directly (e.g., classify_intent)
+            # Although classify_intent was modified to use history[-1]
+            "last_user_message": user_message # Add last user message explicitly if needed
         })
 
         # Invoke the chat graph
-        # Assumes self.chat_graph was compiled in __init__
-        output_state: Any = self.chat_graph.invoke(input_state)
+        # The graph will internally call nodes which now expect 'history_context' in the state dict
+        output_state_changes: Any = self.chat_graph.invoke(input_state_dict)
 
-        # Merge output state changes back
-        # Ensure the final state structure matches LessonState
-        # Note: LangGraph output might only contain changed fields.
+        # Extract potential new messages returned by nodes (if nodes are modified to do so)
+        # This part is speculative and depends on how nodes are modified.
+        # Let's assume nodes add a 'new_assistant_messages' key to the output state changes.
+        new_assistant_messages: Optional[List[Dict[str, Any]]] = output_state_changes.pop('new_assistant_messages', None)
+
+        # Merge output state changes back into the original state (excluding temp history)
+        final_state_dict = {**current_state, **output_state_changes}
+
+        # Remove the temporary history key if it exists
+        final_state_dict.pop('history_context', None)
+        final_state_dict.pop('last_user_message', None) # Clean up temporary keys
+
         # Cast merged dict back to LessonState
-        final_state: LessonState = cast(LessonState, {**input_state, **output_state})
-        return final_state
+        final_state: LessonState = cast(LessonState, final_state_dict)
+
+        # Return the final state and any new messages extracted
+        return final_state, new_assistant_messages
 
     # --- Method to Start Chat (using imported node function) ---
     def start_chat(self, initial_state: LessonState) -> LessonState:

@@ -64,7 +64,7 @@ class TestLessonAIIntentClassification:
             "lesson_uid": "intent_test_uid",
             "created_at": "t",
             "updated_at": "t",
-            "conversation_history": current_history,
+            "history_context": current_history, # Use history_context
             "current_interaction_mode": "chatting",
             "current_exercise_index": None,
             "current_quiz_question_index": None,
@@ -115,8 +115,8 @@ class TestLessonAIIntentClassification:
 
         mock_load_prompt.assert_called_once_with(
             "intent_classification",
-            user_message=user_message,
-            conversation_history=ANY,
+            user_input=user_message, # Check prompt key used in node
+            history_json=ANY,       # Check prompt key used in node
             topic="Testing",
             lesson_title="Intent Test",
             user_level="beginner",
@@ -173,8 +173,8 @@ class TestLessonAIIntentClassification:
         )
         mock_load_prompt.assert_called_once_with(
             "intent_classification",
-            user_message=user_message,
-            conversation_history=ANY,
+            user_input=user_message, # Check prompt key used in node
+            history_json=ANY,       # Check prompt key used in node
             topic="Testing",
             lesson_title="Intent Test",
             user_level="beginner",

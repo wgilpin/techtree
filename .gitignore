@@ -24,3 +24,4 @@ techtree.db-shm
 techtree_db.sqlite
 techtree_db.sqlite-shm
 techtree_db.sqlite-wal
+uv.lock

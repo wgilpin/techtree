@@ -44,7 +44,7 @@ class TestGenerateAssessmentNode:
             "lesson_uid": "gen_assess_lesson_uid",
             "created_at": "sometime",
             "updated_at": "sometime",
-            "conversation_history": current_history,
+            "history_context": current_history, # Use history_context
             "current_interaction_mode": "chatting", # Assume user just requested
             "current_exercise_index": None,
             "current_quiz_question_index": None,
@@ -80,7 +80,8 @@ class TestGenerateAssessmentNode:
         state = self._get_base_state(history=initial_history)
 
         # Cast state before calling node
-        updated_state, generated_question = nodes.generate_new_assessment(
+        # Node now returns state, question object, and assistant message dict
+        updated_state, generated_question, assistant_message = nodes.generate_new_assessment(
             cast(Dict[str, Any], state)
         )
 
@@ -100,15 +101,12 @@ class TestGenerateAssessmentNode:
         assert updated_state["active_assessment"] == mock_new_question
         assert updated_state["generated_assessment_question_ids"] == ["q_new_1"]
         assert updated_state["current_interaction_mode"] == "awaiting_answer"
-        assert len(updated_state["conversation_history"]) == 2
-        assert updated_state["conversation_history"][-1]["role"] == "assistant"
-        assert (
-            "Okay, here's an assessment question"
-            in updated_state["conversation_history"][-1]["content"]
-        )
-        assert (
-            "true false" in updated_state["conversation_history"][-1]["content"]
-        )
+
+        # Check the returned assistant message
+        assert assistant_message is not None
+        assert assistant_message["role"] == "assistant"
+        assert "Okay, here's an assessment question" in assistant_message["content"]
+        assert "true false" in assistant_message["content"]
 
     @patch("backend.ai.lessons.nodes.load_prompt")
     @patch(
@@ -124,7 +122,7 @@ class TestGenerateAssessmentNode:
         state = self._get_base_state(history=initial_history)
 
         # Cast state before calling node
-        updated_state, generated_question = nodes.generate_new_assessment(
+        updated_state, generated_question, assistant_message = nodes.generate_new_assessment(
             cast(Dict[str, Any], state)
         )
 
@@ -133,13 +131,12 @@ class TestGenerateAssessmentNode:
         assert updated_state["active_assessment"] is None
         assert updated_state["generated_assessment_question_ids"] == []
         assert updated_state["current_interaction_mode"] == "chatting"
-        assert len(updated_state["conversation_history"]) == 2
-        assert updated_state["conversation_history"][-1]["role"] == "assistant"
-        assert (
-            "Sorry, I wasn't able to generate an assessment question"
-            in updated_state["conversation_history"][-1]["content"]
-        )
         assert updated_state["error_message"] == "Assessment generation failed."
+
+        # Check the returned assistant message
+        assert assistant_message is not None
+        assert assistant_message["role"] == "assistant"
+        assert "Sorry, I wasn't able to generate an assessment question" in assistant_message["content"]
 
     @patch("backend.ai.lessons.nodes.load_prompt")
     @patch("backend.ai.lessons.nodes.call_llm_with_json_parsing")
@@ -164,20 +161,21 @@ class TestGenerateAssessmentNode:
         )
 
         # Cast state before calling node
-        updated_state, generated_question = nodes.generate_new_assessment(
+        updated_state, generated_question, assistant_message = nodes.generate_new_assessment(
             cast(Dict[str, Any], state)
         )
 
         mock_call_llm.assert_called_once()
         assert generated_question is None
         assert updated_state["active_assessment"] is None
-        assert updated_state["generated_assessment_question_ids"] == ["q_existing"]
+        assert updated_state["generated_assessment_question_ids"] == ["q_existing"] # Should not change
         assert updated_state["current_interaction_mode"] == "chatting"
-        assert len(updated_state["conversation_history"]) == 2
-        assert (
-            "Sorry, I couldn't come up with a new assessment question"
-            in updated_state["conversation_history"][-1]["content"]
-        )
+        assert updated_state["error_message"] == "Duplicate assessment ID generated."
+
+        # Check the returned assistant message
+        assert assistant_message is not None
+        assert assistant_message["role"] == "assistant"
+        assert "Sorry, I couldn't come up with a new assessment question" in assistant_message["content"]
 
     @patch("backend.ai.lessons.nodes.logger", MagicMock())
     def test_generate_new_assessment_missing_content(self) -> None: # Added return type hint
@@ -186,12 +184,20 @@ class TestGenerateAssessmentNode:
         state["generated_content"] = None # Remove content
 
         # Cast state before calling node
-        updated_state, generated_question = nodes.generate_new_assessment(
+        updated_state, generated_question, assistant_message = nodes.generate_new_assessment(
             cast(Dict[str, Any], state)
         )
 
         assert generated_question is None
         assert updated_state["error_message"] is not None
         assert "lesson content is missing" in updated_state["error_message"]
-        # Cast state for comparison
-        assert updated_state == cast(Dict[str, Any], state)
+
+        # Check the returned assistant message
+        assert assistant_message is not None
+        assert assistant_message["role"] == "assistant"
+        assert "lesson content is missing" in assistant_message["content"]
+
+        # State should have error message added, but otherwise be the same
+        expected_state = cast(Dict[str, Any], state)
+        expected_state["error_message"] = updated_state["error_message"] # Copy error message for comparison
+        assert updated_state == expected_state

@@ -4,21 +4,22 @@
 
 import json
 import re
-import uuid
 import traceback
+import uuid
 from datetime import datetime
-from typing import Dict, Optional, List, Any # Added List, Any, cast
+from typing import Any, Dict, List, Optional  # Added List, Any, cast
 
-from requests import RequestException
-from tavily import TavilyClient # type: ignore
 import google.generativeai as genai
+from requests import RequestException
+from tavily import TavilyClient  # type: ignore
 
+from backend.logger import logger  # Import logger
 # Project specific imports
 from backend.services.sqlite_db import SQLiteDatabaseService
-from .state import SyllabusState
+
 from .prompts import GENERATION_PROMPT_TEMPLATE, UPDATE_PROMPT_TEMPLATE
+from .state import SyllabusState
 from .utils import call_with_retry
-from backend.logger import logger # Import logger
 
 # --- Node Functions ---
 
@@ -28,7 +29,7 @@ def initialize_state(
     topic: str = "",
     knowledge_level: str = "beginner",
     user_id: Optional[str] = None,
-) -> Dict[str, Any]: # Changed return type hint
+) -> Dict[str, Any]:  # Changed return type hint
     """Initializes the graph state with topic, knowledge level, and user ID."""
     if not topic:
         raise ValueError("Topic is required")
@@ -59,12 +60,16 @@ def initialize_state(
     return initial_state
 
 
-def search_database(state: SyllabusState, db_service: SQLiteDatabaseService) -> Dict[str, Any]: # Changed return type hint
+def search_database(
+    state: SyllabusState, db_service: SQLiteDatabaseService
+) -> Dict[str, Any]:  # Changed return type hint
     """Searches the database for an existing syllabus matching the criteria."""
     topic = state["topic"]
     knowledge_level = state["user_knowledge_level"]
     user_id = state.get("user_id")
-    logger.info(f"DB Search: Topic='{topic}', Level='{knowledge_level}', User={user_id}")
+    logger.info(
+        f"DB Search: Topic='{topic}', Level='{knowledge_level}', User={user_id}"
+    )
 
     found_syllabus = db_service.get_syllabus(topic, knowledge_level, user_id)
 
@@ -89,7 +94,9 @@ def search_database(state: SyllabusState, db_service: SQLiteDatabaseService) -> 
         return {"existing_syllabus": None}
 
 
-def search_internet(state: SyllabusState, tavily_client: Optional[TavilyClient]) -> Dict[str, List[str]]: # Changed return type hint
+def search_internet(
+    state: SyllabusState, tavily_client: Optional[TavilyClient]
+) -> Dict[str, List[str]]:  # Changed return type hint
     """Performs a web search using Tavily to gather context."""
     if not tavily_client:
         logger.warning("Tavily client not configured. Skipping internet search.")
@@ -128,14 +135,19 @@ def search_internet(state: SyllabusState, tavily_client: Optional[TavilyClient])
             logger.warning(f"Tavily request error for query '{query}': {e}")
             search_results.append(f"Error during web search: {str(e)}")
         except Exception as e:
-            logger.error(f"Unexpected error during Tavily search for query '{query}': {e}", exc_info=True)
+            logger.error(
+                f"Unexpected error during Tavily search for query '{query}': {e}",
+                exc_info=True,
+            )
             search_results.append(f"Unexpected error during web search: {str(e)}")
 
     logger.info(f"Total search results gathered: {len(search_results)}")
     return {"search_results": search_results}
 
 
-def _parse_llm_json_response(response_text: str) -> Optional[Dict[str, Any]]: # Changed return type hint
+def _parse_llm_json_response(
+    response_text: str,
+) -> Optional[Dict[str, Any]]:  # Changed return type hint
     """Attempts to parse a JSON object from the LLM response text."""
     json_str = None
     try:
@@ -156,10 +168,10 @@ def _parse_llm_json_response(response_text: str) -> Optional[Dict[str, Any]]: # 
 
         parsed_json = json.loads(json_str)
         if not isinstance(parsed_json, dict):
-             logger.warning(f"Parsed JSON is not a dictionary: {type(parsed_json)}")
-             return None
+            logger.warning(f"Parsed JSON is not a dictionary: {type(parsed_json)}")
+            return None
         logger.debug("Successfully parsed JSON.")
-        return parsed_json # Returns Dict[str, Any]
+        return parsed_json  # Returns Dict[str, Any]
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse JSON from response: {e}")
         logger.debug(f"Response text was: {response_text[:500]}...")
@@ -170,7 +182,9 @@ def _parse_llm_json_response(response_text: str) -> Optional[Dict[str, Any]]: # 
         return None
 
 
-def _validate_syllabus_structure(syllabus: Dict[str, Any], context: str = "Generated") -> bool: # Added type hint
+def _validate_syllabus_structure(
+    syllabus: Dict[str, Any], context: str = "Generated"
+) -> bool:  # Added type hint
     """Performs basic validation on the syllabus dictionary structure."""
     required_keys = ["topic", "level", "duration", "learning_objectives", "modules"]
     if not all(key in syllabus for key in required_keys):
@@ -181,10 +195,12 @@ def _validate_syllabus_structure(syllabus: Dict[str, Any], context: str = "Gener
         return False
     for i, module in enumerate(syllabus["modules"]):
         if not isinstance(module, dict):
-             logger.error(f"Error: {context} JSON module {i} is not a dictionary.")
-             return False
+            logger.error(f"Error: {context} JSON module {i} is not a dictionary.")
+            return False
         if not all(key in module for key in ["title", "lessons"]):
-            logger.error(f"Error: {context} JSON module {i} missing 'title' or 'lessons'.")
+            logger.error(
+                f"Error: {context} JSON module {i} missing 'title' or 'lessons'."
+            )
             return False
         if not isinstance(module.get("lessons"), list) or not module.get("lessons"):
             logger.error(
@@ -193,7 +209,9 @@ def _validate_syllabus_structure(syllabus: Dict[str, Any], context: str = "Gener
             return False
         for j, lesson in enumerate(module["lessons"]):
             if not isinstance(lesson, dict):
-                logger.error(f"Error: {context} JSON lesson {j} in module {i} is not a dictionary.")
+                logger.error(
+                    f"Error: {context} JSON lesson {j} in module {i} is not a dictionary."
+                )
                 return False
             if "title" not in lesson or not lesson["title"]:
                 logger.error(
@@ -205,8 +223,8 @@ def _validate_syllabus_structure(syllabus: Dict[str, Any], context: str = "Gener
 
 
 def generate_syllabus(
-    state: SyllabusState, llm_model: Optional[genai.GenerativeModel]
-) -> Dict[str, Any]: # Changed return type hint
+    state: SyllabusState, llm_model: Optional[genai.GenerativeModel]  # type: ignore[name-defined]
+) -> Dict[str, Any]:  # Changed return type hint
     """Generates a new syllabus using the LLM based on search results."""
     if not llm_model:
         logger.warning("LLM model not configured. Cannot generate syllabus.")
@@ -295,8 +313,10 @@ def generate_syllabus(
 
 
 def update_syllabus(
-    state: SyllabusState, feedback: str, llm_model: Optional[genai.GenerativeModel]
-) -> Dict[str, Any]: # Changed return type hint
+    state: SyllabusState,
+    feedback: str,
+    llm_model: Optional[genai.GenerativeModel]  # type: ignore[name-defined]
+) -> Dict[str, Any]:  # Changed return type hint
     """Updates the current syllabus based on user feedback using the LLM."""
     if not llm_model:
         logger.warning("LLM model not configured. Cannot update syllabus.")
@@ -317,7 +337,9 @@ def update_syllabus(
 
     try:
         if not isinstance(current_syllabus, dict):
-             raise TypeError(f"Expected dict for current_syllabus, got {type(current_syllabus)}")
+            raise TypeError(
+                f"Expected dict for current_syllabus, got {type(current_syllabus)}"
+            )
         syllabus_json = json.dumps(current_syllabus, indent=2)
     except TypeError as e:
         logger.error(f"Error serializing current syllabus to JSON for update: {e}")
@@ -355,7 +377,9 @@ def update_syllabus(
         }
 
 
-def save_syllabus(state: SyllabusState, db_service: SQLiteDatabaseService) -> Dict[str, Any]: # Changed return type hint
+def save_syllabus(
+    state: SyllabusState, db_service: SQLiteDatabaseService
+) -> Dict[str, Any]:  # Changed return type hint
     """Saves the current syllabus (generated or existing) to the database."""
     syllabus_to_save = state.get("generated_syllabus") or state.get("existing_syllabus")
     if not syllabus_to_save:
@@ -369,7 +393,9 @@ def save_syllabus(state: SyllabusState, db_service: SQLiteDatabaseService) -> Di
     try:
         syllabus_dict = dict(syllabus_to_save).copy()
     except (TypeError, ValueError):
-        logger.error(f"Error: Cannot convert syllabus type {type(syllabus_to_save)} to dict.")
+        logger.error(
+            f"Error: Cannot convert syllabus type {type(syllabus_to_save)} to dict."
+        )
         return {"syllabus_saved": False}
 
     # Ensure topic and level are strings before passing to db_service
@@ -377,7 +403,9 @@ def save_syllabus(state: SyllabusState, db_service: SQLiteDatabaseService) -> Di
     level_str = syllabus_dict.get("level")
 
     if not isinstance(topic_str, str) or not isinstance(level_str, str):
-        logger.error(f"Error: Syllabus missing 'topic' or 'level' as strings. Data: {syllabus_dict}")
+        logger.error(
+            f"Error: Syllabus missing 'topic' or 'level' as strings. Data: {syllabus_dict}"
+        )
         return {"syllabus_saved": False}
 
     now = datetime.now().isoformat()
@@ -394,16 +422,17 @@ def save_syllabus(state: SyllabusState, db_service: SQLiteDatabaseService) -> Di
         if k in syllabus_dict
     }
     if not all(k in content_to_save for k in ["topic", "level", "modules"]):
-         logger.error(f"Error: Prepared content missing required keys for DB save. Content: {content_to_save}")
-         return {"syllabus_saved": False}
-
+        logger.error(
+            f"Error: Prepared content missing required keys for DB save. Content: {content_to_save}"
+        )
+        return {"syllabus_saved": False}
 
     is_master_save = not user_id
 
     try:
         saved_id = db_service.save_syllabus(
-            topic=topic_str, # Pass validated string
-            level=level_str, # Pass validated string
+            topic=topic_str,  # Pass validated string
+            level=level_str,  # Pass validated string
             content=content_to_save,
             user_id=user_id,
             user_entered_topic=user_entered_topic,
@@ -427,12 +456,15 @@ def save_syllabus(state: SyllabusState, db_service: SQLiteDatabaseService) -> Di
             return {"syllabus_saved": False}
 
     except Exception as e:
-        logger.error(f"Error saving syllabus UID {syllabus_dict.get('uid', 'N/A')}: {e}", exc_info=True)
+        logger.error(
+            f"Error saving syllabus UID {syllabus_dict.get('uid', 'N/A')}: {e}",
+            exc_info=True,
+        )
         traceback.print_exc()
         return {"syllabus_saved": False}
 
 
-def end_node(_: SyllabusState) -> Dict[str, Any]: # Changed return type hint
+def end_node(_: SyllabusState) -> Dict[str, Any]:  # Changed return type hint
     """Terminal node for the graph."""
     logger.info("Workflow ended.")
     return {}

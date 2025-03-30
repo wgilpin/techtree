@@ -105,3 +105,17 @@ CREATE INDEX IF NOT EXISTS idx_progress_user_id ON user_progress(user_id);
 CREATE INDEX IF NOT EXISTS idx_progress_syllabus_id ON user_progress(syllabus_id);
 CREATE INDEX IF NOT EXISTS idx_progress_user_syllabus ON user_progress(user_id, syllabus_id);
 CREATE INDEX IF NOT EXISTS idx_progress_lesson_id ON user_progress(lesson_id); -- Added index for lesson_id
+
+-- Conversation History table
+CREATE TABLE IF NOT EXISTS conversation_history (
+    message_id TEXT PRIMARY KEY,         -- UUID for the message
+    progress_id TEXT NOT NULL,           -- FK to user_progress (progress_id is PK)
+    timestamp TEXT NOT NULL,             -- ISO 8601 timestamp
+    role TEXT NOT NULL,                  -- 'user', 'assistant', 'system'
+    message_type TEXT NOT NULL,          -- e.g., 'CHAT_USER', 'EXERCISE_PROMPT', etc.
+    content TEXT NOT NULL,               -- The actual message content
+    metadata TEXT,                       -- Optional JSON blob for extra info (e.g., exercise_id)
+    FOREIGN KEY (progress_id) REFERENCES user_progress(progress_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_history_progress_id ON conversation_history(progress_id);
+CREATE INDEX IF NOT EXISTS idx_history_timestamp ON conversation_history(timestamp);

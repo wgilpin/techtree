@@ -256,7 +256,8 @@ def test_generate_exercise_success(mock_interaction_service: MagicMock) -> None:
     mock_exercise_obj = Exercise(
         id="ex_gen_1", type="short_answer", instructions="Generated Q"
     )
-    mock_interaction_service.generate_exercise.return_value = mock_exercise_obj
+    # Mock should return a tuple (exercise_obj, message)
+    mock_interaction_service.generate_exercise.return_value = (mock_exercise_obj, None)
     response = client.post(
         f"/lesson/exercise/{syllabus_id}/{module_index}/{lesson_index}"
     )
@@ -333,8 +334,9 @@ def test_generate_assessment_question_success(mock_interaction_service: MagicMoc
     mock_question_obj = AssessmentQuestion(
         id="q_gen_1", type="true_false", question_text="Generated Q?"
     )
+    # Mock should return a tuple (question_obj, message)
     mock_interaction_service.generate_assessment_question.return_value = (
-        mock_question_obj
+        mock_question_obj, None
     )
     response = client.post(
         f"/lesson/assessment/{syllabus_id}/{module_index}/{lesson_index}"

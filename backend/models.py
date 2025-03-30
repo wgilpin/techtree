@@ -130,7 +130,7 @@ class EvaluationResult(BaseModel):
 # --- LangGraph State ---
 
 
-class LessonState(TypedDict):
+class LessonState(TypedDict, total=False): # Allow partial states
     """State dictionary structure for the lessons LangGraph workflow."""
 
     topic: str
@@ -151,10 +151,7 @@ class LessonState(TypedDict):
     ]
     created_at: Optional[str]
     updated_at: Optional[str]
-    # Conversational flow fields
-    conversation_history: List[
-        Dict[str, str]
-    ]
+    # Conversational flow fields (History moved to separate table)
     current_interaction_mode: str
     current_exercise_index: Optional[int]
     current_quiz_question_index: Optional[int]
@@ -175,3 +172,5 @@ class LessonState(TypedDict):
     potential_answer: Optional[str]
     # Added field to store the lesson's DB primary key
     lesson_db_id: Optional[int]
+    # Temporary key to pass history context during graph invocation
+    history_context: Optional[List[Dict[str, Any]]]

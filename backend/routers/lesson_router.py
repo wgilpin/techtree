@@ -53,13 +53,15 @@ class LessonDataResponse(BaseModel):
 class ExerciseResponse(BaseModel):
     """Response model for generating an exercise."""
     exercise: Optional[Exercise]
-    error: Optional[str] = None
+    message: Optional[str] = None # Message from generation (success or failure)
+    error: Optional[str] = None # For HTTP level errors, maybe remove if message covers it?
 
 
 class AssessmentQuestionResponse(BaseModel):
     """Response model for generating an assessment question."""
     question: Optional[AssessmentQuestion]
-    error: Optional[str] = None
+    message: Optional[str] = None # Message from generation (success or failure)
+    error: Optional[str] = None # For HTTP level errors, maybe remove if message covers it?
 
 
 # Model for getting exposition by ID
@@ -258,19 +260,19 @@ async def generate_exercise(
         f"lesson: {lesson_index}, user: {current_user.user_id}"
     )
     try:
-        new_exercise = await interaction_service.generate_exercise(
+        # Service now returns a tuple: (Optional[Exercise], Optional[str])
+        exercise_obj, message = await interaction_service.generate_exercise(
             user_id=current_user.user_id,
             syllabus_id=syllabus_id,
             module_index=module_index,
             lesson_index=lesson_index,
         )
-        if new_exercise:
-            return ExerciseResponse(exercise=new_exercise)
-        else:
-            # If service returns None, indicate failure gracefully
-            return ExerciseResponse(
-                exercise=None, error="Failed to generate a new exercise."
-            )
+        # The service already returns the validated Exercise object or None
+        # The type ignore on assignment should handle mypy issues.
+        return ExerciseResponse(
+            exercise=exercise_obj, # type: ignore[arg-type]
+            message=message
+        )
     except ValueError as e:
         logger.error(f"Value error in generate_exercise: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
@@ -330,19 +332,18 @@ async def generate_assessment_question(
         f"lesson: {lesson_index}, user: {current_user.user_id}"
     )
     try:
-        new_question = await interaction_service.generate_assessment_question(
+        # Service now returns a tuple: (Optional[AssessmentQuestion], Optional[str])
+        question_obj, message = await interaction_service.generate_assessment_question(
             user_id=current_user.user_id,
             syllabus_id=syllabus_id,
             module_index=module_index,
             lesson_index=lesson_index,
         )
-        if new_question:
-            return AssessmentQuestionResponse(question=new_question)
-        else:
-            # If service returns None, indicate failure gracefully
-            return AssessmentQuestionResponse(
-                question=None, error="Failed to generate a new assessment question."
-            )
+        # The service already returns the validated AssessmentQuestion object or None
+        return AssessmentQuestionResponse(
+            question=question_obj, # type: ignore[arg-type]
+            message=message
+        )
     except ValueError as e:
         logger.error(f"Value error in generate_assessment_question: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e

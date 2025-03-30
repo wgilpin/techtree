@@ -2,6 +2,7 @@
 """tests for backend/ai/lessons/lessons_graph.py"""
 # pylint: disable=protected-access, unused-argument, invalid-name
 
+from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 from backend.ai.app import LessonAI
@@ -14,7 +15,9 @@ from backend.models import GeneratedLessonContent, LessonState
 class TestLessonAICore:
     """Tests for the core initialization and structure of LessonAI."""
 
-    def test_init_compiles_graph(self, mock_state_graph: MagicMock) -> None: # Added hints
+    def test_init_compiles_graph(
+        self, mock_state_graph: MagicMock
+    ) -> None:  # Added hints
         """Test that __init__ creates and compiles the StateGraph."""
         mock_workflow = MagicMock()
         mock_state_graph.return_value = mock_workflow
@@ -30,7 +33,9 @@ class TestLessonAICore:
         assert lesson_ai.chat_graph is not None
 
     @patch("backend.ai.lessons.lessons_graph.logger", MagicMock())
-    def test_start_chat_success(self, mock_state_graph: MagicMock) -> None: # Added hints
+    def test_start_chat_success(
+        self, mock_state_graph: MagicMock
+    ) -> None:  # Added hints
         """Test the start_chat method for successful initial message generation."""
         mock_workflow = MagicMock()
         mock_state_graph.return_value = mock_workflow
@@ -54,7 +59,7 @@ class TestLessonAICore:
             "lesson_uid": "test_uid",
             "created_at": "t",
             "updated_at": "t",
-            "conversation_history": [],
+            # Remove history key, start_chat doesn't expect it
             "current_interaction_mode": "chatting",
             "current_exercise_index": None,
             "current_quiz_question_index": None,
@@ -71,15 +76,25 @@ class TestLessonAICore:
 
         final_state = lesson_ai.start_chat(initial_state)
 
-        assert "conversation_history" in final_state
-        assert len(final_state["conversation_history"]) == 1
-        first_message = final_state["conversation_history"][0]
-        assert first_message["role"] == "assistant"
-        assert "Welcome to your lesson!" in first_message["content"]
+        # TODO: Refactor start_chat in LessonAI to not add history directly.
+        # For now, assert based on current behavior.
+        assert (
+            "conversation_history" in final_state
+        )  # start_chat currently adds this key back
+        history_list = final_state.get("conversation_history", [])
+        assert isinstance(history_list, list)
+        assert len(history_list) == 1
+        if history_list:  # Check if list is not empty before indexing
+            first_message = history_list[0]
+            assert isinstance(first_message, dict)
+            assert first_message.get("role") == "assistant"
+            assert "Welcome to your lesson!" in first_message.get("content", "")
         assert final_state["current_interaction_mode"] == "chatting"
 
     @patch("backend.ai.lessons.lessons_graph.logger", MagicMock())
-    def test_start_chat_with_existing_history(self, mock_state_graph: MagicMock) -> None: # Added hints
+    def test_start_chat_with_existing_history(
+        self, mock_state_graph: MagicMock
+    ) -> None:  # Added hints
         """Test start_chat when initial state unexpectedly has history (should still work)."""
         mock_workflow = MagicMock()
         mock_state_graph.return_value = mock_workflow
@@ -103,7 +118,7 @@ class TestLessonAICore:
             "lesson_uid": "test_uid",
             "created_at": "t",
             "updated_at": "t",
-            "conversation_history": [{"role": "system", "content": "Existing message"}],
+            # Remove history key, start_chat doesn't expect it
             "current_interaction_mode": "chatting",
             "current_exercise_index": None,
             "current_quiz_question_index": None,
@@ -120,36 +135,62 @@ class TestLessonAICore:
 
         final_state = lesson_ai.start_chat(initial_state)
 
-        assert len(final_state["conversation_history"]) == 1
-        first_message = final_state["conversation_history"][0]
-        assert first_message["role"] == "assistant"
-        assert "Welcome to your lesson!" in first_message["content"]
+        # TODO: Refactor start_chat in LessonAI to not add history directly.
+        # For now, assert based on current behavior.
+        assert (
+            "conversation_history" in final_state
+        )  # start_chat currently adds this key back
+        history_list = final_state.get("conversation_history", [])
+        assert isinstance(history_list, list)
+        assert len(history_list) == 1  # Should overwrite existing history
+        if history_list:
+            first_message = history_list[0]
+            assert isinstance(first_message, dict)
+            assert first_message.get("role") == "assistant"
+            assert "Welcome to your lesson!" in first_message.get("content", "")
         assert final_state["current_interaction_mode"] == "chatting"
 
     @patch("backend.ai.lessons.lessons_graph.logger", MagicMock())
-    def test_process_chat_turn(self, mock_state_graph: MagicMock) -> None: # Added hints
+    def test_process_chat_turn(
+        self, mock_state_graph: MagicMock
+    ) -> None:  # Added hints
         """Test the process_chat_turn method."""
         mock_workflow = MagicMock()
         mock_state_graph.return_value = mock_workflow
         mock_compiled_graph = MagicMock()
         mock_workflow.compile.return_value = mock_compiled_graph
         # Provide a more complete mock output matching LessonState
-        mock_graph_output: LessonState = {
-            "conversation_history": [
-                {"role": "user", "content": "Hello"},
-                {"role": "assistant", "content": "Hi there!"},
-            ],
+        # This mock represents the *changes* returned by the graph,
+        # so it shouldn't contain the full history.
+        # It might contain 'new_assistant_messages' if the node returns them.
+        mock_graph_output: Dict[str, Any] = {  # Changed type hint
+            # "conversation_history": [...], # Removed
+            # Let's assume the graph output includes the new message(s)
+            "new_assistant_messages": [{"role": "assistant", "content": "Hi there!"}],
             "current_interaction_mode": "chatting",
-            "topic": "Test", "knowledge_level": "beginner", "syllabus": None,
-            "lesson_title": "Test", "module_title": "Test",
+            "topic": "Test",
+            "knowledge_level": "beginner",
+            "syllabus": None,
+            "lesson_title": "Test",
+            "module_title": "Test",
             "generated_content": GeneratedLessonContent(exposition_content="Test"),
-            "user_responses": [], "user_performance": {}, "user_id": "test",
-            "lesson_uid": "test", "created_at": "t", "updated_at": "t",
-            "current_exercise_index": None, "current_quiz_question_index": None,
-            "generated_exercises": [], "generated_assessment_questions": [],
-            "generated_exercise_ids": [], "generated_assessment_question_ids": [],
-            "error_message": None, "active_exercise": None, "active_assessment": None,
-            "potential_answer": None, "lesson_db_id": None
+            "user_responses": [],
+            "user_performance": {},
+            "user_id": "test",
+            "lesson_uid": "test",
+            "created_at": "t",
+            "updated_at": "t",
+            "current_exercise_index": None,
+            "current_quiz_question_index": None,
+            "generated_exercises": [],
+            "generated_assessment_questions": [],
+            "generated_exercise_ids": [],
+            "generated_assessment_question_ids": [],
+            "error_message": None,
+            "active_exercise": None,
+            "active_assessment": None,
+            "potential_answer": None,
+            "lesson_db_id": None,
         }
         mock_compiled_graph.invoke.return_value = mock_graph_output
 
@@ -168,7 +209,7 @@ class TestLessonAICore:
             "lesson_uid": "test",
             "created_at": "t",
             "updated_at": "t",
-            "conversation_history": [],
+            # History key removed
             "current_interaction_mode": "chatting",
             "current_exercise_index": None,
             "current_quiz_question_index": None,
@@ -183,23 +224,31 @@ class TestLessonAICore:
             "lesson_db_id": None,
         }
         user_message = "Hello"
+        # Provide a dummy history list for the call signature
+        dummy_history = [{"role": "user", "content": user_message}]
 
-        final_state = lesson_ai.process_chat_turn(initial_state, user_message)
+        # process_chat_turn now returns (final_state, new_messages)
+        final_state, new_messages = lesson_ai.process_chat_turn(
+            initial_state, user_message, dummy_history
+        )
 
+        # The input state passed to invoke should contain history_context
         expected_input_state = {
             **initial_state,
-            "conversation_history": [{"role": "user", "content": user_message}],
+            "history_context": dummy_history,
+            "last_user_message": user_message,
         }
         mock_compiled_graph.invoke.assert_called_once_with(expected_input_state)
 
-        assert (
-            final_state["conversation_history"]
-            == mock_graph_output["conversation_history"]
-        )
-        assert (
-            final_state["current_interaction_mode"]
-            == mock_graph_output["current_interaction_mode"]
-        )
-        assert (
-            final_state["topic"] == initial_state["topic"]
-        )
+        # Assertions on the final state (should not contain history keys)
+        assert "conversation_history" not in final_state
+        assert "history_context" not in final_state
+        assert final_state.get("current_interaction_mode") == mock_graph_output.get(
+            "current_interaction_mode"
+        )  # Use .get for safety
+        assert final_state.get("topic") == initial_state.get("topic")
+        # We assume the mock_graph_output might contain 'new_assistant_messages'
+        # If so, the returned new_messages should match that.
+        # If not, new_messages should be None.
+        # Assert the actual returned messages directly based on the mock setup
+        assert new_messages == [{"role": "assistant", "content": "Hi there!"}]

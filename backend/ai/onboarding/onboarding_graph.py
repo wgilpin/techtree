@@ -36,7 +36,7 @@ TAVILY_TIMEOUT = 5  # seconds
 
 # Configure Gemini API
 # Define type hint before assignment
-MODEL: Optional[genai.GenerativeModel] = None
+MODEL: Optional[genai.GenerativeModel] = None # type: ignore[name-defined]
 try:
     gemini_api_key = os.environ.get("GEMINI_API_KEY")
     gemini_model_name = os.environ.get("GEMINI_MODEL")
@@ -48,8 +48,8 @@ try:
         raise KeyError("GEMINI_MODEL")
 
     # Configuration within the try block (8 spaces indent)
-    genai.configure(api_key=gemini_api_key)
-    MODEL = genai.GenerativeModel(gemini_model_name)
+    genai.configure(api_key=gemini_api_key) # type: ignore[attr-defined]
+    MODEL = genai.GenerativeModel(gemini_model_name) # type: ignore[attr-defined]
     logger.info(f"Onboarding Config: Gemini model '{gemini_model_name}' configured.")
 
 # Except block aligned with try (0 spaces indent)

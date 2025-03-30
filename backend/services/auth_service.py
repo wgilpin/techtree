@@ -74,7 +74,7 @@ class AuthService:
         # Add assertion for mypy
         assert SECRET_KEY is not None, "SECRET_KEY cannot be None here due to initial check."
         encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-        return encoded_jwt  # type: ignore[return-value]
+        return encoded_jwt.decode("utf-8")  # Decode bytes to string
 
     async def register(self, email: str, password: str, name: Optional[str] = None) -> Dict[str, Any]:
         """

@@ -51,6 +51,7 @@ dev = [
     "types-psutil>=7.0.0.20250218",
     "types-pycurl>=7.45.6.20250309",
     "types-pygments>=2.19.0.20250305",
+    "types-pyjwt>=1.7.1",
     "types-pyopenssl>=24.1.0.20240722",
     "types-python-jose>=3.4.0.20250224",
     "types-pyyaml>=6.0.12.20250326",
@@ -62,6 +63,7 @@ dev = [
 [tool.mypy]
 python_version = "3.12"
 strict = true
+warn_unused_ignores = true
 
 # Ignore missing imports for libraries without readily available stubs
 [[tool.mypy.overrides]]

@@ -1,4 +1,5 @@
 """Utilities for interacting with the LLM, including retry logic and JSON parsing."""
+# pylint: disable=broad-exception-caught
 
 import os
 import re
@@ -18,7 +19,7 @@ from backend.logger import logger
 load_dotenv()
 
 # Define MODEL type hint before assignment
-MODEL: Optional[genai.GenerativeModel] = None
+MODEL: Optional[genai.GenerativeModel] = None # type: ignore[name-defined]
 
 # Configure Gemini API (Consider moving this configuration elsewhere if used broadly)
 # For now, keep it here as this module is the primary LLM interface
@@ -32,8 +33,8 @@ try:
         logger.error("Missing environment variable: GEMINI_MODEL")
         raise KeyError("GEMINI_MODEL")
 
-    genai.configure(api_key=gemini_api_key)
-    MODEL = genai.GenerativeModel(gemini_model_name)
+    genai.configure(api_key=gemini_api_key) # type: ignore[attr-defined]
+    MODEL = genai.GenerativeModel(gemini_model_name) # type: ignore[attr-defined]
     logger.info(f"Gemini model '{gemini_model_name}' configured successfully.")
 
 except KeyError as e:

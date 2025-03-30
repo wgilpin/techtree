@@ -1289,3 +1289,98 @@ class SQLiteDatabaseService:
 
         logger.debug(f"Returning {len(in_progress_courses)} in-progress courses.")
         return in_progress_courses
+
+    # Conversation History methods
+    # Type hints for args and return
+    def save_conversation_message(
+        self,
+        progress_id: str,
+        role: str,
+        message_type: str,
+        content: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """
+        Saves a single message to the conversation history table.
+
+        Args:
+            progress_id (str): The ID of the user progress entry this message belongs to.
+            role (str): The role of the message sender ('user', 'assistant', 'system').
+            message_type (str): The type category of the message (e.g., 'CHAT_USER', 'EXERCISE_PROMPT').
+            content (str): The text content of the message.
+            metadata (dict, optional): Additional JSON-serializable metadata.
+
+        Returns:
+            str: The newly created message's ID.
+        """
+        message_id = str(uuid.uuid4())
+        timestamp = datetime.now().isoformat()
+        metadata_json = json.dumps(metadata) if metadata else None
+
+        query = """
+            INSERT INTO conversation_history
+            (message_id, progress_id, timestamp, role, message_type, content, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """
+        params = (
+            message_id,
+            progress_id,
+            timestamp,
+            role,
+            message_type,
+            content,
+            metadata_json,
+        )
+
+        try:
+            self.execute_query(query, params, commit=True)
+            logger.debug(f"Saved conversation message {message_id} for progress {progress_id}")
+            return message_id
+        except Exception as e:
+            logger.error(f"Error saving conversation message for progress {progress_id}: {e}", exc_info=True)
+            raise
+
+    # Type hints for args and return
+    def get_conversation_history(self, progress_id: str) -> List[Dict[str, Any]]:
+        """
+        Retrieves the conversation history for a specific user progress entry,
+        ordered by timestamp.
+
+        Args:
+            progress_id (str): The ID of the user progress entry.
+
+        Returns:
+            list: A list of message dictionaries, ordered chronologically.
+                  Returns an empty list if no history is found or on error.
+        """
+        query = """
+            SELECT * FROM conversation_history
+            WHERE progress_id = ?
+            ORDER BY timestamp ASC
+        """
+        params = (progress_id,)
+        history: List[Dict[str, Any]] = []
+
+        try:
+            message_rows = self.execute_read_query(query, params)
+            for row in message_rows:
+                message_dict = dict(row)
+                # Deserialize metadata if present
+                metadata_json = message_dict.get("metadata")
+                if isinstance(metadata_json, str):
+                    try:
+                        message_dict["metadata"] = json.loads(metadata_json)
+                    except json.JSONDecodeError:
+                        logger.warning(f"Failed to parse metadata JSON for message {message_dict.get('message_id')}")
+                        message_dict["metadata"] = None # Or keep as string? Set to None for consistency.
+                else:
+                     message_dict["metadata"] = None # Ensure it's None if not a string
+
+                history.append(message_dict)
+
+            logger.debug(f"Retrieved {len(history)} messages for progress {progress_id}")
+            return history
+        except Exception as e:
+            logger.error(f"Error retrieving conversation history for progress {progress_id}: {e}", exc_info=True)
+            return [] # Return empty list on error
+
