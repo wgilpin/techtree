@@ -46,8 +46,9 @@
                     {# Loop through conversation history from lesson_state #}
                     {% if lesson_state and lesson_state.conversation_history %}
                         {% for message in lesson_state.conversation_history %}
-                            <div class="chat-message {{ message.role }}"> {# Add classes for styling #}
-                                <span class="message-role">{{ message.role|capitalize }}:</span>
+                            {# Add data-initial attribute only for user messages, using name with fallback #}
+                            <div class="chat-message {{ message.role }}" {% if message.role == 'user' %}data-initial="{% if user and user.name %}{{ user.name[0]|upper }}{% else %}U{% endif %}"{% endif %}>
+                                {# Removed the message-role span #}
                                 <div class="message-content">
                                     {# Apply markdownify filter ONLY to assistant messages #}
                                     {% if message.role == 'assistant' %}
@@ -432,47 +433,10 @@ document.addEventListener('DOMContentLoaded', function() {
     background-color: #f9f9f9;
 }
 
-.chat-message {
-    margin-bottom: 1em;
-    padding: 8px 12px;
-    border-radius: 8px;
-    max-width: 85%;
-    word-wrap: break-word; /* Ensure long words break */
-}
+/* Removed conflicting .chat-message, .chat-message.user, .chat-message.assistant rules. */
+/* Styling is now handled by main.css */
 
-.chat-message .message-role {
-    font-weight: bold;
-    display: block;
-    margin-bottom: 4px;
-    font-size: 0.9em;
-    color: #555;
-}
-
-.chat-message .message-content {
-    line-height: 1.5;
-}
-
-/* Style user messages */
-.chat-message.user {
-    background-color: #e1f5fe; /* Light blue */
-    margin-left: auto; /* Align to the right */
-    border-bottom-right-radius: 0; /* Give it a tail */
-}
-.chat-message.user .message-role {
-    color: #0277bd;
-}
-
-
-/* Style assistant messages */
-.chat-message.assistant {
-    background-color: #fff;
-    border: 1px solid #eee;
-    margin-right: auto; /* Align to the left */
-    border-bottom-left-radius: 0; /* Give it a tail */
-}
-.chat-message.assistant .message-role {
-    color: #4caf50; /* Green */
-}
+/* Keep specific content styling for assistant messages if needed */
 .chat-message.assistant .message-content p:last-child {
     margin-bottom: 0; /* Remove extra space below paragraphs */
 }
