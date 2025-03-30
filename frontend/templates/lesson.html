@@ -120,6 +120,15 @@ document.addEventListener('DOMContentLoaded', function() {
     onDemandThinkingIndicator.style.marginLeft = '10px';
 
 
+    function escapeHtml(unsafe) {
+        return unsafe
+             .replace(/&/g, "&amp;")
+             .replace(/</g, "&lt;")
+             .replace(/>/g, "&gt;")
+             .replace(/"/g, "&quot;")
+             .replace(/'/g, "&#039;");
+     }
+
     // --- Helper Functions ---
     function appendMessage(role, content) {
         const messageDiv = document.createElement('div');
@@ -157,9 +166,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Helper to format exercise HTML for chat
         function formatExerciseForChat(exercise) {
+            const questionText = exercise.instructions || exercise.question || 'N/A';
             let contentHTML = `<div class="generated-item exercise-item">`; // Wrap in a div for potential styling
+            // Add repeat button here
+            contentHTML += `<button class="repeat-question-btn" data-question-text="${escapeHtml(questionText)}" title="Repeat Question">🔄</button>`;
             contentHTML += `<h3>Exercise (${exercise.type.replace('_', ' ')})</h3>`;
-            contentHTML += `<p><strong>Instructions:</strong> ${exercise.instructions || exercise.question || 'N/A'}</p>`;
+            contentHTML += `<p><strong>Instructions:</strong> ${questionText}</p>`; // Use variable
 
             if (exercise.type === 'multiple_choice' && exercise.options) {
                 contentHTML += '<ul>';
@@ -184,9 +196,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
          // Helper to format assessment question HTML for chat
         function formatAssessmentQuestionForChat(question) {
+            const questionText = question.question_text || 'N/A';
             let contentHTML = `<div class="generated-item assessment-item">`; // Wrap in a div
+            // Add repeat button here, using escapeHtml for the data attribute
+            contentHTML += `<button class="repeat-question-btn" data-question-text="${escapeHtml(questionText)}" title="Repeat Question">🔄</button>`;
             contentHTML += `<h3>Assessment Question (${question.type.replace('_', ' ')})</h3>`;
-            contentHTML += `<p>${question.question_text || 'N/A'}</p>`;
+            contentHTML += `<p>${questionText}</p>`; // Use variable
 
             if ((question.type === 'multiple_choice' || question.type === 'true_false') && question.options) {
                 contentHTML += '<ul>';
@@ -357,6 +372,64 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    // --- Event Listener for Repeat Question Button ---
+    if (chatHistory) {
+        chatHistory.addEventListener('click', function(event) {
+            // Check if the clicked element is our repeat button
+            if (event.target.classList.contains('repeat-question-btn')) {
+                const button = event.target;
+                const questionText = button.getAttribute('data-question-text');
+
+                if (questionText && messageInput) {
+                    messageInput.value = questionText; // Set the textarea value
+                    messageInput.focus(); // Focus the textarea
+                    // Optional: Scroll to the input form if it's far down
+                    messageInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }
+        });
+
+    // --- Add Repeat Buttons to Initially Loaded Questions ---
+    function addRepeatButtonsToInitialMessages() {
+        const initialAssistantMessages = chatHistory.querySelectorAll('.chat-message.assistant .message-content');
+        initialAssistantMessages.forEach(contentDiv => {
+            const generatedItem = contentDiv.querySelector('.generated-item.exercise-item, .generated-item.assessment-item');
+            if (generatedItem) {
+                let questionText = '';
+                // Try to find the question text (adjust selector if HTML structure differs)
+                const instructionP = generatedItem.querySelector('p > strong'); // Look for 'Instructions:' first
+                if (instructionP && instructionP.parentElement.textContent.includes('Instructions:')) {
+                    questionText = instructionP.parentElement.textContent.replace('Instructions:', '').trim();
+                } else {
+                    // Fallback: Look for the first <p> after the <h3>
+                    const h3 = generatedItem.querySelector('h3');
+                    if (h3 && h3.nextElementSibling && h3.nextElementSibling.tagName === 'P') {
+                        questionText = h3.nextElementSibling.textContent.trim();
+                    }
+                }
+
+                if (questionText) {
+                    // Check if a button already exists (e.g., if script runs twice)
+                    if (!generatedItem.querySelector('.repeat-question-btn')) {
+                        const button = document.createElement('button');
+                        button.className = 'repeat-question-btn';
+                        button.setAttribute('data-question-text', escapeHtml(questionText));
+                        button.title = 'Repeat Question';
+                        button.innerHTML = '🔄';
+                        // Insert the button right inside the generatedItem div, before other content
+                        generatedItem.insertBefore(button, generatedItem.firstChild);
+                    }
+                }
+            }
+        });
+    }
+
+    // Run the function after the initial DOM is ready
+    addRepeatButtonsToInitialMessages();
+
+    }
+
+
     if (generateExerciseBtn) {
         generateExerciseBtn.addEventListener('click', () => {
             // Pass the correct formatting function
@@ -432,6 +505,24 @@ document.addEventListener('DOMContentLoaded', function() {
     padding: 0;
     background-color: transparent;
 }
+
+/* Style for repeat question button */
+.repeat-question-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 0.9em; /* Slightly smaller */
+    cursor: pointer;
+    float: right; /* Position to the right */
+    margin-left: 5px;
+    opacity: 0.6; /* Make it less prominent */
+    transition: opacity 0.2s ease;
+}
+
+.repeat-question-btn:hover {
+    opacity: 1; /* Full opacity on hover */
+}
+
 
 
 /* Style input form */
