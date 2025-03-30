@@ -99,8 +99,8 @@ def classify_intent(state: Dict[str, Any]) -> Dict[str, Any]:
     try:
         prompt = load_prompt(
             "intent_classification",
-            user_message=last_user_message,
-            conversation_history=formatted_history,
+            user_input=last_user_message, # Correct key for the prompt template
+            history_json=formatted_history, # Correct key for the prompt template
             topic=topic,
             lesson_title=lesson_title,
             user_level=user_level,
@@ -228,11 +228,11 @@ def generate_chat_response(state: Dict[str, Any]) -> Dict[str, Any]:
         prompt = load_prompt(
             "chat_response",
             user_message=last_user_message,
-            conversation_history=formatted_history,
+            history_json=formatted_history, # Correct key for the prompt template
             topic=topic,
             lesson_title=lesson_title,
             user_level=user_level,
-            exposition_summary=exposition_summary,
+            exposition=exposition_summary, # Correct key for the prompt template
             active_task_context=active_task_context,
         )
 
@@ -264,6 +264,7 @@ def generate_chat_response(state: Dict[str, Any]) -> Dict[str, Any]:
         ai_message.model_dump()
     ]  # Append new AI message
     state["current_interaction_mode"] = "chatting"  # Ensure mode is reset/confirmed
+    state["error_message"] = None # Clear any previous error on success
 
     logger.info(f"Generated chat response for user {user_id}.")
     return state
@@ -387,6 +388,7 @@ def evaluate_answer(state: Dict[str, Any]) -> Dict[str, Any]:
     state["active_assessment"] = None
     state["potential_answer"] = None
     state["current_interaction_mode"] = "chatting"  # Revert to chat after evaluation
+    state["error_message"] = None # Clear any previous error on success
 
     logger.info(f"Generated evaluation feedback for user {user_id}.")
     return state
@@ -536,6 +538,7 @@ def generate_new_exercise(
         state["current_interaction_mode"] = (
             "awaiting_answer"  # Mode expecting an answer
         )
+        state["error_message"] = None # Clear any previous error on success
 
         return state, new_exercise  # Return updated state and the new exercise object
 
@@ -681,6 +684,7 @@ def generate_new_assessment(
             history = []  # Ensure history is list
         state["conversation_history"] = history + [confirmation_message.model_dump()]
         state["current_interaction_mode"] = "awaiting_answer"
+        state["error_message"] = None # Clear any previous error on success
 
         return state, new_assessment
 

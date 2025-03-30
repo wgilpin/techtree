@@ -121,6 +121,77 @@ def deserialize_state_data(state_dict: Dict[str, Any]) -> LessonState:
     return cast(LessonState, deserialized_state)
 
 
+def _format_exercise_for_chat_history(exercise: Exercise) -> str:
+    """Formats an Exercise object into an HTML string for chat history."""
+    if not exercise:
+        return "<p><em>Error: Could not format exercise.</em></p>"
+
+    # Use model_dump to get a dictionary, handling potential None values
+    exercise_dict = exercise.model_dump(mode='json')
+
+    exercise_type = exercise_dict.get('type', 'unknown').replace('_', ' ')
+    instructions = exercise_dict.get('instructions') or exercise_dict.get('question') or 'N/A'
+    options = exercise_dict.get('options', [])
+    items = exercise_dict.get('items', [])
+
+    content_html = f'<div class="generated-item exercise-item">'
+    content_html += f'<h3>Exercise ({exercise_type})</h3>'
+    content_html += f'<p><strong>Instructions:</strong> {instructions}</p>'
+
+    if exercise_dict.get('type') == 'multiple_choice' and options:
+        content_html += '<ul>'
+        for opt in options:
+            opt_id = opt.get('id', '?')
+            opt_text = opt.get('text', '')
+            content_html += f'<li><strong>{opt_id})</strong> {opt_text}</li>'
+        content_html += '</ul>'
+        content_html += '<p><small><em>Submit your answer (e.g., \"A\") in the chat.</em></small></p>'
+    elif exercise_dict.get('type') == 'ordering' and items:
+        content_html += '<p><strong>Items to order:</strong></p><ul>'
+        for item in items:
+            content_html += f'<li>{item}</li>'
+        content_html += '</ul>'
+        content_html += '<p><small><em>Submit your ordered list (e.g., \"Item B, Item A, Item C\") in the chat.</em></small></p>'
+    else:
+        content_html += '<p><small><em>Submit your answer in the chat.</em></small></p>' # Indent this line
+
+    content_html += '</div>' # This should be outside the else
+    return content_html # This should be outside the else
+
+
+def _format_assessment_question_for_chat_history(question: AssessmentQuestion) -> str:
+    """Formats an AssessmentQuestion object into an HTML string for chat history."""
+    if not question:
+        return "<p><em>Error: Could not format assessment question.</em></p>"
+
+    question_dict = question.model_dump(mode='json')
+
+    q_type = question_dict.get('type', 'unknown').replace('_', ' ')
+    q_text = question_dict.get('question_text', 'N/A')
+    options = question_dict.get('options', [])
+
+    content_html = f'<div class="generated-item assessment-item">'
+    content_html += f'<h3>Assessment Question ({q_type})</h3>'
+    content_html += f'<p>{q_text}</p>'
+
+    if (question_dict.get('type') == 'multiple_choice' or question_dict.get('type') == 'true_false') and options:
+        content_html += '<ul>'
+        for opt in options:
+            opt_id = opt.get('id', '?')
+            opt_text = opt.get('text', '')
+            content_html += f'<li><strong>{opt_id})</strong> {opt_text}</li>'
+        content_html += '</ul>'
+        if question_dict.get('type') == 'multiple_choice':
+            content_html += '<p><small><em>Submit your answer (e.g., \"A\") in the chat.</em></small></p>'
+        else: # true_false
+            content_html += '<p><small><em>Submit your answer (\"True\" or \"False\") in the chat.</em></small></p>'
+    else: # short_answer
+        content_html += '<p><small><em>Submit your answer in the chat.</em></small></p>'
+
+    content_html += '</div>'
+    return content_html
+
+
 class LessonInteractionService:
     """
     Manages the state and interaction logic for lessons, including chat and
@@ -503,7 +574,35 @@ class LessonInteractionService:
             )
             updated_state = cast(LessonState, updated_state_dict) # Cast result back
 
-            # 3. Save the updated state
+            # 3. Format and append exercise to conversation history BEFORE saving
+            validated_exercise: Optional[Exercise] = None
+            if isinstance(new_exercise_obj, Exercise):
+                validated_exercise = new_exercise_obj
+            elif isinstance(new_exercise_obj, dict):
+                 try:
+                     validated_exercise = Exercise.model_validate(new_exercise_obj)
+                 except ValidationError:
+                     logger.error("Failed to validate exercise dict returned from node.")
+
+            if validated_exercise:
+                formatted_exercise_html = _format_exercise_for_chat_history(validated_exercise)
+                exercise_message = {
+                    "role": "assistant",
+                    "content": formatted_exercise_html,
+                    # Add timestamp or other metadata if needed
+                }
+                # Ensure conversation_history exists and is a list
+                if not isinstance(updated_state.get("conversation_history"), list):
+                    logger.warning("conversation_history missing or not a list, initializing.")
+                    updated_state["conversation_history"] = []
+                # Append the formatted exercise message
+                updated_state["conversation_history"].append(exercise_message)
+                logger.info("Appended generated exercise to conversation history.")
+            else:
+                logger.warning("No valid exercise object generated, cannot append to history.")
+
+
+            # 4. Save the updated state (which now includes the exercise message)
             try:
                 # Cast before serializing
                 state_json = serialize_state_data(updated_state)
@@ -585,7 +684,34 @@ class LessonInteractionService:
             )
             updated_state = cast(LessonState, updated_state_dict) # Cast result back
 
-            # 3. Save the updated state
+            # 3. Format and append assessment question to conversation history BEFORE saving
+            validated_question: Optional[AssessmentQuestion] = None
+            if isinstance(new_question_obj, AssessmentQuestion):
+                validated_question = new_question_obj
+            elif isinstance(new_question_obj, dict):
+                 try:
+                     validated_question = AssessmentQuestion.model_validate(new_question_obj)
+                 except ValidationError:
+                     logger.error("Failed to validate assessment dict returned from node.")
+
+            if validated_question:
+                formatted_question_html = _format_assessment_question_for_chat_history(validated_question)
+                question_message = {
+                    "role": "assistant",
+                    "content": formatted_question_html,
+                }
+                # Ensure conversation_history exists and is a list
+                if not isinstance(updated_state.get("conversation_history"), list):
+                    logger.warning("conversation_history missing or not a list, initializing.")
+                    updated_state["conversation_history"] = []
+                # Append the formatted question message
+                updated_state["conversation_history"].append(question_message)
+                logger.info("Appended generated assessment question to conversation history.")
+            else:
+                logger.warning("No valid assessment question object generated, cannot append to history.")
+
+
+            # 4. Save the updated state (which now includes the assessment message)
             try:
                 # Cast before serializing
                 state_json = serialize_state_data(updated_state)
