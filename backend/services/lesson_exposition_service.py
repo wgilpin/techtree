@@ -87,7 +87,7 @@ class LessonExpositionService:
                 time_constraint="5 minutes",
             )
             if llm_model is None:
-                 raise RuntimeError("LLM model not configured for exposition generation.")
+                raise RuntimeError("LLM model not configured for exposition generation.")
             response = call_with_retry(llm_model.generate_content, prompt)
             response_text = response.text
         except ResourceExhausted:
@@ -150,6 +150,7 @@ class LessonExpositionService:
             logger.error(f"Failed to save lesson exposition: {save_err}", exc_info=True)
             raise RuntimeError("Database error saving lesson exposition") from save_err
 
+    # pylint: disable=too-many-branches
     async def get_or_generate_exposition(
         self, syllabus_id: str, module_index: int, lesson_index: int
     ) -> Tuple[Optional[GeneratedLessonContent], Optional[int]]:

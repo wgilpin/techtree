@@ -6,7 +6,7 @@ to create, retrieve, and manage syllabus data.
 """
 
 import logging
-from typing import Any, Dict, Optional, cast # Added cast
+from typing import Any, Dict, Optional, cast  # Added cast
 
 from backend.ai.app import SyllabusAI
 from backend.services.sqlite_db import SQLiteDatabaseService
@@ -51,13 +51,15 @@ class SyllabusService:
             structured to match the SyllabusResponse model.
         """
         logger.debug(
-            f"get_or_generate_syllabus called with topic='{topic}', level='{level}', user_id='{user_id}'"
+            f"get_or_generate_syllabus called with topic='{topic}', "
+            f"level='{level}', user_id='{user_id}'"
         )
         syllabus = self.db_service.get_syllabus(topic, level, user_id)
 
         if not syllabus:
             logger.info(
-                f"Syllabus not found for topic='{topic}', level='{level}', user_id='{user_id}'. Generating new one."
+                f"Syllabus not found for topic='{topic}', level='{level}', user_id='{user_id}'. "
+                "Generating new one."
             )
             result = await self.create_syllabus(topic, level, user_id)
             return result
@@ -68,7 +70,8 @@ class SyllabusService:
         modules = syllabus.get("content", {}).get("modules", [])
         if not modules:
             logger.warning(
-                f"Existing syllabus {syllabus.get('syllabus_id')} found but has no modules in its content."
+                f"Existing syllabus {syllabus.get('syllabus_id')} found but "
+                "has no modules in its content."
             )
 
         return {
@@ -102,18 +105,18 @@ class SyllabusService:
         )
         self.syllabus_ai.initialize(topic, knowledge_level, user_id=user_id)
 
-        syllabus_content = (
-            self.syllabus_ai.get_or_create_syllabus()
-        )
+        syllabus_content = self.syllabus_ai.get_or_create_syllabus()
 
         if not syllabus_content or "modules" not in syllabus_content:
             logger.error("Syllabus AI failed to generate content with modules.")
             raise RuntimeError("Failed to generate syllabus content with modules.")
 
         syllabus_id = self.db_service.save_syllabus(
-            topic=str(syllabus_content.get("topic", topic)), # Ensure topic is str
-            level=str(syllabus_content.get("level", knowledge_level)), # Ensure level is str
-            content=cast(Dict[str, Any], syllabus_content), # Cast content to Dict
+            topic=str(syllabus_content.get("topic", topic)),  # Ensure topic is str
+            level=str(
+                syllabus_content.get("level", knowledge_level)
+            ),  # Ensure level is str
+            content=cast(Dict[str, Any], syllabus_content),  # Cast content to Dict
             user_id=user_id,
             user_entered_topic=topic,
         )
@@ -154,7 +157,8 @@ class SyllabusService:
             syllabus_id: The database ID of the syllabus to retrieve.
 
         Returns:
-            A dictionary representing the syllabus structured for SyllabusResponse, or None if not found.
+            A dictionary representing the syllabus structured for SyllabusResponse,
+                or None if not found.
         """
         logger.debug(f"Getting syllabus by ID: {syllabus_id}")
         syllabus = self.db_service.get_syllabus_by_id(syllabus_id)
@@ -194,7 +198,8 @@ class SyllabusService:
             A dictionary representing the found syllabus structured for SyllabusResponse, or None.
         """
         logger.debug(
-            f"get_syllabus_by_topic_level called with topic='{topic}', level='{level}', user_id='{user_id}'"
+            f"get_syllabus_by_topic_level called with topic='{topic}', "
+            f"level='{level}', user_id='{user_id}'"
         )
         syllabus = self.db_service.get_syllabus(topic, level, user_id)
 
@@ -210,7 +215,8 @@ class SyllabusService:
         modules = syllabus.get("content", {}).get("modules", [])
         if not modules:
             logger.warning(
-                f"Existing syllabus {syllabus.get('syllabus_id')} found but has no modules in its content."
+                f"Existing syllabus {syllabus.get('syllabus_id')} found but "
+                "has no modules in its content."
             )
 
         return {
@@ -292,9 +298,14 @@ class SyllabusService:
 
         # Access lessons via module['content']['lessons'] based on _build_syllabus_dict
         module_content = module.get("content", {})
-        if not isinstance(module_content, dict) or "lessons" not in module_content or not isinstance(module_content["lessons"], list):
+        if (
+            not isinstance(module_content, dict)
+            or "lessons" not in module_content
+            or not isinstance(module_content["lessons"], list)
+        ):
             raise ValueError(
-                f"Module {module_index} in syllabus {syllabus_id} is missing 'lessons' list in its content."
+                f"Module {module_index} in syllabus {syllabus_id} "
+                "is missing 'lessons' list in its content."
             )
 
         lessons = module_content["lessons"]

@@ -27,6 +27,7 @@ router = APIRouter()
 
 
 # Models for chat
+# pylint: disable=too-few-public-methods
 class ChatMessageRequest(BaseModel):
     """Request model for sending a chat message."""
     message: str
@@ -35,6 +36,7 @@ class ChatMessageRequest(BaseModel):
 # REMOVED local ChatMessage definition (lines 34-37)
 
 
+# pylint: disable=too-few-public-methods
 class ChatTurnResponse(BaseModel):
     """Response model for a chat turn, containing AI responses."""
     responses: List[ChatMessage] # This now refers to the imported ChatMessage
@@ -42,6 +44,7 @@ class ChatTurnResponse(BaseModel):
 
 
 # Updated model for GET /lesson to include state
+# pylint: disable=too-few-public-methods
 class LessonDataResponse(BaseModel):
     """Response model for lesson data including conversational state."""
     lesson_id: Optional[int]
@@ -50,6 +53,7 @@ class LessonDataResponse(BaseModel):
 
 
 # Response models for new generation endpoints
+# pylint: disable=too-few-public-methods
 class ExerciseResponse(BaseModel):
     """Response model for generating an exercise."""
     exercise: Optional[Exercise]
@@ -57,6 +61,7 @@ class ExerciseResponse(BaseModel):
     error: Optional[str] = None # For HTTP level errors, maybe remove if message covers it?
 
 
+# pylint: disable=too-few-public-methods
 class AssessmentQuestionResponse(BaseModel):
     """Response model for generating an assessment question."""
     question: Optional[AssessmentQuestion]
@@ -65,17 +70,20 @@ class AssessmentQuestionResponse(BaseModel):
 
 
 # Model for getting exposition by ID
+# pylint: disable=too-few-public-methods
 class LessonExpositionResponse(BaseModel):
     """Response model for retrieving lesson exposition by ID."""
     exposition: Optional[GeneratedLessonContent]
     error: Optional[str] = None
 
 
+# pylint: disable=too-few-public-methods
 class ProgressUpdate(BaseModel):
     """Request model for updating lesson progress status."""
     status: str
 
 
+# pylint: disable=too-few-public-methods
 class ProgressResponse(BaseModel):
     """Response model for lesson progress updates."""
     progress_id: Optional[int]

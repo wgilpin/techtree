@@ -1,3 +1,4 @@
+"""API routes for syllabus generation and retrieval."""
 # Improved code for backend/routers/syllabus_router.py
 import logging
 from typing import Any, Dict, List, Optional
@@ -18,12 +19,14 @@ router = APIRouter()
 # --- Pydantic Models ---
 
 # Consider adding example values or more specific field constraints if applicable
+# pylint: disable=too-few-public-methods
 class SyllabusRequest(BaseModel):
     """Request model for generating a syllabus."""
     topic: str = Field(..., json_schema_extra={"example": "Introduction to Python"})
     level: str = Field(..., json_schema_extra={"example": "Beginner"})
     user_id: Optional[str] = Field(None, json_schema_extra={"example": "user_abc_123"}) # Optional user ID
 
+# pylint: disable=too-few-public-methods
 class Module(BaseModel):
     """Represents a single module within a syllabus."""
     # Define structure more explicitly if known, e.g.:
@@ -31,6 +34,7 @@ class Module(BaseModel):
     title: str = Field(..., json_schema_extra={"example": "Module 1: Getting Started"})
     content: Dict[str, Any] # Or a more specific model
 
+# pylint: disable=too-few-public-methods
 class SyllabusResponse(BaseModel):
     """Response model for a generated syllabus."""
     syllabus_id: str = Field(..., json_schema_extra={"example": "sy_xyz_789"})
@@ -39,12 +43,14 @@ class SyllabusResponse(BaseModel):
     # Use the specific Module model for better type safety and documentation
     modules: List[Module]
 
+# pylint: disable=too-few-public-methods
 class SyllabusSummary(BaseModel):
     """Summary model for listing syllabi."""
     syllabus_id: str = Field(..., json_schema_extra={"example": "sy_xyz_789"})
     topic: str = Field(..., json_schema_extra={"example": "Introduction to Python"})
     level: str = Field(..., json_schema_extra={"example": "Beginner"})
 
+# pylint: disable=too-few-public-methods
 class SyllabusListResponse(BaseModel):
     """Response model for listing available syllabi."""
     syllabi: List[SyllabusSummary]
@@ -87,8 +93,8 @@ async def generate_syllabus( # Added return type hint
         )
 
         if not syllabus_data:
-             logger.error("Syllabus service returned empty data.")
-             raise HTTPException(
+            logger.error("Syllabus service returned empty data.")
+            raise HTTPException(
                  status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                  detail="Failed to generate syllabus data.",
              )

@@ -44,6 +44,27 @@ def _format_history_for_prompt(history: List[Dict[str, str]]) -> str:
 
 
 # Changed to synchronous
+def _map_intent_to_mode(intent_str: str, state: Dict[str, Any]) -> str:
+    """Maps the classified intent string to an interaction mode."""
+    intent_lower = intent_str.lower()
+    if "exercise" in intent_lower:
+        return "request_exercise"
+    if "assessment" in intent_lower:
+        return "request_assessment"
+    if "answer" in intent_lower or "submit" in intent_lower:
+        # Only map to submit_answer if there's an active task
+        if state.get("active_exercise") or state.get("active_assessment"):
+            return "submit_answer"
+        else:
+            # If user tries to submit without active task, treat as chatting
+            logger.warning("User tried to submit answer but no active task found.")
+            return "chatting"
+    # Add more specific intent mappings if needed
+    # ...
+    # Default to chatting if no specific intent matches
+    return "chatting"
+
+
 def classify_intent(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Classifies the user's intent based on the latest message and conversation history.
@@ -139,39 +160,22 @@ def classify_intent(state: Dict[str, Any]) -> Dict[str, Any]:
         classified_intent = intent_classification.intent.lower()
         logger.info(f"Classified intent for user {user_id}: {classified_intent}")
 
-        # Map classified intent to interaction mode
-        if "exercise" in classified_intent:
-            state["current_interaction_mode"] = "request_exercise"
-        elif "assessment" in classified_intent:
-            state["current_interaction_mode"] = "request_assessment"
-        elif "answer" in classified_intent or "submit" in classified_intent:
-            # Check if there's an active task to submit against
-            if active_exercise or active_assessment:
-                state["current_interaction_mode"] = "submit_answer"
-                # Store the potential answer for the evaluation node
-                state["potential_answer"] = last_user_message
-            else:
-                # Treat as chat if there's nothing active to answer
-                logger.info(
-                    "User tried to submit answer, but no active task. Treating as chat."
-                )
-                state["current_interaction_mode"] = "chatting"
-        elif "chat" in classified_intent or "question" in classified_intent:
-            state["current_interaction_mode"] = "chatting"
+        # Use helper function to map intent to mode
+        interaction_mode = _map_intent_to_mode(classified_intent, state)
+        state["current_interaction_mode"] = interaction_mode
+
+        # Store potential answer if intent is submit_answer
+        if interaction_mode == "submit_answer":
+            state["potential_answer"] = last_user_message
         else:
-            logger.warning(
-                f"Unknown intent classified: {classified_intent}. Defaulting to chatting."
-            )
-            state["current_interaction_mode"] = (
-                "chatting"  # Default for unknown intents
-            )
+            # Clear potential answer if not submitting
+            state["potential_answer"] = None
+
     else:
-        logger.error(
-            f"Intent classification failed for user {user_id}. Defaulting to chatting."
-        )
-        state["current_interaction_mode"] = (
-            "chatting"  # Default if classification fails completely
-        )
+        # If classification failed or returned no intent, default to chatting
+        logger.warning(f"Intent classification failed for user {user_id}. Defaulting to chatting.")
+        state["current_interaction_mode"] = "chatting"
+        state["potential_answer"] = None # Ensure potential answer is cleared
 
     return state
 
@@ -196,9 +200,8 @@ def generate_chat_response(
     # Use the 'history' variable defined above
     if not history or history[-1].get("role") != "user":
         logger.warning(
-            f"""
-                Cannot generate chat response:
-                No user message found in history_context for user {user_id}."""
+            "Cannot generate chat response: "
+            f"No user message found in history_context for user {user_id}."""
         )
         # Return state and None for the message
         return state, None
@@ -252,8 +255,7 @@ def generate_chat_response(
         logger.error(
             f"LLM call failed during chat response generation: {e}", exc_info=True
         )
-        ai_response_content = """
-            Sorry, I encountered an error while generating a response."""  # Error message
+        ai_response_content = "Sorry, I encountered an error while generating a response."
 
     # --- Prepare new message and update state (without history append) ---
     if ai_response_content is None:
@@ -275,6 +277,54 @@ def generate_chat_response(
 
 
 # Changed to synchronous
+def _prepare_evaluation_context(
+    active_exercise: Optional[Exercise],
+    active_assessment: Optional[AssessmentQuestion],
+) -> Dict[str, str]:
+    """Prepares the context dictionary needed for the evaluation prompt."""
+    context = {
+        "task_type": "Unknown",
+        "task_details": "N/A",
+        "correct_answer_details": "N/A",
+    }
+
+    if active_exercise:
+        context["task_type"] = "Exercise"
+        details = (
+            f"Type: {active_exercise.type}\nInstructions/Question: "
+            f"{active_exercise.instructions or active_exercise.question}"
+        )
+        if active_exercise.options:
+            options = json.dumps([opt.model_dump() for opt in active_exercise.options])
+            details += f"\nOptions: {options}"
+        if active_exercise.type == "ordering" and active_exercise.items:
+            details += f"\nItems to Order: {json.dumps(active_exercise.items)}"
+        context["task_details"] = details
+
+        if active_exercise.correct_answer:
+            context["correct_answer_details"] = (
+                f"Correct Answer/Criteria: {active_exercise.correct_answer}"
+            )
+
+    elif active_assessment:
+        context["task_type"] = "Assessment Question"
+        details = (
+            f"Type: {active_assessment.type}"
+            f"\nQuestion: {active_assessment.question_text}"
+        )
+        if active_assessment.options:
+            options = json.dumps([opt.model_dump() for opt in active_assessment.options])
+            details += f"\nOptions: {options}"
+        context["task_details"] = details
+
+        if active_assessment.correct_answer:
+            context["correct_answer_details"] = (
+                f"Correct Answer: {active_assessment.correct_answer}"
+            )
+
+    return context
+
+
 def evaluate_answer(
     state: Dict[str, Any],
 ) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
@@ -317,42 +367,11 @@ def evaluate_answer(
         # Return state and the error message
         return state, feedback_message
 
-    # --- Prepare Context for Evaluation Prompt ---
-    task_type = ""
-    task_details = ""
-    correct_answer_details = ""
-
-    if active_exercise:
-        task_type = "Exercise"
-        task_details = (
-            f"Type: {active_exercise.type}\nInstructions/Question: "
-            f"{active_exercise.instructions or active_exercise.question}"
-        )
-        if active_exercise.options:
-            options = json.dumps([opt.model_dump() for opt in active_exercise.options])
-            task_details += f"\nOptions: {options}"
-        if active_exercise.correct_answer:
-            correct_answer_details = (
-                f"Correct Answer/Criteria: {active_exercise.correct_answer}"
-            )
-        if active_exercise.type == "ordering" and active_exercise.items:
-            task_details += f"\nItems to Order: {json.dumps(active_exercise.items)}"
-
-    elif active_assessment:
-        task_type = "Assessment Question"
-        task_details = (
-            f"Type: {active_assessment.type}"
-            f"\nQuestion: {active_assessment.question_text}"
-        )
-        if active_assessment.options:
-            options = json.dumps(
-                [opt.model_dump() for opt in active_assessment.options]
-            )
-            task_details += f"\nOptions: {options}"
-        if active_assessment.correct_answer:
-            correct_answer_details = (
-                f"Correct Answer/Criteria: {active_assessment.correct_answer}"
-            )
+    # --- Prepare Context using Helper ---
+    eval_context = _prepare_evaluation_context(active_exercise, active_assessment)
+    task_type = eval_context["task_type"]
+    task_details = eval_context["task_details"]
+    correct_answer_details = eval_context["correct_answer_details"]
 
     # --- Call LLM for Evaluation ---
     evaluation_feedback_content = None  # Initialize as None
@@ -373,8 +392,7 @@ def evaluate_answer(
 
     except Exception as e:
         logger.error(f"LLM call failed during answer evaluation: {e}", exc_info=True)
-        evaluation_feedback_content = """
-            Sorry, I encountered an error while evaluating your answer."""  # Error message
+        evaluation_feedback_content = "Sorry, I encountered an error while evaluating your answer."
 
     # --- Prepare feedback message and update state ---
     feedback_message = {"role": "assistant", "content": evaluation_feedback_content}
@@ -513,9 +531,9 @@ def generate_new_exercise(
             ]
             assistant_message = {
                 "role": "assistant",
-                "content": f"""
-                    Okay, I've generated a new {validated_exercise.type.replace('_', ' ')}
-                    exercise for you. Please see below and provide your answer in the chat.""",
+                "content": (
+                    f"Okay, I've generated a new {validated_exercise.type.replace('_', ' ')} "
+                    "exercise for you. Please see below and provide your answer in the chat."),
             }
             state["current_interaction_mode"] = "awaiting_answer"
             state["error_message"] = None

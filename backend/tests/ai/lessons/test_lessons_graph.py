@@ -76,7 +76,7 @@ class TestLessonAICore:
 
         final_state = lesson_ai.start_chat(initial_state)
 
-        # TODO: Refactor start_chat in LessonAI to not add history directly.
+        # TODO: Refactor start_chat in LessonAI to not add history directly. # pylint: disable=fixme
         # For now, assert based on current behavior.
         assert (
             "conversation_history" in final_state
@@ -135,7 +135,7 @@ class TestLessonAICore:
 
         final_state = lesson_ai.start_chat(initial_state)
 
-        # TODO: Refactor start_chat in LessonAI to not add history directly.
+        # TODO: Refactor start_chat in LessonAI to not add history directly. # pylint: disable=fixme
         # For now, assert based on current behavior.
         assert (
             "conversation_history" in final_state

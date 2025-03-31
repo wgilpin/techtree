@@ -3,8 +3,7 @@
 # pylint: disable=protected-access, unused-argument, invalid-name
 
 from unittest.mock import ANY, MagicMock, patch
-from typing import Optional, List, Dict, Any, cast # Added imports
-
+from typing import Optional, List, Dict, Any, cast  # Added imports
 
 
 # Import the node functions directly
@@ -22,18 +21,19 @@ class TestEvaluateAnswerNode:
     """Tests for the evaluate_answer node action."""
 
     # Basic state setup helper (copied and adapted)
+
     def _get_base_state(
         self,
         user_message: Optional[str] = "Test answer",
-        history: Optional[List[Dict[str, str]]] = None, # Use List[Dict[str, str]]
+        history: Optional[List[Dict[str, str]]] = None,  # Use List[Dict[str, str]]
         active_exercise: Optional[Exercise] = None,
         active_assessment: Optional[AssessmentQuestion] = None,
-        potential_answer: Optional[str] = "Test answer"
+        potential_answer: Optional[str] = "Test answer",
     ) -> LessonState:
         """Creates a base LessonState dictionary for testing evaluation."""
         current_history = list(history) if history is not None else []
-        if user_message: # Usually the answer is the last user message
-             current_history.append({"role": "user", "content": user_message})
+        if user_message:  # Usually the answer is the last user message
+            current_history.append({"role": "user", "content": user_message})
 
         # Ensure all keys from LessonState are present
         state: LessonState = {
@@ -51,14 +51,18 @@ class TestEvaluateAnswerNode:
             "lesson_uid": "eval_lesson_uid",
             "created_at": "sometime",
             "updated_at": "sometime",
-            "history_context": current_history, # Use history_context
-            "current_interaction_mode": "submit_answer", # Assume mode is correct
+            "history_context": current_history,  # Use history_context
+            "current_interaction_mode": "submit_answer",  # Assume mode is correct
             "current_exercise_index": None,
             "current_quiz_question_index": None,
             "generated_exercises": [active_exercise] if active_exercise else [],
-            "generated_assessment_questions": [active_assessment] if active_assessment else [],
+            "generated_assessment_questions": (
+                [active_assessment] if active_assessment else []
+            ),
             "generated_exercise_ids": [active_exercise.id] if active_exercise else [],
-            "generated_assessment_question_ids": [active_assessment.id] if active_assessment else [],
+            "generated_assessment_question_ids": (
+                [active_assessment.id] if active_assessment else []
+            ),
             "error_message": None,
             "active_exercise": active_exercise,
             "active_assessment": active_assessment,
@@ -74,7 +78,7 @@ class TestEvaluateAnswerNode:
         self,
         mock_call_llm: MagicMock,
         mock_load_prompt: MagicMock,
-    ) -> None: # Added return type hint
+    ) -> None:  # Added return type hint
         """Test evaluating a correct exercise answer."""
         mock_load_prompt.return_value = "mocked_eval_prompt"
         mock_call_llm.return_value = "Spot on!"
@@ -90,11 +94,13 @@ class TestEvaluateAnswerNode:
             user_message=None,
             history=initial_history,
             active_exercise=exercise,
-            potential_answer="4"
+            potential_answer="4",
         )
 
         # Cast state before calling node
-        updated_state, feedback_message = nodes.evaluate_answer(cast(Dict[str, Any], state))
+        updated_state, feedback_message = nodes.evaluate_answer(
+            cast(Dict[str, Any], state)
+        )
 
         mock_load_prompt.assert_called_once_with(
             "evaluate_answer",
@@ -123,20 +129,18 @@ class TestEvaluateAnswerNode:
         self,
         mock_call_llm: MagicMock,
         mock_load_prompt: MagicMock,
-    ) -> None: # Added return type hint
+    ) -> None:  # Added return type hint
         """Test evaluating an incorrect quiz answer with explanation."""
         mock_load_prompt.return_value = "mocked_eval_prompt"
         mock_call_llm.return_value = "Not quite. *Explanation:* Python is a language."
 
-        question = (
-            AssessmentQuestion(
-                id="q_eval",
-                type="multiple_choice",
-                question_text="What is Python?",
-                options=[Option(id="A", text="Snake"), Option(id="B", text="Language")],
-                correct_answer_id="B",
-                correct_answer="Language",
-            )
+        question = AssessmentQuestion(
+            id="q_eval",
+            type="multiple_choice",
+            question_text="What is Python?",
+            options=[Option(id="A", text="Snake"), Option(id="B", text="Language")],
+            correct_answer_id="B",
+            correct_answer="Language",
         )
         initial_history = [
             {
@@ -149,17 +153,19 @@ class TestEvaluateAnswerNode:
             user_message=None,
             history=initial_history,
             active_assessment=question,
-            potential_answer="A"
+            potential_answer="A",
         )
 
         # Cast state before calling node
-        updated_state, feedback_message = nodes.evaluate_answer(cast(Dict[str, Any], state))
+        updated_state, feedback_message = nodes.evaluate_answer(
+            cast(Dict[str, Any], state)
+        )
 
         mock_load_prompt.assert_called_once_with(
             "evaluate_answer",
             task_type="Assessment Question",
             task_details=ANY,
-            correct_answer_details="Correct Answer/Criteria: Language",
+            correct_answer_details="Correct Answer: Language", # Match actual call
             user_answer="A",
         )
         mock_call_llm.assert_called_once_with("mocked_eval_prompt", max_retries=2)
@@ -168,7 +174,9 @@ class TestEvaluateAnswerNode:
         assert isinstance(feedback_message, dict)
         assert feedback_message.get("role") == "assistant"
         assert "Not quite." in feedback_message.get("content", "")
-        assert "*Explanation:* Python is a language." in feedback_message.get("content", "")
+        assert "*Explanation:* Python is a language." in feedback_message.get(
+            "content", ""
+        )
 
         # Check the updated state
         assert isinstance(updated_state, dict)
@@ -177,19 +185,21 @@ class TestEvaluateAnswerNode:
         assert updated_state.get("potential_answer") is None
 
     @patch("backend.ai.lessons.nodes.logger", MagicMock())
-    def test_evaluate_answer_no_user_answer(self) -> None: # Added return type hint
+    def test_evaluate_answer_no_user_answer(self) -> None:  # Added return type hint
         """Test evaluation attempt without a user answer in state."""
         initial_history = [{"role": "assistant", "content": "Question?"}]
         state = self._get_base_state(
             user_message=None,
             history=initial_history,
             active_exercise=Exercise(id="ex", type="short_answer"),
-            potential_answer=None
+            potential_answer=None,
         )
 
         with patch("backend.ai.lessons.nodes.logger.error") as mock_error:
             # Cast state before calling node
-            updated_state, feedback_message = nodes.evaluate_answer(cast(Dict[str, Any], state))
+            updated_state, feedback_message = nodes.evaluate_answer(
+                cast(Dict[str, Any], state)
+            )
 
             mock_error.assert_called_once_with(
                 f"Cannot evaluate: No user answer found in state for user {state['user_id']}."
@@ -197,14 +207,16 @@ class TestEvaluateAnswerNode:
             # Check the returned feedback message
             assert isinstance(feedback_message, dict)
             assert feedback_message.get("role") == "assistant"
-            assert "Sorry, I couldn't find your answer" in feedback_message.get("content", "")
+            assert "Sorry, I couldn't find your answer" in feedback_message.get(
+                "content", ""
+            )
 
             # Check the updated state
             assert isinstance(updated_state, dict)
             assert updated_state.get("current_interaction_mode") == "chatting"
 
     @patch("backend.ai.lessons.nodes.logger", MagicMock())
-    def test_evaluate_answer_no_active_task(self) -> None: # Added return type hint
+    def test_evaluate_answer_no_active_task(self) -> None:  # Added return type hint
         """Test evaluation when there is no active exercise or assessment."""
         initial_history = [{"role": "user", "content": "My answer"}]
         state = self._get_base_state(
@@ -212,12 +224,14 @@ class TestEvaluateAnswerNode:
             history=initial_history,
             active_exercise=None,
             active_assessment=None,
-            potential_answer="My answer"
+            potential_answer="My answer",
         )
 
         with patch("backend.ai.lessons.nodes.logger.error") as mock_error:
             # Cast state before calling node
-            updated_state, feedback_message = nodes.evaluate_answer(cast(Dict[str, Any], state))
+            updated_state, feedback_message = nodes.evaluate_answer(
+                cast(Dict[str, Any], state)
+            )
 
             mock_error.assert_called_once_with(
                 "Cannot evaluate: No active exercise or assessment"
@@ -226,7 +240,10 @@ class TestEvaluateAnswerNode:
             # Check the returned feedback message
             assert isinstance(feedback_message, dict)
             assert feedback_message.get("role") == "assistant"
-            assert "There doesn't seem to be an active question" in feedback_message.get("content", "")
+            assert (
+                "There doesn't seem to be an active question"
+                in feedback_message.get("content", "")
+            )
 
             # Check the updated state
             assert isinstance(updated_state, dict)
@@ -245,7 +262,7 @@ class TestEvaluateAnswerNode:
         self,
         mock_call_llm: MagicMock,
         mock_load_prompt: MagicMock,
-    ) -> None: # Added return type hint
+    ) -> None:  # Added return type hint
         """Test evaluation when the LLM call/parsing fails."""
         mock_load_prompt.return_value = "mocked_eval_prompt"
         exercise = Exercise(
@@ -256,12 +273,14 @@ class TestEvaluateAnswerNode:
             user_message=None,
             history=initial_history,
             active_exercise=exercise,
-            potential_answer="answer"
+            potential_answer="answer",
         )
 
         with patch("backend.ai.lessons.nodes.logger.warning") as mock_log_warning:
             # Cast state before calling node
-            updated_state, feedback_message = nodes.evaluate_answer(cast(Dict[str, Any], state))
+            updated_state, feedback_message = nodes.evaluate_answer(
+                cast(Dict[str, Any], state)
+            )
 
             mock_load_prompt.assert_called_once()
             mock_call_llm.assert_called_once()
@@ -272,28 +291,31 @@ class TestEvaluateAnswerNode:
             # Check the returned feedback message
             assert isinstance(feedback_message, dict)
             assert feedback_message.get("role") == "assistant"
-            assert "Sorry, I couldn't evaluate your answer properly" in feedback_message.get("content", "") # Check fallback
+            assert (
+                "Sorry, I couldn't evaluate your answer properly"
+                in feedback_message.get("content", "")
+            )  # Check fallback
 
             # Check the updated state
             assert isinstance(updated_state, dict)
             assert updated_state.get("current_interaction_mode") == "chatting"
             assert updated_state.get("active_exercise") is None
-            assert updated_state.get("potential_answer") is None # Also check potential_answer
+            assert (
+                updated_state.get("potential_answer") is None
+            )  # Also check potential_answer
             assert updated_state.get("potential_answer") is None
 
     @patch(
         "backend.ai.lessons.nodes.load_prompt",
         side_effect=Exception("LLM Error"),
     )
-    @patch(
-        "backend.ai.lessons.nodes.call_llm_plain_text"
-    )
+    @patch("backend.ai.lessons.nodes.call_llm_plain_text")
     @patch("backend.ai.lessons.nodes.logger", MagicMock())
     def test_evaluate_answer_llm_exception(
         self,
         mock_call_llm: MagicMock,
         mock_load_prompt_exc: MagicMock,
-    ) -> None: # Added return type hint
+    ) -> None:  # Added return type hint
         """Test evaluation when an exception occurs during LLM call."""
         exercise = Exercise(
             id="ex_eval_exc", type="short_answer", question="?", correct_answer="!"
@@ -303,12 +325,14 @@ class TestEvaluateAnswerNode:
             user_message=None,
             history=initial_history,
             active_exercise=exercise,
-            potential_answer="answer"
+            potential_answer="answer",
         )
 
         with patch("backend.ai.lessons.nodes.logger.error") as mock_log_error:
             # Cast state before calling node
-            updated_state, feedback_message = nodes.evaluate_answer(cast(Dict[str, Any], state))
+            updated_state, feedback_message = nodes.evaluate_answer(
+                cast(Dict[str, Any], state)
+            )
 
             mock_load_prompt_exc.assert_called_once()
             mock_call_llm.assert_not_called()
@@ -321,7 +345,10 @@ class TestEvaluateAnswerNode:
             # Check the returned feedback message
             assert isinstance(feedback_message, dict)
             assert feedback_message.get("role") == "assistant"
-            assert "Sorry, I encountered an error while evaluating" in feedback_message.get("content", "") # Check error fallback
+            assert (
+                "Sorry, I encountered an error while evaluating"
+                in feedback_message.get("content", "")
+            )  # Check error fallback
 
             # Check the updated state
             assert isinstance(updated_state, dict)

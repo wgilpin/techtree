@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__) # Added logger instance
 
 # --- Pydantic Models ---
 
+# pylint: disable=too-few-public-methods
 class CourseProgress(BaseModel):
     """Model representing progress summary for a course (syllabus)."""
     syllabus_id: str
@@ -27,6 +28,7 @@ class CourseProgress(BaseModel):
     progress_percentage: float = Field(..., ge=0, le=100)
     last_accessed: str # ISO format timestamp
 
+# pylint: disable=too-few-public-methods
 class CourseListResponse(BaseModel):
     """Response model for listing courses the user has progress in."""
     courses: List[CourseProgress]

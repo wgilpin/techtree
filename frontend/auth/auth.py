@@ -2,6 +2,7 @@
 """ Blueprint for authentication and authorization """
 
 import logging
+from typing import Callable, Any, Union, Tuple
 from functools import wraps
 
 import requests
@@ -13,7 +14,9 @@ from flask import (
     session,
     url_for,
     current_app, # Import current_app
+    Response as FlaskResponse,
 )
+from werkzeug.wrappers import Response as WerkzeugResponse # type: ignore[import-not-found]
 
 # Configure logging for the blueprint
 logger = logging.getLogger(__name__)
@@ -29,13 +32,17 @@ auth_bp = Blueprint(
 
 # --- Authentication Decorator ---
 # Now lives here, can be imported by other blueprints
-def login_required(f):
+def login_required(
+    f: Callable[..., Any]
+) -> Callable[..., Union[WerkzeugResponse, str, FlaskResponse, Tuple[FlaskResponse, int]]]:
     """
     Decorator for routes that require a logged-in user.
     Redirects to the login page if the user is not in the session.
     """
     @wraps(f)
-    def decorated_function(*args, **kwargs):
+    def decorated_function(
+        *args: Any, **kwargs: Any
+    ) -> Union[WerkzeugResponse, str, FlaskResponse, Tuple[FlaskResponse, int]]:
         if "user" not in session:
             # Redirect to the login route within this blueprint
             return redirect(url_for("auth.login"))
@@ -49,8 +56,8 @@ def login_required(f):
 
 # --- Authentication Routes ---
 
-@auth_bp.route("/login", methods=["GET", "POST"])
-def login():
+@auth_bp.route("/login", methods=["GET", "POST"]) # type: ignore[misc]
+def login() -> Union[WerkzeugResponse, str]:
     """Handles user login."""
     error = None
     if request.method == "POST":
@@ -93,8 +100,8 @@ def login():
     return render_template("login.html", error=error)
 
 
-@auth_bp.route("/register", methods=["GET", "POST"])
-def register():
+@auth_bp.route("/register", methods=["GET", "POST"]) # type: ignore[misc]
+def register() -> Union[WerkzeugResponse, str]:
     """Handles user registration."""
     error = None
     if request.method == "POST":
@@ -130,8 +137,8 @@ def register():
     return render_template("register.html", error=error)
 
 
-@auth_bp.route("/logout")
-def logout():
+@auth_bp.route("/logout") # type: ignore[misc]
+def logout() -> WerkzeugResponse:
     """Handles user logout."""
     session.pop("user", None)
     # Redirect to the login page within this blueprint

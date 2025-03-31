@@ -15,12 +15,14 @@ router = APIRouter()
 
 # --- Pydantic Models ---
 
+# pylint: disable=too-few-public-methods
 class OnboardingRequest(BaseModel):
     """Request model for starting the onboarding process."""
     topic: str
     user_id: Optional[str] = None # Optional user ID
 
 # Updated response model for starting onboarding
+# pylint: disable=too-few-public-methods
 class OnboardingResponse(BaseModel):
     """Response model for the initial onboarding state."""
     question: str
@@ -30,11 +32,13 @@ class OnboardingResponse(BaseModel):
     logs: Optional[List[str]] = None # For debugging
 
 # Updated request model for submitting an answer
+# pylint: disable=too-few-public-methods
 class AnswerRequest(BaseModel):
     """Request model for submitting an answer during onboarding."""
     answer: str # Expect a single answer string
 
 # New response model for submitting an answer
+# pylint: disable=too-few-public-methods
 class AnswerResponse(BaseModel):
     """Response model after submitting an answer."""
     is_complete: bool
@@ -64,16 +68,16 @@ async def start_onboarding( # Added return type hint
         )
 
         if session_data.get("error"):
-             logger.error(f"Onboarding service returned error: {session_data['error']}")
+            logger.error(f"Onboarding service returned error: {session_data['error']}")
              # Include logs in the error detail if available
-             error_detail = f"Failed to initialize onboarding: {session_data['error']}"
-             if session_data.get("logs"):
-                 error_detail += f" Logs: {'; '.join(session_data['logs'])}"
-             raise HTTPException(status_code=500, detail=error_detail)
+            error_detail = f"Failed to initialize onboarding: {session_data['error']}"
+            if session_data.get("logs"):
+                error_detail += f" Logs: {'; '.join(session_data['logs'])}"
+            raise HTTPException(status_code=500, detail=error_detail)
 
         if "question" not in session_data or "difficulty" not in session_data:
-             logger.error("Onboarding service did not return expected question data.")
-             raise HTTPException(status_code=500, detail="Failed to initialize onboarding session.")
+            logger.error("Onboarding service did not return expected question data.")
+            raise HTTPException(status_code=500, detail="Failed to initialize onboarding session.")
 
         return OnboardingResponse(
             question=session_data["question"],

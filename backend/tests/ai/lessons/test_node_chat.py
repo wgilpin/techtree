@@ -4,7 +4,13 @@
 
 from unittest.mock import MagicMock, patch
 from unittest.mock import ANY
-from typing import Optional, List, Dict, Any, cast # Added Optional, List, Dict, Any, cast
+from typing import (
+    Optional,
+    List,
+    Dict,
+    Any,
+    cast,
+)  # Added Optional, List, Dict, Any, cast
 
 
 from google.api_core.exceptions import ResourceExhausted
@@ -23,8 +29,8 @@ class TestGenerateChatResponse:
     # Basic state setup helper (copied and adapted)
     def _get_base_state(
         self,
-        user_message: Optional[str] = "Test message", # Allow None
-        history: Optional[List[Dict[str, str]]] = None # Use List[Dict[str, str]]
+        user_message: Optional[str] = "Test message",  # Allow None
+        history: Optional[List[Dict[str, str]]] = None,  # Use List[Dict[str, str]]
     ) -> LessonState:
         """Creates a base LessonState dictionary for testing chat response."""
         current_history = list(history) if history is not None else []
@@ -47,7 +53,7 @@ class TestGenerateChatResponse:
             "lesson_uid": "chat_lesson_uid",
             "created_at": "sometime",
             "updated_at": "sometime",
-            "history_context": current_history, # Use history_context
+            "history_context": current_history,  # Use history_context
             "current_interaction_mode": "chatting",
             "current_exercise_index": None,
             "current_quiz_question_index": None,
@@ -70,7 +76,7 @@ class TestGenerateChatResponse:
         self,
         mock_call_llm: MagicMock,
         mock_load_prompt: MagicMock,
-    ) -> None: # Added return type hint
+    ) -> None:  # Added return type hint
         """Test successful chat response generation."""
         mock_load_prompt.return_value = "mocked_chat_prompt"
         mock_call_llm.return_value = "This is the AI response."
@@ -79,16 +85,18 @@ class TestGenerateChatResponse:
         state = self._get_base_state(user_message=None, history=initial_history)
 
         # Cast state before calling node
-        updated_state, assistant_message = nodes.generate_chat_response(cast(Dict[str, Any], state))
+        updated_state, assistant_message = nodes.generate_chat_response(
+            cast(Dict[str, Any], state)
+        )
 
         mock_load_prompt.assert_called_once_with(
             "chat_response",
             user_message="Tell me more.",
-            history_json="", # Check if prompt uses history_json or conversation_history
+            history_json="",  # Check if prompt uses history_json or conversation_history
             topic="Chatting",
             lesson_title="Chat Lesson",
             user_level="beginner",
-            exposition=ANY, # Check prompt key
+            exposition=ANY,  # Check prompt key
             active_task_context="None",
         )
         mock_call_llm.assert_called_once_with("mocked_chat_prompt", max_retries=3)
@@ -106,17 +114,22 @@ class TestGenerateChatResponse:
         assert "history_context" not in updated_state
 
     @patch("backend.ai.lessons.nodes.logger", MagicMock())
-    def test_generate_chat_response_no_user_message(self) -> None: # Added return type hint
+    def test_generate_chat_response_no_user_message(
+        self,
+    ) -> None:  # Added return type hint
         """Test chat response generation when no user message precedes."""
         initial_history = [{"role": "assistant", "content": "Welcome!"}]
         state = self._get_base_state(user_message=None, history=initial_history)
 
         with patch("backend.ai.lessons.nodes.logger.warning") as mock_warning:
             # Cast state before calling node
-            updated_state, assistant_message = nodes.generate_chat_response(cast(Dict[str, Any], state))
+            updated_state, assistant_message = nodes.generate_chat_response(
+                cast(Dict[str, Any], state)
+            )
 
             mock_warning.assert_called_once_with(
-                f"Cannot generate chat response: No user message found in history_context for user {state['user_id']}."
+                "Cannot generate chat response: No user message found in "
+                f"history_context for user {state['user_id']}."
             )
             # Node should return original state and None message in this case
             assert assistant_message is None
@@ -125,14 +138,14 @@ class TestGenerateChatResponse:
     @patch("backend.ai.lessons.nodes.load_prompt")
     @patch(
         "backend.ai.lessons.nodes.call_llm_plain_text",
-        side_effect=ResourceExhausted("Quota exceeded"), # type: ignore[no-untyped-call]
+        side_effect=ResourceExhausted("Quota exceeded"),  # type: ignore[no-untyped-call]
     )
     @patch("backend.ai.lessons.nodes.logger", MagicMock())
     def test_generate_chat_response_resource_exhausted(
         self,
         mock_call_llm: MagicMock,
         mock_load_prompt: MagicMock,
-    ) -> None: # Added return type hint
+    ) -> None:  # Added return type hint
         """Test chat response generation handling ResourceExhausted."""
         mock_load_prompt.return_value = "mocked_chat_prompt"
         initial_history = [{"role": "user", "content": "Tell me more."}]
@@ -140,7 +153,9 @@ class TestGenerateChatResponse:
 
         with patch("backend.ai.lessons.nodes.logger.error") as mock_error:
             # Cast state before calling node
-            updated_state, assistant_message = nodes.generate_chat_response(cast(Dict[str, Any], state))
+            updated_state, assistant_message = nodes.generate_chat_response(
+                cast(Dict[str, Any], state)
+            )
 
             mock_error.assert_called_once()
             assert "LLM call failed" in mock_error.call_args[0][0]
@@ -148,7 +163,10 @@ class TestGenerateChatResponse:
             # Check the returned assistant message (should be error fallback)
             assert isinstance(assistant_message, dict)
             assert assistant_message.get("role") == "assistant"
-            assert "Sorry, I encountered an error while generating a response." in assistant_message.get("content", "")
+            assert (
+                "Sorry, I encountered an error while generating a response."
+                in assistant_message.get("content", "")
+            )
 
             # Check the updated state
             assert isinstance(updated_state, dict)
@@ -158,33 +176,34 @@ class TestGenerateChatResponse:
         "backend.ai.lessons.nodes.load_prompt",
         side_effect=Exception("Prompt loading failed"),
     )
-    @patch(
-        "backend.ai.lessons.nodes.call_llm_plain_text"
-    )
+    @patch("backend.ai.lessons.nodes.call_llm_plain_text")
     @patch("backend.ai.lessons.nodes.logger", MagicMock())
     def test_generate_chat_response_generic_exception(
         self,
         mock_call_llm: MagicMock,
         mock_load_prompt_exc: MagicMock,
-    ) -> None: # Added return type hint
+    ) -> None:  # Added return type hint
         """Test chat response generation handling a generic exception."""
         initial_history = [{"role": "user", "content": "Tell me more."}]
         state = self._get_base_state(user_message=None, history=initial_history)
 
         with patch("backend.ai.lessons.nodes.logger.error") as mock_error:
             # Cast state before calling node
-            updated_state, assistant_message = nodes.generate_chat_response(cast(Dict[str, Any], state))
+            updated_state, assistant_message = nodes.generate_chat_response(
+                cast(Dict[str, Any], state)
+            )
 
             mock_error.assert_called_once()
-            assert (
-                "LLM call failed" in mock_error.call_args[0][0]
-            )
+            assert "LLM call failed" in mock_error.call_args[0][0]
             mock_call_llm.assert_not_called()
 
             # Check the returned assistant message (should be error fallback)
             assert isinstance(assistant_message, dict)
             assert assistant_message.get("role") == "assistant"
-            assert "Sorry, I encountered an error while generating a response." in assistant_message.get("content", "")
+            assert (
+                "Sorry, I encountered an error while generating a response."
+                in assistant_message.get("content", "")
+            )
 
             # Check the updated state
             assert isinstance(updated_state, dict)

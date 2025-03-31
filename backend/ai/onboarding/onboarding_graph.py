@@ -101,14 +101,14 @@ def call_with_retry(
             if func == getattr(TAVILY, "search", None) and TAVILY is None:
                 raise RuntimeError("Tavily client is not configured.")
             return func(*args, **kwargs)
-        except ResourceExhausted as e:
+        except ResourceExhausted as ex:
             retries += 1
             if retries > max_retries:
                 logger.error(
                     f"Max retries ({max_retries}) exceeded for {func.__name__}. "
                     "Raising ResourceExhausted."
                 )
-                raise e
+                raise ex
 
             # Calculate delay with exponential backoff and jitter
             current_delay = delay * (2 ** (retries - 1)) + random.uniform(0, 1)
@@ -117,13 +117,13 @@ def call_with_retry(
                 f"seconds... (Attempt {retries}/{max_retries})"
             )
             time.sleep(current_delay)
-        except requests.exceptions.Timeout as e:
+        except requests.exceptions.Timeout as ex:
             retries += 1
             if retries > max_retries:
                 logger.error(
                     f"Max retries ({max_retries}) exceeded for {func.__name__} due to Timeout."
                 )
-                raise e
+                raise ex
 
             # Calculate delay with exponential backoff and jitter
             current_delay = delay * (2 ** (retries - 1)) + random.uniform(0, 1)
@@ -132,11 +132,11 @@ def call_with_retry(
                 f"seconds... (Attempt {retries}/{max_retries})"
             )
             time.sleep(current_delay)
-        except Exception as e:
+        except Exception as exc:
             logger.error(
-                f"Non-retryable error calling {func.__name__}: {e}", exc_info=True
+                f"Non-retryable error calling {func.__name__}: {exc}", exc_info=True
             )
-            raise e
+            raise exc
 
 
 # --- Define State ---
@@ -295,11 +295,11 @@ class TechTreeAI:
                 "google_results": google_results,
                 "search_completed": True,
             }
-        except Exception as e:  # pylint: disable=broad-except
-            self.search_status = f"Error during internet search: {e}"
+        except Exception as ex:  # pylint: disable=broad-except
+            self.search_status = f"Error during internet search: {ex}"
             logger.error(self.search_status, exc_info=True)
             return {
-                "wikipedia_content": f"Error searching for {topic}: {str(e)}",
+                "wikipedia_content": f"Error searching for {topic}: {str(ex)}",
                 "google_results": [],
                 "search_completed": True,
             }
@@ -397,10 +397,10 @@ class TechTreeAI:
                     "Could not extract question using regex, using full response."
                 )
 
-        except Exception as e:
-            logger.error(f"Error in _generate_question: {str(e)}", exc_info=True)
+        except Exception as ex:
+            logger.error(f"Error in _generate_question: {str(ex)}", exc_info=True)
             difficulty = MEDIUM
-            question = f"Error generating question: {str(e)}"
+            question = f"Error generating question: {str(ex)}"
 
         return {
             "current_question": question,
@@ -410,6 +410,7 @@ class TechTreeAI:
         }
 
     # Added return type hint
+    # pylint: disable=too-many-branches, too-many-statements
     def _evaluate_answer(self, state: AgentState, answer: str = "") -> Dict[str, Any]:
         """Evaluates the answer using the Gemini API."""
         if not answer:
@@ -497,10 +498,10 @@ class TechTreeAI:
                 classification = 0.0
                 feedback = evaluation
 
-        except Exception as e:
-            logger.error(f"Error in _evaluate_answer: {str(e)}", exc_info=True)
+        except Exception as ex:
+            logger.error(f"Error in _evaluate_answer: {str(ex)}", exc_info=True)
             classification = 0.0
-            feedback = f"Error evaluating answer: {str(e)}"
+            feedback = f"Error evaluating answer: {str(ex)}"
 
         current_difficulty = state["current_target_difficulty"]
         consecutive_wrong = state["consecutive_wrong"]
@@ -621,8 +622,8 @@ class TechTreeAI:
             self.state = cast(AgentState, initial_state_dict)
             logger.debug(f"Successfully initialized state for topic: {topic}")
             return {"status": "initialized", "topic": topic}
-        except Exception as e:
-            logger.error(f"Error initializing TechTreeAI: {str(e)}", exc_info=True)
+        except Exception as ex:
+            logger.error(f"Error initializing TechTreeAI: {str(ex)}", exc_info=True)
             raise
 
     # Added return type hint
@@ -645,8 +646,8 @@ class TechTreeAI:
                         f"Ignoring unexpected key '{key}' from search node result."
                     )
             return {"status": "search_completed", "search_status": self.search_status}
-        except Exception as e:
-            logger.error(f"Error during search: {str(e)}", exc_info=True)
+        except Exception as ex:
+            logger.error(f"Error during search: {str(ex)}", exc_info=True)
             raise
 
     # Added return type hint

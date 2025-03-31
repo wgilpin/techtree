@@ -28,6 +28,7 @@ repos:
             'pandas-stubs>=2.2.3.250308',
             'types-cachetools>=5.5.0.20240820',
             "types-defusedxml>=0.7.0.20240218",
+            # 'types-Flask>=3.0.0.20240118', # Removed due to sync issues
             "types-httplib2>=0.22.0.20241221",
             "types-protobuf>=5.29.1.20250315",
             "types-psutil>=7.0.0.20250218",
@@ -40,3 +41,12 @@ repos:
             "types-requests>=2.32.0.20250328",
             "types-tqdm>=4.67.0.20250319",
             ]
+
+-   repo: https://github.com/pylint-dev/pylint
+    rev: v3.1.0 # Or choose a specific version
+    hooks:
+    -   id: pylint
+        args:
+          - --rcfile=pyproject.toml # Assuming pylint config is in pyproject.toml
+        files: ^(backend/|frontend/) # Adjust pattern as needed
+        # exclude: # Add excludes if necessary

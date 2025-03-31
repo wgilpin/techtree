@@ -1,3 +1,4 @@
+"""Service layer for authentication logic (registration, login, password hashing)."""
 # backend/services/auth_service.py
 import os
 from datetime import datetime, timedelta

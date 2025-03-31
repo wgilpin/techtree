@@ -50,7 +50,8 @@ class TestGenerateExerciseNode:
             "current_quiz_question_index": None,
             "generated_exercises": [], # Will be populated by tests if needed
             "generated_assessment_questions": [],
-            "generated_exercise_ids": existing_exercise_ids if existing_exercise_ids is not None else [],
+            "generated_exercise_ids":
+                existing_exercise_ids if existing_exercise_ids is not None else [],
             "generated_assessment_question_ids": [],
             "error_message": None,
             "active_exercise": None,
@@ -200,5 +201,6 @@ class TestGenerateExerciseNode:
 
         # State should have error message added, but otherwise be the same
         expected_state = cast(Dict[str, Any], state)
-        expected_state["error_message"] = updated_state["error_message"] # Copy error message for comparison
+        # Copy error message for comparison
+        expected_state["error_message"] = updated_state["error_message"]
         assert updated_state == expected_state

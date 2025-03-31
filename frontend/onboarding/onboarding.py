@@ -2,6 +2,7 @@
 """ Blueprint for onboarding - syllabus creation and user level testing """
 
 import logging
+from typing import Any, Dict, Optional, cast, Union
 import requests
 from flask import (
     Blueprint,
@@ -13,6 +14,7 @@ from flask import (
     url_for,
     current_app,  # Import current_app
 )
+from werkzeug.wrappers import Response as WerkzeugResponse # type: ignore[import-not-found]
 
 # Configure logging for the blueprint
 logger = logging.getLogger(__name__)
@@ -26,7 +28,7 @@ onboarding_bp = Blueprint("onboarding", __name__, template_folder="../templates"
 # --- Onboarding API Helper Functions ---
 
 
-def _start_assessment(topic):
+def _start_assessment(topic: str) -> Optional[Dict[str, Any]]:
     """Calls the backend API to start a new assessment."""
     logger.info(f"Starting assessment for topic: {topic}")
     try:
@@ -39,7 +41,8 @@ def _start_assessment(topic):
             timeout=30,
         )
         response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
-        return response.json()
+        # Cast the response to the expected type using typing.cast
+        return cast(Optional[Dict[str, Any]], response.json())
     except requests.RequestException as e:
         logger.error(f"API error starting assessment: {str(e)}")
         flash(f"Error starting assessment: {str(e)}")
@@ -50,7 +53,7 @@ def _start_assessment(topic):
         return None
 
 
-def _submit_answer(answer):
+def _submit_answer(answer: Optional[str]) -> Optional[Dict[str, Any]]:
     """Calls the backend API to submit an assessment answer."""
     logger.info("Submitting assessment answer.")
     try:
@@ -63,7 +66,8 @@ def _submit_answer(answer):
             timeout=30,
         )
         response.raise_for_status()
-        return response.json()
+        # Cast the response to the expected type using typing.cast
+        return cast(Optional[Dict[str, Any]], response.json())
     except requests.RequestException as e:
         logger.error(f"API error submitting answer: {str(e)}")
         flash(f"Error processing answer: {str(e)}")
@@ -72,12 +76,10 @@ def _submit_answer(answer):
         logger.exception(f"Unexpected error submitting answer: {str(e)}")
         flash(f"An unexpected error occurred: {str(e)}")
         return None
-
-
 # --- Route Handlers ---
 
 
-def _handle_onboarding_get(topic):
+def _handle_onboarding_get(topic: Optional[str]) -> Union[WerkzeugResponse, str]:
     """Handles GET requests for the onboarding route."""
     if not topic:
         # Render a page to select a topic if none is provided
@@ -103,7 +105,8 @@ def _handle_onboarding_get(topic):
         return render_template("onboarding.html", user=session.get("user"), topic=None)
 
 
-def _handle_onboarding_post(topic):
+# pylint: disable=too-many-return-statements
+def _handle_onboarding_post(topic: Optional[str]) -> Union[WerkzeugResponse, str]:
     """Handles POST requests for the onboarding route."""
     if "user" not in session:
         flash("Please log in to continue the assessment.")
@@ -157,11 +160,11 @@ def _handle_onboarding_post(topic):
 # --- Main Blueprint Route ---
 
 
-@onboarding_bp.route("/<topic>", methods=["GET", "POST"])
-@onboarding_bp.route(
+@onboarding_bp.route("/<topic>", methods=["GET", "POST"]) # type: ignore[misc]
+@onboarding_bp.route( # type: ignore[misc]
     "/", defaults={"topic": None}, methods=["GET"]
 )  # Handle base /onboarding/ route
-def onboarding_route(topic):
+def onboarding_route(topic: Optional[str]) -> Union[WerkzeugResponse, str]:
     """
     Handles the onboarding process for a given topic.
     Delegates to GET or POST handlers.

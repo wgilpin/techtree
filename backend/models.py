@@ -3,6 +3,7 @@ from typing import List, Dict, Optional, Union, Any, TypedDict
 from pydantic import BaseModel
 
 
+# pylint: disable=too-few-public-methods
 class User(BaseModel):
     """
     Model for user information.
@@ -16,6 +17,7 @@ class User(BaseModel):
 # --- Chat Model ---
 
 
+# pylint: disable=too-few-public-methods
 class ChatMessage(BaseModel):
     """Model for a single message in the conversation history."""
 
@@ -26,6 +28,7 @@ class ChatMessage(BaseModel):
 # --- Lesson Content Models ---
 
 
+# pylint: disable=too-few-public-methods
 class Metadata(BaseModel):
     """Model for lesson metadata."""
 
@@ -37,6 +40,7 @@ class Metadata(BaseModel):
     # Add any other metadata fields observed
 
 
+# pylint: disable=too-few-public-methods
 class ExpositionContentItem(BaseModel):
     """Represents a single item within structured exposition content
         (e.g., heading, paragraph, list)."""
@@ -49,6 +53,7 @@ class ExpositionContentItem(BaseModel):
     question: Optional[str] = None  # For thought questions
 
 
+# pylint: disable=too-few-public-methods
 class ExpositionContent(BaseModel):
     """Model for the main explanatory content of a lesson, can be simple string or structured."""
 
@@ -56,6 +61,7 @@ class ExpositionContent(BaseModel):
     content: Optional[Union[str, List[ExpositionContentItem]]] = None
 
 
+# pylint: disable=too-few-public-methods
 class Option(BaseModel):
     """Model for a single option in a multiple-choice question."""
 
@@ -63,6 +69,7 @@ class Option(BaseModel):
     text: str
 
 
+# pylint: disable=too-few-public-methods
 class Exercise(BaseModel):
     """Model representing a single active learning exercise within a lesson."""
 
@@ -83,6 +90,7 @@ class Exercise(BaseModel):
     # Add any other exercise fields observed
 
 
+# pylint: disable=too-few-public-methods
 class AssessmentQuestion(BaseModel):
     """Model representing a single question in the knowledge assessment quiz."""
 
@@ -98,6 +106,7 @@ class AssessmentQuestion(BaseModel):
 
 
 # Main model for the generated content
+# pylint: disable=too-few-public-methods
 class GeneratedLessonContent(BaseModel):
     """Overall model for the AI-generated content of a single lesson."""
 
@@ -112,12 +121,14 @@ class GeneratedLessonContent(BaseModel):
 # --- LLM Interaction Models ---
 
 
+# pylint: disable=too-few-public-methods
 class IntentClassificationResult(BaseModel):
     """Pydantic model for the result of intent classification."""
 
     intent: str
 
 
+# pylint: disable=too-few-public-methods
 class EvaluationResult(BaseModel):
     """Pydantic model for the result of answer evaluation."""
 

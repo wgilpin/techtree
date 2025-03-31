@@ -16,6 +16,7 @@ router = APIRouter()
 
 # --- Pydantic Models ---
 
+# pylint: disable=too-few-public-methods
 class Token(BaseModel):
     """Model for the access token response."""
     access_token: str
@@ -24,12 +25,14 @@ class Token(BaseModel):
     email: str
     name: str
 
+# pylint: disable=too-few-public-methods
 class UserCreate(BaseModel):
     """Model for user registration request."""
     email: str
     password: str
     name: Optional[str] = None
 
+# pylint: disable=too-few-public-methods
 class UserResponse(BaseModel):
     """Model for user information response (excluding password)."""
     user_id: str

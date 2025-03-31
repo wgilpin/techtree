@@ -3,7 +3,6 @@
 # pylint: disable=broad-exception-caught,singleton-comparison
 
 from typing import Any, Dict, List, cast, Tuple, Optional # Added Tuple, Optional
-from typing import Tuple, Optional
 
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END # Added END import
@@ -97,7 +96,7 @@ class LessonAI:
         # We need to pass history to the nodes via the state during invocation.
         # Note: This assumes nodes are modified to accept history via state['history_context']
         #       and that LessonState is temporarily updated to include this key.
-        # TODO: Define 'history_context' key in LessonState or find alternative LangGraph context passing.
+        # TODO: Define 'history_context' key in LessonState or find alternative LangGraph context passing. # pylint: disable=fixme
 
         # Prepare input state for the graph, adding history temporarily
         input_state_dict: Dict[str, Any] = cast(Dict[str, Any], {
@@ -115,7 +114,8 @@ class LessonAI:
         # Extract potential new messages returned by nodes (if nodes are modified to do so)
         # This part is speculative and depends on how nodes are modified.
         # Let's assume nodes add a 'new_assistant_messages' key to the output state changes.
-        new_assistant_messages: Optional[List[Dict[str, Any]]] = output_state_changes.pop('new_assistant_messages', None)
+        new_assistant_messages: Optional[List[Dict[str, Any]]] = \
+            output_state_changes.pop('new_assistant_messages', None)
 
         # Merge output state changes back into the original state (excluding temp history)
         final_state_dict = {**current_state, **output_state_changes}
@@ -141,7 +141,8 @@ class LessonAI:
         try:
             welcome_message: Dict[str, str] = {
                  "role": "assistant",
-                 "content": "Welcome to your lesson! Feel free to ask questions or tell me when you're ready for an exercise.",
+                 "content": "Welcome to your lesson! Feel free to ask questions "
+                            "or tell me when you're ready for an exercise.",
             }
 
             # Cast merged dict to LessonState

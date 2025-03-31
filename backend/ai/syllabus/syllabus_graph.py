@@ -7,21 +7,21 @@ import uuid
 import traceback
 from datetime import datetime
 from typing import Dict, Optional, cast, Any, Union # Added cast, Any, Union
-from backend.ai.syllabus.state import SyllabusState
-
+# Standard library imports
+import logging
 from functools import partial
-import logging # Added logging
 
+# Third-party imports
 from langgraph.graph import StateGraph
 
-# Project specific imports
+# First-party/Local imports
 from backend.services.sqlite_db import SQLiteDatabaseService
 from .state import SyllabusState
 from . import nodes
 from .config import (
     MODEL as llm_model,
     TAVILY as tavily_client,
-)  # Import configured clients
+)
 
 # Add logger
 logger = logging.getLogger(__name__)
@@ -236,7 +236,7 @@ class SyllabusAI:
             state_updates = {k: v for k, v in save_result.items() if k in SyllabusState.__annotations__} # Check keys
             if self.state:
                 for key, value in state_updates.items():
-                     self.state[key] = value # type: ignore
+                    self.state[key] = value # type: ignore
 
             print(
                 f"Syllabus save finished. Saved UID: {save_result.get('saved_uid', 'N/A')}"
@@ -258,6 +258,7 @@ class SyllabusAI:
         # Ensure we return a dict, not potentially a Pydantic model if state changes
         return dict(syllabus)
 
+    # pylint: disable=too-many-statements
     def clone_syllabus_for_user(self, user_id: str) -> Dict[str, Any]:
         """Clones the current syllabus in the state for a specific user."""
         if not self.state:
@@ -320,7 +321,7 @@ class SyllabusAI:
 
         # Ensure topic and level are definitely in content_to_save for the DB call
         if "topic" not in content_to_save or "level" not in content_to_save:
-             raise ValueError("Topic or level missing in content prepared for saving clone.")
+            raise ValueError("Topic or level missing in content prepared for saving clone.")
 
 
         try:
@@ -378,7 +379,7 @@ class SyllabusAI:
             f"Attempting deletion: Topic='{topic}', Level='{knowledge_level}', User={user_id}"
         )
         try:
-            # TODO: Implement delete_syllabus in SQLiteDatabaseService if needed.
+            # TODO: Implement delete_syllabus in SQLiteDatabaseService if needed. # pylint: disable=fixme
             # deleted = self.db_service.delete_syllabus(topic, knowledge_level, user_id)
             deleted = False # Assume deletion failed as method doesn't exist
             logger.warning("Syllabus deletion is not implemented in SQLiteDatabaseService.")

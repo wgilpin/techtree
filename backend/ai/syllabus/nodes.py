@@ -182,6 +182,7 @@ def _parse_llm_json_response(
         return None
 
 
+# pylint: disable=too-many-return-statements
 def _validate_syllabus_structure(
     syllabus: Dict[str, Any], context: str = "Generated"
 ) -> bool:  # Added type hint
@@ -377,6 +378,7 @@ def update_syllabus(
         }
 
 
+# pylint: disable=too-many-return-statements
 def save_syllabus(
     state: SyllabusState, db_service: SQLiteDatabaseService
 ) -> Dict[str, Any]:  # Changed return type hint

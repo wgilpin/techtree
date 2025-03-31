@@ -8,13 +8,15 @@ TechTree learning platform. It handles user authentication, routing, and
 interaction with the backend API.
 """
 import logging
+from typing import cast
 import os
 
 import requests
 from dotenv import load_dotenv
 from flask import current_app
 from flask import Flask, flash, redirect, render_template, request, session, url_for
-from werkzeug.routing.exceptions import BuildError # Import BuildError
+from werkzeug.wrappers import Response as WerkzeugResponse # type: ignore[import-not-found]
+from werkzeug.routing.exceptions import BuildError # type: ignore[import-not-found] # Import BuildError
 import markdown
 from .auth.auth import auth_bp, login_required
 from .lessons.lessons import lessons_bp
@@ -45,9 +47,10 @@ Flask application instance.
 """
 
 # Register the markdown filter for Jinja2 templates
-@app.template_filter('markdown')
-def markdown_filter(text):
-    return markdown.markdown(text)
+@app.template_filter('markdown') # type: ignore[misc]
+def markdown_filter(text: str) -> str:
+    """Converts a Markdown string to HTML."""
+    return cast(str, markdown.markdown(text))
 
 app.secret_key = "your-secret-key"  # For session management
 
@@ -66,8 +69,8 @@ logger.info(f"Backend API URL set to: {app.config['API_URL']}")
 # --- Core App Routes ---
 
 
-@app.route("/", methods=["GET", "POST"])
-def index():
+@app.route("/", methods=["GET", "POST"]) # type: ignore[misc]
+def index() -> WerkzeugResponse:
     """
     Handles the main index route.
 
@@ -91,9 +94,9 @@ def index():
 # Login, Register, Logout routes moved to frontend.auth.auth blueprint
 
 
-@app.route("/dashboard")
+@app.route("/dashboard") # type: ignore[misc]
 @login_required  # This now refers to the imported decorator
-def dashboard():
+def dashboard() -> str:
     """
     Displays the user's dashboard.
 
@@ -121,8 +124,8 @@ def dashboard():
             error_json = http_err.response.json()
             error_detail = error_json.get("detail", error_detail)
         except (ValueError, AttributeError):
-             # If response is not JSON or doesn't have 'detail'
-             error_detail = f"{error_detail} Status: {http_err.response.status_code}"
+            # If response is not JSON or doesn't have 'detail'
+            error_detail = f"{error_detail} Status: {http_err.response.status_code}"
         logger.error(f"Dashboard HTTP error fetching courses: {error_detail}")
         flash(error_detail, "error")
 
@@ -137,9 +140,9 @@ def dashboard():
         flash("An unexpected error occurred while loading the dashboard.", "error")
 
     # Always render the template, passing the (potentially empty) courses_list
-    return render_template(
+    return cast(str, render_template(
         "dashboard.html", user=session["user"], courses=courses_list
-    )
+    ))
 
 
 # Onboarding routes moved to frontend.onboarding.onboarding blueprint
@@ -148,11 +151,12 @@ def dashboard():
 
 
 # --- Error Handlers ---
-@app.errorhandler(BuildError)
-def handle_build_error(e):
+@app.errorhandler(BuildError) # type: ignore[misc]
+def handle_build_error(e: BuildError) -> WerkzeugResponse:
     """Logs BuildError exceptions and redirects the user."""
     logger.error(f"URL Build Error: {e}", exc_info=True)
-    flash("An internal error occurred building a URL. Please try again later or contact support if the issue persists.", "error")
+    flash("An internal error occurred building a URL. "
+          "Please try again later or contact support if the issue persists.", "error")
     # Redirect to a safe page
     if 'user' in session:
         return redirect(url_for('dashboard'))

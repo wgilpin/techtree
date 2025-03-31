@@ -33,8 +33,8 @@ def load_prompt(prompt_name: str, **kwargs: Any) -> str:
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             template_content = f.read()
-    except FileNotFoundError as e:
-        raise FileNotFoundError(f"Prompt file not found: {file_path}") from e
+    except FileNotFoundError as ex:
+        raise FileNotFoundError(f"Prompt file not found: {file_path}") from ex
 
     template = PromptTemplate(template_content)
 
@@ -44,11 +44,11 @@ def load_prompt(prompt_name: str, **kwargs: Any) -> str:
     try:
         formatted_prompt = template.substitute(**kwargs)
         return formatted_prompt
-    except KeyError as e:
-        raise KeyError(f"Missing placeholder value for '{e}' in prompt '{prompt_name}'") from e
-    except Exception as e:
+    except KeyError as ex:
+        raise KeyError(f"Missing placeholder value for '{ex}' in prompt '{prompt_name}'") from ex
+    except Exception as ex:
         # Catch other potential formatting errors
-        raise ValueError(f"Error formatting prompt '{prompt_name}': {e}") from e
+        raise ValueError(f"Error formatting prompt '{prompt_name}': {ex}") from ex
 
 # Example Usage (can be removed or kept for testing):
 if __name__ == "__main__":
@@ -77,11 +77,11 @@ if __name__ == "__main__":
         print("\n" + "="*20 + "\n")
 
         # Example for evaluation
-        context_example = "Question: What is 2+2?\nExpected Answer: 4\nUser Answer: 4"
+        context_example_str = "Question: What is 2+2?\nExpected Answer: 4\nUser Answer: 4" # pylint: disable=invalid-name
         formatted_eval = load_prompt(
             "evaluate_answer",
             question_type="math question",
-            prompt_context=context_example
+            prompt_context=context_example_str
         )
         print("--- Evaluation Example ---")
         print(formatted_eval)

@@ -3,7 +3,7 @@
 # pylint: disable=protected-access, unused-argument, invalid-name
 
 from unittest.mock import ANY, MagicMock, patch
-from typing import Optional, List, Dict, Any, cast # Added imports
+from typing import Optional, List, Dict, Any, cast  # Added imports
 
 import pytest
 
@@ -11,7 +11,7 @@ from backend.models import (
     IntentClassificationResult,
     LessonState,
     Exercise,
-    GeneratedLessonContent, # Added import
+    GeneratedLessonContent,  # Added import
 )
 
 # Import the nodes module for direct function calls
@@ -28,8 +28,8 @@ class TestLessonAIIntentClassification:
     # Basic state setup helper
     def _get_base_state(
         self,
-        user_message: Optional[str] = "Test message", # Allow None
-        history: Optional[List[Dict[str, str]]] = None # Use List[Dict[str, str]]
+        user_message: Optional[str] = "Test message",  # Allow None
+        history: Optional[List[Dict[str, str]]] = None,  # Use List[Dict[str, str]]
     ) -> LessonState:
         """
         Creates a base LessonState dictionary for testing.
@@ -64,7 +64,7 @@ class TestLessonAIIntentClassification:
             "lesson_uid": "intent_test_uid",
             "created_at": "t",
             "updated_at": "t",
-            "history_context": current_history, # Use history_context
+            "history_context": current_history,  # Use history_context
             "current_interaction_mode": "chatting",
             "current_exercise_index": None,
             "current_quiz_question_index": None,
@@ -81,9 +81,7 @@ class TestLessonAIIntentClassification:
         return state
 
     @patch("backend.ai.lessons.nodes.load_prompt")
-    @patch(
-        "backend.ai.lessons.nodes.call_llm_with_json_parsing"
-    )
+    @patch("backend.ai.lessons.nodes.call_llm_with_json_parsing")
     @patch("backend.ai.lessons.nodes.logger", MagicMock())
     @pytest.mark.parametrize(
         "intent, user_message, expected_mode",
@@ -102,8 +100,8 @@ class TestLessonAIIntentClassification:
         mock_load_prompt: MagicMock,
         intent: str,
         user_message: str,
-        expected_mode: str
-    ) -> None: # Added return type hint
+        expected_mode: str,
+    ) -> None:  # Added return type hint
         """Test intent classification routing when no task is active."""
         mock_load_prompt.return_value = "mocked_intent_prompt"
         mock_call_llm.return_value = IntentClassificationResult(intent=intent)
@@ -115,8 +113,8 @@ class TestLessonAIIntentClassification:
 
         mock_load_prompt.assert_called_once_with(
             "intent_classification",
-            user_input=user_message, # Check prompt key used in node
-            history_json=ANY,       # Check prompt key used in node
+            user_input=user_message,  # Check prompt key used in node
+            history_json=ANY,  # Check prompt key used in node
             topic="Testing",
             lesson_title="Intent Test",
             user_level="beginner",
@@ -133,9 +131,7 @@ class TestLessonAIIntentClassification:
             assert result_state.get("potential_answer") is None
 
     @patch("backend.ai.lessons.nodes.load_prompt")
-    @patch(
-        "backend.ai.lessons.nodes.call_llm_with_json_parsing"
-    )
+    @patch("backend.ai.lessons.nodes.call_llm_with_json_parsing")
     @patch("backend.ai.lessons.nodes.logger", MagicMock())
     @pytest.mark.parametrize(
         "intent, user_message, expected_mode",
@@ -155,8 +151,8 @@ class TestLessonAIIntentClassification:
         mock_load_prompt: MagicMock,
         intent: str,
         user_message: str,
-        expected_mode: str
-    ) -> None: # Added return type hint
+        expected_mode: str,
+    ) -> None:  # Added return type hint
         """Test intent classification routing when an exercise/assessment is active."""
         mock_load_prompt.return_value = "mocked_intent_prompt"
         mock_call_llm.return_value = IntentClassificationResult(intent=intent)
@@ -173,8 +169,8 @@ class TestLessonAIIntentClassification:
         )
         mock_load_prompt.assert_called_once_with(
             "intent_classification",
-            user_input=user_message, # Check prompt key used in node
-            history_json=ANY,       # Check prompt key used in node
+            user_input=user_message,  # Check prompt key used in node
+            history_json=ANY,  # Check prompt key used in node
             topic="Testing",
             lesson_title="Intent Test",
             user_level="beginner",
@@ -200,31 +196,27 @@ class TestLessonAIIntentClassification:
     @patch("backend.ai.lessons.nodes.logger", MagicMock())
     def test_classify_intent_llm_failure(
         self, mock_call_llm: MagicMock, mock_load_prompt: MagicMock
-    ) -> None: # Added return type hint
+    ) -> None:  # Added return type hint
         """Test routing default when intent classification LLM call fails."""
         mock_load_prompt.return_value = "mocked_intent_prompt"
         state = self._get_base_state(user_message="Something weird")
 
-        with patch("backend.ai.lessons.nodes.logger.error") as mock_logger_error:
-            # Cast state before calling node
+        with patch("backend.ai.lessons.nodes.logger.error") as _:
             result_state = nodes.classify_intent(cast(Dict[str, Any], state))
 
             mock_call_llm.assert_called_once()
             assert result_state["current_interaction_mode"] == "chatting"
 
     @patch("backend.ai.lessons.nodes.load_prompt", side_effect=Exception("LLM Error"))
-    @patch(
-        "backend.ai.lessons.nodes.call_llm_with_json_parsing"
-    )
+    @patch("backend.ai.lessons.nodes.call_llm_with_json_parsing")
     @patch("backend.ai.lessons.nodes.logger", MagicMock())
     def test_classify_intent_exception(
         self, mock_call_llm: MagicMock, mock_load_prompt_exc: MagicMock
-    ) -> None: # Added return type hint
+    ) -> None:  # Added return type hint
         """Test routing default when an exception occurs during intent classification."""
         state = self._get_base_state(user_message="Something weird")
 
         with patch("backend.ai.lessons.nodes.logger.error") as mock_logger_error:
-            # Cast state before calling node
             result_state = nodes.classify_intent(cast(Dict[str, Any], state))
 
             mock_load_prompt_exc.assert_called_once()
@@ -233,12 +225,11 @@ class TestLessonAIIntentClassification:
             assert result_state["current_interaction_mode"] == "chatting"
 
     @patch("backend.ai.lessons.nodes.logger", MagicMock())
-    def test_classify_intent_no_user_message(self) -> None: # Added return type hint
+    def test_classify_intent_no_user_message(self) -> None:  # Added return type hint
         """Test classification when the last message isn't from the user."""
         state = self._get_base_state(user_message=None)
 
         with patch("backend.ai.lessons.nodes.logger.warning") as mock_logger_warning:
-            # Cast state before calling node
             result_state = nodes.classify_intent(cast(Dict[str, Any], state))
 
             mock_logger_warning.assert_called_once()

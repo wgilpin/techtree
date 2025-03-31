@@ -1,17 +1,18 @@
 """Utilities for interacting with the LLM, including retry logic and JSON parsing."""
+
 # pylint: disable=broad-exception-caught
 
+import json
 import os
+import random
 import re
 import time
-import random
-import json
-from typing import Callable, Any, Dict, Optional, Type, TypeVar
-from pydantic import BaseModel, ValidationError
+from typing import Any, Callable, Dict, Optional, Type, TypeVar
 
 import google.generativeai as genai
-from google.api_core.exceptions import ResourceExhausted
 from dotenv import load_dotenv
+from google.api_core.exceptions import ResourceExhausted
+from pydantic import BaseModel, ValidationError
 
 from backend.logger import logger
 
@@ -19,7 +20,7 @@ from backend.logger import logger
 load_dotenv()
 
 # Define MODEL type hint before assignment
-MODEL: Optional[genai.GenerativeModel] = None # type: ignore[name-defined]
+MODEL: Optional[genai.GenerativeModel] = None  # type: ignore[name-defined]
 
 # Configure Gemini API (Consider moving this configuration elsewhere if used broadly)
 # For now, keep it here as this module is the primary LLM interface
@@ -33,15 +34,19 @@ try:
         logger.error("Missing environment variable: GEMINI_MODEL")
         raise KeyError("GEMINI_MODEL")
 
-    genai.configure(api_key=gemini_api_key) # type: ignore[attr-defined]
-    MODEL = genai.GenerativeModel(gemini_model_name) # type: ignore[attr-defined]
+    genai.configure(api_key=gemini_api_key)  # type: ignore[attr-defined]
+    MODEL = genai.GenerativeModel(gemini_model_name)  # type: ignore[attr-defined]
     logger.info(f"Gemini model '{gemini_model_name}' configured successfully.")
 
 except KeyError as e:
-    logger.error(f"Gemini configuration failed due to missing environment variable: {e}")
-    MODEL = None # This assignment is now compatible with the type hint
+    logger.error(
+        f"Gemini configuration failed due to missing environment variable: {e}"
+    )
+    MODEL = None  # This assignment is now compatible with the type hint
 except Exception as e:
-    logger.error(f"An unexpected error occurred during Gemini configuration: {e}", exc_info=True)
+    logger.error(
+        f"An unexpected error occurred during Gemini configuration: {e}", exc_info=True
+    )
     MODEL = None
 
 
@@ -80,29 +85,67 @@ def call_with_retry(
     while True:
         try:
             return func(*args, **kwargs)
-        except ResourceExhausted as e:
+        except ResourceExhausted as re_e:  # Renamed 'e' to 're_e'
             retries += 1
             if retries > max_retries:
                 logger.error(
                     f"Max retries ({max_retries}) exceeded for {func.__name__}."
                     " Raising ResourceExhausted."
                 )
-                raise e
+                raise re_e  # Use renamed variable
 
             # Calculate delay with exponential backoff and jitter
-            current_delay = delay * (2 ** (retries - 1)) + random.uniform(
-                0, 0.5
-            )
+            current_delay = delay * (2 ** (retries - 1)) + random.uniform(0, 0.5)
             logger.warning(
                 f"ResourceExhausted error calling {func.__name__}."
                 f" Retrying in {current_delay:.2f} seconds... (Attempt {retries}/{max_retries})"
             )
             time.sleep(current_delay)
-        except Exception as e:
+        except Exception as other_e:  # Renamed 'e' to 'other_e'
             logger.error(
-                f"Non-retryable error calling {func.__name__}: {e}", exc_info=True
+                f"Non-retryable error calling {func.__name__}: {other_e}", exc_info=True
             )
-            raise e
+            raise other_e  # Use renamed variable
+
+
+def _extract_json_from_text(response_text: str) -> Optional[Dict[str, Any]]:
+    """Attempts to extract a JSON object from text, trying common patterns."""
+    json_patterns = [
+        r"```(?:json)?\s*({.*?})```",  # Code block with optional json tag
+        r"({[\s\S]*})",  # Any object literal {} (greedy)
+    ]
+    parsed_json: Optional[Dict[str, Any]] = None
+
+    for pattern in json_patterns:
+        json_match = re.search(pattern, response_text, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1)
+            # Basic cleaning: remove escaped newlines that might break parsing
+            json_str_cleaned = re.sub(r"\\n", " ", json_str)
+            try:
+                loaded_data = json.loads(json_str_cleaned)
+                if isinstance(loaded_data, dict):
+                    parsed_json = loaded_data
+                    logger.debug(f"Successfully parsed JSON using pattern: {pattern}")
+                    return parsed_json  # Return as soon as valid JSON dict is found
+                else:
+                    logger.warning(
+                        f"Parsed JSON is not a dictionary: {type(loaded_data)}"
+                    )
+            except json.JSONDecodeError as json_e:
+                logger.warning(
+                    f"JSON parsing failed for pattern {pattern} with "
+                    f"cleaned string: {json_e}. String: '{json_str_cleaned[:100]}...'"
+                )
+                # Try the next pattern
+                continue
+
+    # If no pattern yielded a valid JSON dictionary
+    if parsed_json is None:
+        logger.error(
+            f"Failed to parse JSON from LLM response. Raw text: {response_text[:500]}..."
+        )
+    return parsed_json
 
 
 def call_llm_with_json_parsing(
@@ -141,57 +184,22 @@ def call_llm_with_json_parsing(
             initial_delay=initial_delay,
         )
         response_text = response.text
-        logger.debug(
-            f"Raw LLM response: {response_text[:500]}..."
-        )
+        logger.debug(f"Raw LLM response: {response_text[:500]}...")
 
     except ResourceExhausted:
         logger.error(
             "LLM call failed after multiple retries due to resource exhaustion."
         )
-        return None
-    except Exception as e:
-        logger.error(f"LLM call failed with unexpected error: {e}", exc_info=True)
-        return None
+        # Let execution continue, will return None later if parsing fails
+    except Exception as llm_e:  # Renamed 'e' to 'llm_e'
+        logger.error(f"LLM call failed with unexpected error: {llm_e}", exc_info=True)
+        # Let execution continue, will return None later if parsing fails
 
-    # Attempt to extract JSON from the response text
-    json_patterns = [
-        r"```(?:json)?\s*({.*?})```",
-        r"({[\s\S]*})",
-    ]
-    # Explicitly type parsed_json
-    parsed_json: Optional[Dict[str, Any]] = None
-    json_str_cleaned = None
-
-    for pattern in json_patterns:
-        json_match = re.search(pattern, response_text, re.DOTALL)
-        if json_match:
-            json_str = json_match.group(1)
-            json_str_cleaned = re.sub(r"\\n", " ", json_str)
-            try:
-                # json.loads returns Any, cast it for safety
-                loaded_data = json.loads(json_str_cleaned)
-                if isinstance(loaded_data, dict):
-                    parsed_json = loaded_data
-                    logger.debug(f"Successfully parsed JSON using pattern: {pattern}")
-                    break
-                else:
-                    logger.warning(f"Parsed JSON is not a dictionary: {type(loaded_data)}")
-                    parsed_json = None # Reset if not a dict
-            except json.JSONDecodeError as e:
-                logger.warning(
-                    f"JSON parsing failed for pattern {pattern} with "
-                    f"cleaned string: {e}. String: '{json_str_cleaned[:100]}...'"
-                )
-                continue
-
-    if parsed_json is None:
-        logger.error(
-            f"Failed to parse JSON from LLM response. Raw text: {response_text[:500]}..."
-        )
-        return None
+    # Attempt to extract JSON using the helper function
+    parsed_json = _extract_json_from_text(response_text)
 
     # Optional Pydantic validation
+    # If parsed_json is None here, validation will fail and return None below
     if validation_model:
         try:
             validated_data = validation_model.model_validate(parsed_json)
@@ -199,15 +207,15 @@ def call_llm_with_json_parsing(
                 f"Successfully validated JSON against model: {validation_model.__name__}"
             )
             return validated_data # Returns type T
-        except ValidationError as e:
+        except ValidationError as val_e: # Renamed 'e' to 'val_e'
             logger.error(
                 f"Pydantic validation failed for model {validation_model.__name__}:"
-                f" {e}. Parsed JSON: {parsed_json}"
+                f" {val_e}. Parsed JSON: {parsed_json}" # Use renamed variable
             )
             return None
     else:
         # Return the raw parsed dictionary if no validation model is provided
-        return parsed_json # Returns Dict[str, Any]
+        return parsed_json  # Returns Dict[str, Any]
 
 
 def call_llm_plain_text(
@@ -238,9 +246,7 @@ def call_llm_plain_text(
             initial_delay=initial_delay,
         )
         response_text = response.text
-        logger.debug(
-            f"Raw LLM response (plain text): {response_text[:500]}..."
-        )
+        logger.debug(f"Raw LLM response (plain text): {response_text[:500]}...")
         # Ensure response_text is actually a string before returning
         return response_text if isinstance(response_text, str) else None
 
@@ -249,29 +255,32 @@ def call_llm_plain_text(
             "LLM call failed after multiple retries due to resource exhaustion."
         )
         return None
-    except Exception as e:
-        logger.error(f"LLM call failed with unexpected error: {e}", exc_info=True)
+    except Exception as llm_e:  # Renamed 'e' to 'llm_e'
+        logger.error(f"LLM call failed with unexpected error: {llm_e}", exc_info=True)
         return None
 
 
 # Example Usage / Simple Test Block
 if __name__ == "__main__":
-    #Runs simple tests when the script is executed directly.
+    # Runs simple tests when the script is executed directly.
 
+# pylint: disable=too-few-public-methods
     class SimpleResult(BaseModel):
         """A simple Pydantic model for testing validation."""
+
         status: str
         message: Optional[str] = None
 
-    TEST_PROMPT_VALID = """
-        Respond with ONLY the following JSON: {"status": "success", "message": "It worked!"}"""
+    TEST_PROMPT_VALID = (
+        "Respond with ONLY the following JSON:"
+        ' {"status": "success", "message": "It worked!"}'
+    )
     TEST_PROMPT_INVALID_JSON = """
         Respond with ONLY the following: {"status": "fail", message: "Invalid JSON"}"""
     TEST_PROMPT_INVALID_MODEL = (
         'Respond with ONLY the following JSON: {"status_code": 200}'
     )
     TEST_PROMPT_PLAIN = "Explain the concept of recursion in one sentence."
-
 
     print("\n--- Testing call_llm_with_json_parsing ---")
 
