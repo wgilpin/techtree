@@ -68,10 +68,8 @@ def format_exposition_to_markdown(
 
     # Handle if input is the Pydantic Model
     if isinstance(exposition_input, ExpositionContent):
-        logger.debug("DEBUG_FORMAT: Processing ExpositionContent model.")
         content_data = exposition_input.content
         if isinstance(content_data, str):
-            logger.debug("DEBUG_FORMAT: ExpositionContent.content is a string.")
             return content_data  # Return string directly
         elif isinstance(content_data, list):
             logger.debug(
@@ -109,7 +107,6 @@ def format_exposition_to_markdown(
                     # Optionally try to convert to string or skip
                     markdown_parts.append(str(item))
         elif content_data is None:
-            logger.debug("DEBUG_FORMAT: ExpositionContent.content is None.")
             return ""  # Return empty string if content is None
         else:
             logger.warning(
@@ -119,7 +116,6 @@ def format_exposition_to_markdown(
 
     # Handle if input is a plain string
     elif isinstance(exposition_input, str):
-        logger.debug("DEBUG_FORMAT: Processing as plain string.")
         return exposition_input
 
     # Handle if input is still a dictionary (e.g., validation failed upstream) - Legacy support
@@ -161,7 +157,6 @@ def format_exposition_to_markdown(
 
     # Handle None or other unexpected types
     elif exposition_input is None:
-        logger.debug("DEBUG_FORMAT: Received None input.")
         return ""
     else:
         logger.warning(
