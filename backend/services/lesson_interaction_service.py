@@ -285,6 +285,16 @@ class LessonInteractionService:
                     status_code=500,
                     detail="Internal server error getting lesson state.",
                 ) from e
+
+            # Prepare response structure using the new helper for authenticated users
+            serializable_state_for_response = prepare_state_for_response(lesson_state)
+            response_data = {
+                "lesson_id": lesson_db_id,
+                "content": (
+                    lesson_content.model_dump(mode="json") if lesson_content else None
+                ),
+                "lesson_state": serializable_state_for_response,
+            }
         else:
             # --- Unauthenticated User Flow ---
             logger.info("Unauthenticated user request. Fetching only static content.")
@@ -311,8 +321,9 @@ class LessonInteractionService:
                     detail="Internal server error getting lesson content.",
                 ) from e
 
-            # Prepare response structure using the new helper
+            # Prepare response structure using the new helper for unauthenticated users
             # This handles serialization of Pydantic models/datetimes within the state
+            # Note: lesson_state will be None here, prepare_state_for_response handles this
             serializable_state_for_response = prepare_state_for_response(lesson_state)
             # No need for try-except here as the helper handles internal types;
             # JSON encoding happens at the FastAPI response level.
