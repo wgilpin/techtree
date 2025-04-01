@@ -14,10 +14,10 @@ from flask import (
     request,
     session,
     current_app,
-    Response as FlaskResponse, # Moved alias inside
+    Response as FlaskResponse,  # Moved alias inside
 )
 from pydantic import ValidationError
-from werkzeug.wrappers import Response as WerkzeugResponse # type: ignore[import-not-found]
+from werkzeug.wrappers import Response as WerkzeugResponse  # type: ignore[import-not-found]
 
 # Assuming backend models are accessible via PYTHONPATH or similar mechanism
 # Adjust the import path if necessary based on project structure
@@ -40,7 +40,7 @@ lessons_bp = Blueprint("lessons", __name__, template_folder="../templates")
 
 
 # --- Custom Jinja Filter for Markdown ---
-@lessons_bp.app_template_filter("markdownify") # type: ignore[misc]
+@lessons_bp.app_template_filter("markdownify")  # type: ignore[misc]
 def markdownify_filter(text: str) -> str:
     """Converts markdown text to HTML."""
     # Use the markdown library with desired extensions if needed
@@ -129,7 +129,9 @@ def format_exposition_to_markdown(
         if isinstance(content_list, list):
             for item_dict in content_list:
                 if isinstance(item_dict, dict):
-                    item_type = item_dict.get("type", "") # Provide default empty string
+                    item_type = item_dict.get(
+                        "type", ""
+                    )  # Provide default empty string
                     text = item_dict.get("text", "")
                     if item_type == "paragraph":
                         markdown_parts.append(text)
@@ -171,7 +173,9 @@ def format_exposition_to_markdown(
 # --- Lesson Helper Functions (Copied from app.py) ---
 
 
-def _fetch_lesson_data(syllabus_id: str, module: int, lesson_id: int) -> Optional[Dict[str, Any]]:
+def _fetch_lesson_data(
+    syllabus_id: str, module: int, lesson_id: int
+) -> Optional[Dict[str, Any]]:
     """Fetches lesson data from the backend API."""
     logger.info(
         "Fetching lesson data for syllabus_id: "
@@ -240,7 +244,9 @@ def _fetch_lesson_data(syllabus_id: str, module: int, lesson_id: int) -> Optiona
         return None
 
 
-def _process_lesson_content(lesson_data_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _process_lesson_content(
+    lesson_data_dict: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
     """
     Processes lesson data, primarily using the validated Pydantic model for exposition,
     and retrieves exercises/assessments from the main data structure,
@@ -309,12 +315,14 @@ def _process_lesson_content(lesson_data_dict: Dict[str, Any]) -> Optional[Dict[s
 # --- Lesson Routes ---
 
 
-@lessons_bp.route( # type: ignore[misc]
+@lessons_bp.route(  # type: ignore[misc]
     "/<syllabus_id>/<module>/<lesson_id>"
 )  # Assuming module/lesson_id are indices
 @login_required
 # pylint: disable=too-many-return-statements
-def lesson(syllabus_id: str, module: str, lesson_id: str) -> Union[WerkzeugResponse, str]:
+def lesson(
+    syllabus_id: str, module: str, lesson_id: str
+) -> Union[WerkzeugResponse, str]:
     """
     Displays a specific lesson, including exposition and chat state.
 
@@ -422,7 +430,7 @@ def lesson(syllabus_id: str, module: str, lesson_id: str) -> Union[WerkzeugRespo
 
 
 # --- NEW Chat POST Route ---
-@lessons_bp.route( # type: ignore[misc]
+@lessons_bp.route(  # type: ignore[misc]
     "/chat/<syllabus_id>/<int:module_index>/<int:lesson_index>", methods=["POST"]
 )
 @login_required
@@ -488,7 +496,7 @@ def lesson_chat(
 
 
 # --- NEW Generate Exercise POST Route ---
-@lessons_bp.route( # type: ignore[misc]
+@lessons_bp.route(  # type: ignore[misc]
     "/exercise/<syllabus_id>/<int:module_index>/<int:lesson_index>", methods=["POST"]
 )
 @login_required
@@ -550,7 +558,7 @@ def generate_exercise_proxy(
         return jsonify({"error": "An internal server error occurred."}), 500
 
 
-@lessons_bp.route("/exercise/evaluate", methods=["POST"]) # type: ignore[misc]
+@lessons_bp.route("/exercise/evaluate", methods=["POST"])  # type: ignore[misc]
 @login_required
 def evaluate_exercise() -> Union[FlaskResponse, Tuple[FlaskResponse, int]]:
     """
@@ -602,7 +610,7 @@ def evaluate_exercise() -> Union[FlaskResponse, Tuple[FlaskResponse, int]]:
         return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
 
 
-@lessons_bp.route("/assessment/submit", methods=["POST"]) # type: ignore[misc]
+@lessons_bp.route("/assessment/submit", methods=["POST"])  # type: ignore[misc]
 @login_required
 def submit_assessment() -> Union[FlaskResponse, Tuple[FlaskResponse, int]]:
     """
@@ -657,3 +665,70 @@ def submit_assessment() -> Union[FlaskResponse, Tuple[FlaskResponse, int]]:
     return jsonify(
         {"message": "Assessment submitted successfully.", "received_answers": answers}
     )
+
+
+@lessons_bp.route("/rerun/<syllabus_id>/<int:module_index>/<int:lesson_index>", methods=["POST"])  # type: ignore[misc]
+@login_required
+def rerun_handler(
+    syllabus_id: str, module_index: int, lesson_index: int
+) -> Union[FlaskResponse, Tuple[FlaskResponse, int]]:
+    """
+    Handles the 'Rerun' request from the frontend, forwards it
+    to the backend API, and returns the result.
+
+    Requires user authentication. Forwards the request to save a re-run message
+    to the conversation history without triggering AI interaction.
+    """
+    if request.json is None:
+        return jsonify({"error": "Invalid JSON request"}), 400
+
+    content = request.json.get("content")
+    if not content:
+        return jsonify({"error": "No content provided"}), 400
+
+    if "user" not in session:
+        return jsonify({"error": "User not logged in"}), 401
+
+    logger.info(
+        f"Received rerun request for lesson {syllabus_id}/{module_index}/{lesson_index}"
+    )
+
+    try:
+        api_url = current_app.config["API_URL"]
+        backend_rerun_url = (
+            f"{api_url}/lesson/rerun/{syllabus_id}/{module_index}/{lesson_index}"
+        )
+        headers = {"Authorization": f"Bearer {session['user']['access_token']}"}
+
+        # Forward the request to the backend API
+        backend_response = requests.post(
+            backend_rerun_url,
+            headers=headers,
+            json={"content": content},
+            timeout=30,  # Set appropriate timeout
+        )
+
+        # Check if the backend request was successful
+        backend_response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
+
+        # Return the JSON response from the backend directly to the frontend JS
+        response_data = backend_response.json()
+        logger.info(f"Received backend response for rerun: {response_data}")
+        return jsonify(response_data)
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error calling backend rerun API: {e}", exc_info=True)
+        error_detail = "Failed to communicate with the rerun service."
+        if e.response is not None:
+            try:
+                error_json = e.response.json()
+                error_detail = error_json.get(
+                    "detail", error_json.get("error", error_detail)
+                )
+            except ValueError:  # If response is not JSON
+                error_detail = f"{error_detail} Status: {e.response.status_code}"
+
+        return jsonify({"error": error_detail}), 502  # Bad Gateway or appropriate error
+    except Exception as e:
+        logger.exception(f"Unexpected error in rerun_handler: {e}")
+        return jsonify({"error": "An internal server error occurred."}), 500

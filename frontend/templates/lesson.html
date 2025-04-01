@@ -119,6 +119,13 @@ document.addEventListener('DOMContentLoaded', function() {
     onDemandThinkingIndicator.style.display = 'none';
     onDemandThinkingIndicator.style.marginLeft = '10px';
 
+    // --- Define lesson identifiers in the outer scope ---
+    // These are needed by multiple handlers (chat submit, generate, rerun)
+    const syllabusId = "{{ syllabus_id }}";
+    // moduleIndex and lessonIndex will be defined within each handler that needs them
+    // to ensure they capture the value at the time of execution.
+
+
 
     function escapeHtml(unsafe) {
         return unsafe
@@ -196,9 +203,10 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 // --- Get necessary IDs/indices ---
                 // These should be passed from the Flask template into the JS context
-                const syllabusId = "{{ syllabus_id }}";
                 const moduleIndex = parseInt("{{ lesson_data.module_index if lesson_data else '-1' }}");
                 const lessonIndex = parseInt("{{ lesson_data.lesson_index if lesson_data else '-1' }}");
+                // syllabusId, moduleIndex, lessonIndex are now defined in the outer scope.
+                // We just need to ensure they are valid before proceeding.
 
 
                 if (isNaN(moduleIndex) || moduleIndex < 0 || isNaN(lessonIndex) || lessonIndex < 0 || !syllabusId) {
@@ -271,10 +279,10 @@ document.addEventListener('DOMContentLoaded', function() {
         onDemandThinkingIndicator.style.display = 'inline-block';
 
         try {
-            const syllabusId = "{{ syllabus_id }}";
-            // Ensure lesson_data exists before accessing its properties
+            // Define indices within this handler's scope
             const moduleIndex = parseInt("{{ lesson_data.module_index if lesson_data else '-1' }}");
             const lessonIndex = parseInt("{{ lesson_data.lesson_index if lesson_data else '-1' }}");
+            // We just need to ensure they are valid before proceeding.
 
             if (isNaN(moduleIndex) || moduleIndex < 0 || isNaN(lessonIndex) || lessonIndex < 0 || !syllabusId) {
                  console.error("Missing necessary lesson identifiers for on-demand generation.");
@@ -324,17 +332,63 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- Event Listener for Repeat Question Button ---
     if (chatHistory) {
-        chatHistory.addEventListener('click', function(event) {
+        chatHistory.addEventListener('click', async function(event) { // Make handler async
+            // Check if the clicked element is our repeat button
             // Check if the clicked element is our repeat button
             if (event.target.classList.contains('repeat-question-btn')) {
                 const button = event.target;
-                const questionText = button.getAttribute('data-question-text');
+                // Retrieve the full original HTML content
+                const originalContent = button.getAttribute('data-original-content');
 
-                if (questionText && messageInput) {
-                    messageInput.value = questionText; // Set the textarea value
-                    messageInput.focus(); // Focus the textarea
-                    // Optional: Scroll to the input form if it's far down
-                    messageInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                if (originalContent && chatHistory) {
+                    // --- NEW LOGIC: Call backend to save, then append ---
+                    button.disabled = true; // Disable button immediately
+
+                    try {
+                        // Define indices within this handler's scope
+                        const moduleIndex = parseInt("{{ lesson_data.module_index if lesson_data else '-1' }}");
+                        const lessonIndex = parseInt("{{ lesson_data.lesson_index if lesson_data else '-1' }}");
+                        // Ensure the identifiers are valid before proceeding.
+                        if (isNaN(moduleIndex) || moduleIndex < 0 || isNaN(lessonIndex) || lessonIndex < 0 || !syllabusId) {
+                             console.error("Missing necessary lesson identifiers for rerun.");
+                             throw new Error("Missing necessary lesson identifiers.");
+                        }
+
+                        const rerunUrl = `/lesson/rerun/${syllabusId}/${moduleIndex}/${lessonIndex}`;
+
+                        const response = await fetch(rerunUrl, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({ content: originalContent })
+                        });
+
+                        if (!response.ok) {
+                            let errorMsg = `Error saving rerun: ${response.statusText}`;
+                            try {
+                                const errorData = await response.json();
+                                errorMsg = errorData.detail || errorData.message || errorMsg;
+                            } catch (e) { /* Ignore if response isn't JSON */ }
+                            throw new Error(errorMsg);
+                        }
+
+                        // Success: Now append visually
+                        appendMessage('assistant', originalContent);
+                        scrollChatToBottom();
+
+                    } catch (error) {
+                        console.error('Error saving re-run message:', error);
+                        // Optionally inform the user via an alert or a temporary message in the chat
+                        appendMessage('system', `Error: Could not save the re-run message. ${error.message}`);
+                        scrollChatToBottom();
+                    } finally {
+                        // Re-enable button after a short delay, regardless of success/failure
+                        setTimeout(() => { button.disabled = false; }, 500);
+                    }
+
+                } else {
+                    console.error("Could not re-run: Missing original content or chat history element.");
                 }
             }
         });
@@ -345,29 +399,25 @@ document.addEventListener('DOMContentLoaded', function() {
         initialAssistantMessages.forEach(contentDiv => {
             const generatedItem = contentDiv.querySelector('.generated-item.exercise-item, .generated-item.assessment-item');
             if (generatedItem) {
-                let questionText = '';
-                // Try to find the question text (adjust selector if HTML structure differs)
-                const instructionP = generatedItem.querySelector('p > strong'); // Look for 'Instructions:' first
-                if (instructionP && instructionP.parentElement.textContent.includes('Instructions:')) {
-                    questionText = instructionP.parentElement.textContent.replace('Instructions:', '').trim();
-                } else {
-                    // Fallback: Look for the first <p> after the <h3>
-                    const h3 = generatedItem.querySelector('h3');
-                    if (h3 && h3.nextElementSibling && h3.nextElementSibling.tagName === 'P') {
-                        questionText = h3.nextElementSibling.textContent.trim();
-                    }
-                }
+                // Store the full original HTML content of the generated item
+                const originalContent = generatedItem.innerHTML;
 
-                if (questionText) {
-                    // Check if a button already exists (e.g., if script runs twice)
-                    if (!generatedItem.querySelector('.repeat-question-btn')) {
-                        const button = document.createElement('button');
-                        button.className = 'repeat-question-btn';
-                        button.setAttribute('data-question-text', escapeHtml(questionText));
-                        button.title = 'Repeat Question';
-                        button.innerHTML = '🔄';
-                        // Insert the button right inside the generatedItem div, before other content
-                        generatedItem.insertBefore(button, generatedItem.firstChild);
+                // Check if a button already exists (e.g., if script runs twice)
+                // and avoid adding a button to content that already contains one (prevents nesting)
+                if (!generatedItem.querySelector('.repeat-question-btn') && !contentDiv.querySelector('.repeat-question-btn')) {
+                    const button = document.createElement('button');
+                    button.className = 'repeat-question-btn';
+                    // Store the original HTML content instead of just the text
+                    button.setAttribute('data-original-content', originalContent);
+                    button.title = 'Re-run this item'; // Updated title
+                    button.innerHTML = '🔄';
+                    // Insert the button right inside the generatedItem div, before other content
+                    // Ensure we don't insert the button inside itself if something goes wrong
+                    if (generatedItem.firstChild && generatedItem.firstChild.nodeType === Node.ELEMENT_NODE && generatedItem.firstChild.classList.contains('repeat-question-btn')) {
+                        // Button already seems to be the first child, do nothing or log warning
+                        console.warn("Repeat button might already exist as first child.");
+                    } else {
+                         generatedItem.insertBefore(button, generatedItem.firstChild);
                     }
                 }
             }

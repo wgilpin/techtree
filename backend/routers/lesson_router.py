@@ -77,6 +77,22 @@ class LessonExpositionResponse(BaseModel):
     error: Optional[str] = None
 
 
+
+# Model for rerun request
+# pylint: disable=too-few-public-methods
+class RerunMessageRequest(BaseModel):
+    """Request model for saving a re-run message."""
+    content: str
+
+
+# Model for rerun response
+# pylint: disable=too-few-public-methods
+class RerunMessageResponse(BaseModel):
+    """Response model for the rerun message action."""
+    status: str
+    message: Optional[str] = None
+
+
 # pylint: disable=too-few-public-methods
 class ProgressUpdate(BaseModel):
     """Request model for updating lesson progress status."""
@@ -372,6 +388,76 @@ async def generate_assessment_question(
             detail=f"Error generating assessment question: {str(e)}",
         ) from e
 
+
+
+
+@router.post(
+    "/rerun/{syllabus_id}/{module_index}/{lesson_index}",
+    response_model=RerunMessageResponse,
+)
+async def handle_rerun_request(
+    syllabus_id: str,
+    module_index: int,
+    lesson_index: int,
+    request_body: RerunMessageRequest,
+    current_user: User = Depends(get_current_user),
+    interaction_service: LessonInteractionService = Depends(get_interaction_service),
+) -> RerunMessageResponse:
+    """
+    Saves a re-run message (exercise/assessment) to the conversation history.
+
+    Requires user authentication. Calls the interaction service to save the message
+    with role 'assistant' and type 'ASSISTANT_RERUN'. Does not trigger AI.
+
+    Args:
+        syllabus_id: The ID of the parent syllabus.
+        module_index: The index of the parent module.
+        lesson_index: The index of the lesson.
+        request_body: Contains the HTML content of the message to save.
+        current_user: The authenticated user.
+        interaction_service: Dependency-injected LessonInteractionService instance.
+
+    Returns:
+        RerunMessageResponse indicating success or failure.
+
+    Raises:
+        HTTPException (401): If the user is not authenticated.
+        HTTPException (404): If the lesson progress record cannot be found.
+        HTTPException (500): If saving the message fails.
+    """
+    if not current_user or current_user.user_id == "no-auth":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required to save rerun messages.",
+        )
+    logger.info(
+        f"Entering handle_rerun_request for syllabus: {syllabus_id}, "
+        f"mod: {module_index}, lesson: {lesson_index}, user: {current_user.user_id}"
+    )
+    try:
+        result = await interaction_service.handle_rerun_message(
+            user_id=current_user.user_id,
+            syllabus_id=syllabus_id,
+            module_index=module_index,
+            lesson_index=lesson_index,
+            message_content=request_body.content,
+        )
+        # The service method returns a dict like {"status": "success", "message": "..."}
+        # or raises HTTPException on error.
+        return RerunMessageResponse(**result)
+    except HTTPException as http_exc:
+        # Log and re-raise HTTP exceptions from the service
+        logger.error(
+            f"HTTP error in handle_rerun_request: {http_exc.detail}", exc_info=False
+        )
+        raise http_exc
+    except Exception as e:
+        # Catch any other unexpected errors
+        logger.error(f"Unexpected error in handle_rerun_request: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error saving rerun message: {str(e)}",
+        ) from e
 
 @router.get("/by-id/{lesson_id}", response_model=LessonExpositionResponse)
 async def get_lesson_exposition_by_id(

@@ -25,6 +25,7 @@ dependencies = [
     "pytest-asyncio>=0.24.0", # Added for async tests
     "python-jose[cryptography]>=3.4.0",
     "pydantic>=2.10.6",
+    "beautifulsoup4>=4.12.3", # Added for parsing HTML in chat messages
 ]
 
 [project.optional-dependencies]
@@ -48,6 +49,7 @@ dev = [
     "types-pyyaml>=6.0.12.20250326",
     "types-requests>=2.32.0.20250328",
     "types-tqdm>=4.67.0.20250319",
+    "types-beautifulsoup4>=4.12.0.20240511", # Added stubs for beautifulsoup4
 ] # Close the dev list properly
 
 [tool.setuptools]
@@ -111,3 +113,8 @@ module = [
     "email_validator" # If using email-validator
 ]
 ignore_missing_imports = true
+
+[dependency-groups]
+dev = [
+    "types-beautifulsoup4>=4.12.0.20250204",
+]

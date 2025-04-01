@@ -436,7 +436,7 @@ class LessonInteractionService:
             # 4. Invoke the LessonAI graph - it now returns only the updated state dict
             updated_state = self.lesson_ai.process_chat_turn(
                 current_state=current_state,
-                user_message=user_message,
+                user_message=user_message, # Pass original message directly
                 history=history,
             )
             # Cast removed - process_chat_turn should return LessonState directly
@@ -874,3 +874,73 @@ class LessonInteractionService:
             logger.error(f"Error updating progress: {e}", exc_info=True)
             # Re-raise potentially as a different error type if needed
             raise RuntimeError("Failed to update lesson progress in database.") from e
+
+    async def handle_rerun_message(
+        self,
+        user_id: str,
+        syllabus_id: str,
+        module_index: int,
+        lesson_index: int,
+        message_content: str,
+    ) -> Dict[str, Any]:
+        """
+        Saves a re-run message (exercise/assessment) to the conversation history
+        as an assistant message without triggering AI interaction.
+
+        Args:
+            user_id: The ID of the user initiating the rerun.
+            syllabus_id: The ID of the parent syllabus.
+            module_index: The index of the parent module.
+            lesson_index: The index of the lesson.
+            message_content: The HTML content of the message to save.
+
+        Returns:
+            A dictionary indicating success or failure.
+
+        Raises:
+            HTTPException: If the progress record cannot be found or saving fails.
+        """
+        logger.info(
+            f"Handling rerun message for user {user_id}, lesson "
+            f"{syllabus_id}/{module_index}/{lesson_index}"
+        )
+        try:
+            # 1. Get the progress_id (we need it to save the message)
+            # We don't need the full state, just the progress record
+            progress_record = self.db_service.get_lesson_progress(
+                user_id=user_id,
+                syllabus_id=syllabus_id,
+                module_index=module_index,
+                lesson_index=lesson_index,
+            )
+            if not progress_record or not progress_record.get("progress_id"):
+                logger.error(
+                    f"Could not find progress record for rerun: user {user_id}, "
+                    f"lesson {syllabus_id}/{module_index}/{lesson_index}"
+                )
+                raise HTTPException(
+                    status_code=404, detail="Lesson progress not found for rerun."
+                )
+            progress_id = progress_record["progress_id"]
+
+            # 2. Save the message to history
+            self.db_service.save_conversation_message(
+                progress_id=progress_id,
+                role="assistant", # Save as assistant message
+                message_type="ASSISTANT_RERUN", # Specific type for reruns
+                content=message_content,
+                metadata=None, # No specific metadata needed for simple rerun
+            )
+            logger.info(f"Saved rerun message to history for progress_id {progress_id}")
+            return {"status": "success", "message": "Rerun message saved."}
+
+        except HTTPException as http_exc:
+            # Re-raise known HTTP exceptions
+            raise http_exc
+        except Exception as e:
+            logger.error(
+                f"Unexpected error handling rerun message: {e}", exc_info=True
+            )
+            raise HTTPException(
+                status_code=500, detail="Failed to save rerun message."
+            ) from e
