@@ -75,6 +75,9 @@ disable = [
 [tool.pylint.format]
 max-line-length = 120
 
+[tool.pylint.main]
+ignore-patterns = [".*test.*\\.py"] # Exclude python files containing 'test'
+
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
@@ -86,6 +89,7 @@ asyncio_default_fixture_loop_scope = "function"
 python_version = "3.12"
 strict = false
 warn_unused_ignores = false
+exclude = ['.*test.*'] # Exclude files/dirs containing 'test'
 
 # Ignore missing imports for libraries without readily available stubs
 [[tool.mypy.overrides]]

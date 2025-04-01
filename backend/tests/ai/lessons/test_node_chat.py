@@ -84,8 +84,8 @@ class TestGenerateChatResponse:
         initial_history = [{"role": "user", "content": "Tell me more."}]
         state = self._get_base_state(user_message=None, history=initial_history)
 
-        # Cast state before calling node
-        updated_state, assistant_message = nodes.generate_chat_response(
+        # Cast state before calling node, now returns only state dict
+        updated_state = nodes.generate_chat_response(
             cast(Dict[str, Any], state)
         )
 
@@ -102,9 +102,11 @@ class TestGenerateChatResponse:
         mock_call_llm.assert_called_once_with("mocked_chat_prompt", max_retries=3)
 
         # Check the returned assistant message
-        assert isinstance(assistant_message, dict)
-        assert assistant_message.get("role") == "assistant"
-        assert assistant_message.get("content") == "This is the AI response."
+        # Check the message within the returned state
+        new_message = updated_state.get("new_assistant_message")
+        assert isinstance(new_message, dict)
+        assert new_message.get("role") == "assistant"
+        assert new_message.get("content") == "This is the AI response."
 
         # Check the updated state
         assert isinstance(updated_state, dict)
@@ -122,8 +124,8 @@ class TestGenerateChatResponse:
         state = self._get_base_state(user_message=None, history=initial_history)
 
         with patch("backend.ai.lessons.nodes.logger.warning") as mock_warning:
-            # Cast state before calling node
-            updated_state, assistant_message = nodes.generate_chat_response(
+            # Cast state before calling node, now returns only state dict
+            updated_state = nodes.generate_chat_response(
                 cast(Dict[str, Any], state)
             )
 
@@ -132,7 +134,8 @@ class TestGenerateChatResponse:
                 f"history_context for user {state['user_id']}."
             )
             # Node should return original state and None message in this case
-            assert assistant_message is None
+            # Check the message within the returned state (should be None)
+            assert updated_state.get("new_assistant_message") is None
             assert updated_state == state
 
     @patch("backend.ai.lessons.nodes.load_prompt")
@@ -152,8 +155,8 @@ class TestGenerateChatResponse:
         state = self._get_base_state(user_message=None, history=initial_history)
 
         with patch("backend.ai.lessons.nodes.logger.error") as mock_error:
-            # Cast state before calling node
-            updated_state, assistant_message = nodes.generate_chat_response(
+            # Cast state before calling node, now returns only state dict
+            updated_state = nodes.generate_chat_response(
                 cast(Dict[str, Any], state)
             )
 
@@ -161,11 +164,13 @@ class TestGenerateChatResponse:
             assert "LLM call failed" in mock_error.call_args[0][0]
 
             # Check the returned assistant message (should be error fallback)
-            assert isinstance(assistant_message, dict)
-            assert assistant_message.get("role") == "assistant"
+            # Check the message within the returned state
+            new_message = updated_state.get("new_assistant_message")
+            assert isinstance(new_message, dict)
+            assert new_message.get("role") == "assistant"
             assert (
                 "Sorry, I encountered an error while generating a response."
-                in assistant_message.get("content", "")
+                in new_message.get("content", "")
             )
 
             # Check the updated state
@@ -188,8 +193,8 @@ class TestGenerateChatResponse:
         state = self._get_base_state(user_message=None, history=initial_history)
 
         with patch("backend.ai.lessons.nodes.logger.error") as mock_error:
-            # Cast state before calling node
-            updated_state, assistant_message = nodes.generate_chat_response(
+            # Cast state before calling node, now returns only state dict
+            updated_state = nodes.generate_chat_response(
                 cast(Dict[str, Any], state)
             )
 
@@ -198,11 +203,13 @@ class TestGenerateChatResponse:
             mock_call_llm.assert_not_called()
 
             # Check the returned assistant message (should be error fallback)
-            assert isinstance(assistant_message, dict)
-            assert assistant_message.get("role") == "assistant"
+            # Check the message within the returned state
+            new_message = updated_state.get("new_assistant_message")
+            assert isinstance(new_message, dict)
+            assert new_message.get("role") == "assistant"
             assert (
                 "Sorry, I encountered an error while generating a response."
-                in assistant_message.get("content", "")
+                in new_message.get("content", "")
             )
 
             # Check the updated state

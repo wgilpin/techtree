@@ -16,7 +16,7 @@ from typing import (
     Callable,
     Tuple,
     Union,
-)  # Added Callable, Tuple, Union
+)
 
 # Import logger
 from backend.logger import logger
@@ -508,7 +508,6 @@ class SQLiteDatabaseService:
             )
             cursor = self.conn.cursor()
             cursor.execute(syllabus_query, syllabus_params)
-            logger.debug(f"Inserted syllabus record with ID: {syllabus_id}")
 
             # Insert modules and lessons
             modules_list = content.get("modules", [])
@@ -531,7 +530,6 @@ class SQLiteDatabaseService:
                     )
                     raise RuntimeError("Failed to get module ID after insert.")
                 module_id = module_id_result[0]
-                logger.debug(f"Retrieved module_id: {module_id}")
 
                 lessons_list = module_data.get("lessons", [])
                 for lesson_index, lesson_data in enumerate(lessons_list):
@@ -551,9 +549,6 @@ class SQLiteDatabaseService:
                         now,
                     )
                     cursor.execute(lesson_query, lesson_params)
-                    logger.debug(
-                        f"Inserted {len(lessons_list)} lessons for module {module_id}"
-                    )
 
             return syllabus_id
 
@@ -583,11 +578,6 @@ class SQLiteDatabaseService:
         norm_topic = topic.lower()
         norm_level = level.lower()
 
-        logger.debug(
-            f"Attempting to get syllabus: topic='{norm_topic}', "
-            f"level='{norm_level}', user_id='{user_id}'"
-        )
-
         syllabus_row: Optional[sqlite3.Row] = None
 
         if user_id:
@@ -600,10 +590,7 @@ class SQLiteDatabaseService:
             syllabus_row = self.execute_query(
                 query_user, (user_id, norm_topic, norm_level), fetch_one=True
             )
-            if syllabus_row:
-                logger.debug("Found user-specific syllabus.")
-            else:
-                logger.debug("User-specific syllabus not found, checking for general.")
+            if syllabus_row is None:
                 query_general = """
                     SELECT * FROM syllabi
                     WHERE user_id IS NULL AND lower(topic) = ? AND lower(level) = ?
@@ -612,11 +599,8 @@ class SQLiteDatabaseService:
                 syllabus_row = self.execute_query(
                     query_general, (norm_topic, norm_level), fetch_one=True
                 )
-                if syllabus_row:
-                    logger.debug("Found general syllabus.")
 
         else:
-            logger.debug("No user_id provided, checking for general syllabus.")
             query_general = """
                 SELECT * FROM syllabi
                 WHERE user_id IS NULL AND lower(topic) = ? AND lower(level) = ?
@@ -625,14 +609,11 @@ class SQLiteDatabaseService:
             syllabus_row = self.execute_query(
                 query_general, (norm_topic, norm_level), fetch_one=True
             )
-            if syllabus_row:
-                logger.debug("Found general syllabus.")
 
         if syllabus_row:
             syllabus_dict = dict(syllabus_row)
             return self._build_syllabus_dict(syllabus_dict)
         else:
-            logger.debug("Syllabus not found.")
             return None
 
     # Type hints for args and return
@@ -646,7 +627,6 @@ class SQLiteDatabaseService:
         Returns:
             dict: The syllabus data if found, otherwise None
         """
-        logger.debug(f"Getting syllabus by ID: {syllabus_id}")
         query = "SELECT * FROM syllabi WHERE syllabus_id = ?"
         syllabus_row = self.execute_query(
             query, (syllabus_id,), fetch_one=True
@@ -670,7 +650,6 @@ class SQLiteDatabaseService:
             dict: The fully constructed syllabus dictionary.
         """
         syllabus_id = syllabus_dict["syllabus_id"]
-        logger.debug(f"Building syllabus dict for syllabus_id: {syllabus_id}")
 
         # Fetch modules
         modules_query = """
@@ -679,14 +658,10 @@ class SQLiteDatabaseService:
         modules_result = self.execute_read_query(
             modules_query, (syllabus_id,)
         )  # Use typed read query
-        logger.debug(f"Found {len(modules_result)} modules for syllabus {syllabus_id}")
 
         top_level_content: Dict[str, Any] = {"modules": []}
         for module_data in modules_result:
             module_pk = module_data["module_id"]
-            logger.debug(
-                f"Processing module PK: {module_pk}, index: {module_data['module_index']}"
-            )
             module_dict = dict(module_data)
 
             # Fetch lessons for the module
@@ -696,16 +671,12 @@ class SQLiteDatabaseService:
             lessons_result = self.execute_read_query(
                 lessons_query, (module_pk,)
             )  # Use typed read query
-            logger.debug(
-                f"Found {len(lessons_result)} lessons for module PK {module_pk}"
-            )
 
             module_dict["lessons"] = [dict(lesson) for lesson in lessons_result]
             top_level_content["modules"].append(module_dict)
 
         # Add the fetched content under the 'content' key
         syllabus_dict["content"] = top_level_content
-        logger.debug(f"Finished building syllabus dict for syllabus_id: {syllabus_id}")
 
         return syllabus_dict
 
@@ -774,7 +745,6 @@ class SQLiteDatabaseService:
                     WHERE content_id = ?
                 """
                 self.execute_query(update_query, (content_json, now, content_id))
-                logger.debug(f"Updated lesson content for lesson_pk {lesson_pk}")
             else:
                 # Insert new content
                 insert_query = """
@@ -786,10 +756,6 @@ class SQLiteDatabaseService:
                 if not content_id_result:
                     raise RuntimeError("Failed to get content_id after insert.")
                 content_id = content_id_result[0]
-                logger.debug(
-                    f"Inserted new lesson content for lesson_pk {lesson_pk} "
-                    f"with content_id {content_id}"
-                )
 
             return lesson_pk  # Return the lesson's primary key
 
@@ -860,7 +826,6 @@ class SQLiteDatabaseService:
         Returns:
             dict: The lesson content dictionary, or None if not found or error occurs.
         """
-        logger.debug(f"Getting lesson content by lesson_pk: {lesson_pk}")
         content_query = "SELECT content FROM lesson_content WHERE lesson_id = ?"
         content_row = self.execute_query(content_query, (lesson_pk,), fetch_one=True)
 
@@ -869,7 +834,6 @@ class SQLiteDatabaseService:
             if isinstance(content_str, str):
                 try:
                     parsed_content = json.loads(content_str)
-                    logger.debug(f"Found and parsed content for lesson_pk {lesson_pk}")
                     # Ensure return is Dict or None
                     return parsed_content if isinstance(parsed_content, dict) else None
                 except json.JSONDecodeError:
@@ -933,7 +897,6 @@ class SQLiteDatabaseService:
             dict: Lesson details including title, summary, module_index, lesson_index,
                   or None if not found.
         """
-        logger.debug(f"Getting lesson by content_id: {lesson_content_id}")
         # Query joining lesson_content, lessons, and modules tables
         query = """
             SELECT l.title, l.summary, l.lesson_index, m.module_index, m.syllabus_id
@@ -953,7 +916,6 @@ class SQLiteDatabaseService:
                 "module_index": result_row["module_index"],
                 "syllabus_id": result_row["syllabus_id"],
             }
-            logger.debug(f"Found lesson details: {lesson_details}")
             return lesson_details
 
         return None
@@ -986,10 +948,6 @@ class SQLiteDatabaseService:
             str: The ID of the progress entry (UUID)
         """
         now = datetime.now().isoformat()
-        logger.debug(
-            f"Saving progress for user {user_id}, syllabus {syllabus_id}, "
-            f"mod {module_index}, lesson {lesson_index}, lesson_id PK {lesson_id}, status {status}"
-        )
 
         # Ensure we have the lesson_id PK if not provided
         if lesson_id is None:
@@ -1002,7 +960,6 @@ class SQLiteDatabaseService:
                     f"mod {module_index}, lesson {lesson_index} to save progress."
                 )
             lesson_id = retrieved_lesson_id
-            logger.debug(f"Retrieved lesson_id PK: {lesson_id}")
 
         # Check if progress entry already exists for this user and lesson
         check_query = "SELECT progress_id FROM user_progress WHERE user_id = ? AND lesson_id = ?"
@@ -1012,7 +969,6 @@ class SQLiteDatabaseService:
 
         if existing_progress:
             progress_id = existing_progress["progress_id"]
-            logger.debug(f"Updating existing progress entry: {progress_id}")
             update_query = """
                 UPDATE user_progress
                 SET status = ?, updated_at = ?, lesson_state_json = ?
@@ -1022,7 +978,6 @@ class SQLiteDatabaseService:
             self.execute_query(update_query, update_params, commit=True)
         else:
             progress_id = str(uuid.uuid4())
-            logger.debug(f"Creating new progress entry: {progress_id}")
             insert_query = """
                 INSERT INTO user_progress
                 (progress_id, user_id, syllabus_id, module_index, lesson_index, lesson_id, status, created_at, updated_at, lesson_state_json)
@@ -1060,10 +1015,6 @@ class SQLiteDatabaseService:
         Returns:
             dict: Progress entry inc. parsed 'lesson_state' and 'lesson_id', or None if not found.
         """
-        logger.debug(
-            f"Getting lesson progress for user {user_id}, syllabus {syllabus_id}, "
-            f"mod {module_index}, lesson {lesson_index}"
-        )
         lesson_id_pk = self.get_lesson_id(syllabus_id, module_index, lesson_index)
 
         if lesson_id_pk is None:
@@ -1072,31 +1023,22 @@ class SQLiteDatabaseService:
 
         query = "SELECT * FROM user_progress WHERE user_id = ? AND lesson_id = ?"
         params = (user_id, lesson_id_pk)
-        logger.debug(f"Executing get_lesson_progress query with params: {params}")
         entry_row = self.execute_query(
             query, params, fetch_one=True
         )  # Returns Row or None
-        logger.debug(f"Raw entry fetched from DB: {entry_row}")
 
         if entry_row:
             entry_dict = dict(entry_row)
-            logger.debug(f"Converted entry_dict: {entry_dict}")
 
             # Parse lesson_state_json if it exists
             state_json = entry_dict.get("lesson_state_json")
             parsed_state: Optional[Dict[str, Any]] = None
             if isinstance(state_json, str):
-                log_json_str = (
-                    state_json[:100] + "..." if len(state_json) > 100 else state_json
-                )
-                logger.debug(f"Attempting to parse lesson_state_json: {log_json_str}")
                 try:
                     parsed_state = json.loads(state_json)
                     if not isinstance(parsed_state, dict):
                         logger.warning("Parsed lesson_state_json is not a dictionary.")
                         parsed_state = None  # Treat non-dict JSON as invalid state
-                    else:
-                        logger.debug("Successfully parsed lesson_state_json.")
                 except json.JSONDecodeError as json_err:
                     logger.error(
                         "Failed to parse lesson_state_json for progress_id "
@@ -1105,14 +1047,11 @@ class SQLiteDatabaseService:
                     )
                     parsed_state = None
             else:
-                logger.debug("lesson_state_json is null or not a string.")
                 parsed_state = None
 
             entry_dict["lesson_state"] = parsed_state  # Add parsed state to dict
-            logger.debug(f"Returning entry_dict from get_lesson_progress: {entry_dict}")
             return entry_dict
 
-        logger.debug("No progress entry found, returning None.")
         return None
 
     # Type hints for args and return
@@ -1129,7 +1068,6 @@ class SQLiteDatabaseService:
         Returns:
             list: A list of progress entry dictionaries.
         """
-        logger.debug(f"Getting all progress for user {user_id}, syllabus {syllabus_id}")
         query = """
             SELECT up.*, l.lesson_index, m.module_index
             FROM user_progress up
@@ -1142,7 +1080,6 @@ class SQLiteDatabaseService:
         result_rows = self.execute_read_query(query, params)
 
         result = [dict(row) for row in result_rows]
-        logger.debug(f"Found {len(result)} progress entries.")
         return result
 
     # Type hints for args and return
@@ -1163,7 +1100,6 @@ class SQLiteDatabaseService:
             """
             result = self.execute_query(query, (syllabus_id,), fetch_one=True)
             total_lessons = result[0] if result else 0
-            logger.debug(f"Calculated {total_lessons} total lessons for syllabus {syllabus_id}")
             return total_lessons
 
     # Type hints for args and return
@@ -1174,7 +1110,6 @@ class SQLiteDatabaseService:
         Returns:
             list: A list of dictionaries, each containing syllabus details and progress summary.
         """
-        logger.debug(f"Getting in-progress courses for user: {user_id}")
         # Get unique syllabus_ids & the latest updated_at for each syllabus the user has progress on
         syllabi_query = """
             SELECT m.syllabus_id, MAX(up.updated_at) as last_accessed
@@ -1188,17 +1123,11 @@ class SQLiteDatabaseService:
         syllabi_progress = self.execute_read_query(
             syllabi_query, (user_id,)
         )  # Use typed read query
-        logger.debug(
-            f"Found {len(syllabi_progress)} syllabi with progress for user {user_id}"
-        )
 
         in_progress_courses: List[Dict[str, Any]] = []
         for syllabus_row in syllabi_progress:
             syllabus_id = syllabus_row["syllabus_id"]
             last_accessed = syllabus_row["last_accessed"]
-            logger.debug(
-                f"Processing syllabus {syllabus_id}, last accessed {last_accessed}"
-            )
 
             # Get syllabus details (topic, level)
             syllabus_details = self.get_syllabus_by_id(syllabus_id)
@@ -1218,9 +1147,6 @@ class SQLiteDatabaseService:
                 completed_lessons_query, (user_id, syllabus_id), fetch_one=True
             )
             completed_lessons = completed_result[0] if completed_result else 0
-            logger.debug(
-                f"Found {completed_lessons} completed lessons for syllabus {syllabus_id}"
-            )
 
             total_lessons = self._calculate_total_lessons(syllabus_details, syllabus_id)
             progress_percentage = (
@@ -1238,7 +1164,6 @@ class SQLiteDatabaseService:
             }
             in_progress_courses.append(course_summary)
 
-        logger.debug(f"Returning {len(in_progress_courses)} in-progress courses.")
         return in_progress_courses
 
     # Conversation History methods
@@ -1247,6 +1172,7 @@ class SQLiteDatabaseService:
         self,
         progress_id: str,
         role: str,
+        message_type: str,
         content: str,
         timestamp: Optional[datetime] = None,
         metadata: Optional[Dict[str, Any]] = None,
@@ -1257,6 +1183,7 @@ class SQLiteDatabaseService:
         Args:
             progress_id (str): The ID of the user progress entry this message belongs to.
             role (str): 'user' or 'assistant'.
+            message_type (str): The type of message (e.g., 'CHAT_USER', 'EXERCISE_PROMPT').
             content (str): The text content of the message.
             timestamp (datetime, optional): When the message occurred. Defaults to now.
             metadata (dict, optional): Additional structured data related to the message.
@@ -1268,16 +1195,13 @@ class SQLiteDatabaseService:
 
         query = """
             INSERT INTO conversation_history
-            (message_id, progress_id, role, content, timestamp, metadata)
-            VALUES (?, ?, ?, ?, ?, ?)
+            (message_id, progress_id, role, message_type, content, timestamp, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """
-        params = (message_id, progress_id, role, content, ts_iso, metadata_json)
+        params = (message_id, progress_id, role, message_type, content, ts_iso, metadata_json)
 
         try:
             self.execute_query(query, params, commit=True)
-            logger.debug(
-                f"Saved conversation message {message_id} for progress {progress_id}"
-            )
         except Exception as e:
             logger.error(
                 f"Error saving conversation message for progress {progress_id}: {e}",
@@ -1328,9 +1252,6 @@ class SQLiteDatabaseService:
 
                 history.append(message_dict)
 
-            logger.debug(
-                f"Retrieved {len(history)} messages for progress {progress_id}"
-            )
             return history
         except Exception as e:
             logger.error(

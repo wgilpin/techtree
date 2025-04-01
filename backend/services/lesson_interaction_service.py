@@ -110,7 +110,7 @@ class LessonInteractionService:
                 new_exception_type=ValueError,
                 new_exception_message="Failed to get or generate lesson exposition.",
                 original_exception=expo_err,
-                exc_info=True # Keep stack trace logging
+                exc_info=True,  # Keep stack trace logging
             )
 
         if not lesson_content:
@@ -177,9 +177,7 @@ class LessonInteractionService:
                 "syllabus": None,  # Consider fetching/linking syllabus if needed
                 "lesson_title": lesson_title,
                 "module_title": module_title,
-                "generated_content": lesson_content.model_dump(
-                    mode="json"
-                ),
+                "generated_content": lesson_content.model_dump(mode="json"),
                 "user_responses": [],
                 "user_performance": {},
                 "user_id": user_id,
@@ -241,6 +239,7 @@ class LessonInteractionService:
         # Return the final state, content, and the progress_id
         return lesson_state, lesson_content, progress_id
 
+# pylint: disable=too-many-branches
     async def get_or_create_lesson_state(
         self,
         syllabus_id: str,
@@ -263,18 +262,23 @@ class LessonInteractionService:
         lesson_state: Optional[LessonState] = None
         lesson_content: Optional[GeneratedLessonContent] = None
         lesson_db_id: Optional[int] = None
+        progress_id: Optional[str] = None  # Initialize progress_id
 
         if user_id:
             # --- Authenticated User Flow ---
             try:
-                # Unpack 3 values, ignore progress_id with '_'
-                loaded_state, loaded_content, _ = await self._load_or_initialize_state(
-                    user_id, syllabus_id, module_index, lesson_index
+                # Capture progress_id
+                loaded_state, loaded_content, progress_id = (
+                    await self._load_or_initialize_state(
+                        user_id, syllabus_id, module_index, lesson_index
+                    )
                 )
                 lesson_state = loaded_state
                 lesson_content = loaded_content
                 if lesson_state:
                     lesson_db_id = lesson_state.get("lesson_db_id")
+                else:  # Ensure lesson_db_id is initialized even if state is None initially
+                    lesson_db_id = None
 
             except ValueError as e:
                 logger.error(f"Error loading/initializing state: {e}", exc_info=True)
@@ -288,12 +292,41 @@ class LessonInteractionService:
 
             # Prepare response structure using the new helper for authenticated users
             serializable_state_for_response = prepare_state_for_response(lesson_state)
+
+            # Fetch conversation history if progress_id exists
+            conversation_history = []
+            if progress_id:
+                try:
+                    conversation_history = self.db_service.get_conversation_history(
+                        progress_id
+                    )
+                    logger.info(
+                        f"Fetched {len(conversation_history)} messages for progress_id {progress_id}"
+                    )
+                except Exception as hist_err:
+                    logger.error(
+                        f"Failed to fetch conversation history for progress {progress_id}: {hist_err}",
+                        exc_info=True,
+                    )
+                    # Proceed without history, maybe add an error indicator?
+
+            # Add history to the state dictionary before returning
+            if serializable_state_for_response:
+                serializable_state_for_response["conversation_history"] = (
+                    conversation_history
+                )
+            else:
+                # Handle case where state might be None but we still need a structure for history
+                serializable_state_for_response = {
+                    "conversation_history": conversation_history
+                }
+
             response_data = {
                 "lesson_id": lesson_db_id,
                 "content": (
                     lesson_content.model_dump(mode="json") if lesson_content else None
                 ),
-                "lesson_state": serializable_state_for_response,
+                "lesson_state": serializable_state_for_response,  # Now includes history
             }
         else:
             # --- Unauthenticated User Flow ---
@@ -324,7 +357,9 @@ class LessonInteractionService:
             # Prepare response structure using the new helper for unauthenticated users
             # This handles serialization of Pydantic models/datetimes within the state
             # Note: lesson_state will be None here, prepare_state_for_response handles this
-            serializable_state_for_response = prepare_state_for_response(lesson_state)
+            serializable_state_for_response = prepare_state_for_response(
+                lesson_state
+            )  # Will be None
             # No need for try-except here as the helper handles internal types;
             # JSON encoding happens at the FastAPI response level.
 
@@ -333,11 +368,11 @@ class LessonInteractionService:
                 "content": (
                     lesson_content.model_dump(mode="json") if lesson_content else None
                 ),
-                "lesson_state": serializable_state_for_response,
+                "lesson_state": serializable_state_for_response,  # Will be None
             }
-        return response_data
+        return response_data  # This return needs to be at the function level
 
-# pylint: disable=too-many-nested-blocks, too-many-branches, too-many-statements
+    # pylint: disable=too-many-nested-blocks, too-many-branches, too-many-statements
     async def handle_chat_turn(
         self,
         user_id: str,
@@ -386,6 +421,7 @@ class LessonInteractionService:
                 self.db_service.save_conversation_message(
                     progress_id=progress_id,
                     role="user",
+                    message_type="CHAT_USER",
                     content=user_message,
                 )
             except Exception as save_err:
@@ -397,52 +433,66 @@ class LessonInteractionService:
             # 3. Get current history for AI context
             history = self.db_service.get_conversation_history(progress_id)
 
-            # 4. Invoke the LessonAI graph
-            updated_state, new_assistant_messages = self.lesson_ai.process_chat_turn(
+            # 4. Invoke the LessonAI graph - it now returns only the updated state dict
+            updated_state = self.lesson_ai.process_chat_turn(
                 current_state=current_state,
                 user_message=user_message,
                 history=history,
             )
+            # Cast removed - process_chat_turn should return LessonState directly
 
-            # 5. Save new assistant messages to history
+            # 5. Extract the new assistant message from the state and save it
             saved_assistant_messages_for_response = []
-            # Robust check in case AI returns unexpected type
-            if isinstance(new_assistant_messages, list):
-                for msg_data in new_assistant_messages:
-                    # Robust check for message format
-                    if (
-                        isinstance(msg_data, dict)
-                        and msg_data.get("role") == "assistant"
-                    ):
-                        content_to_save = msg_data.get("content", "")
-                        try:
-                            self.db_service.save_conversation_message(
-                                progress_id=progress_id,
-                                role="assistant",
-                                content=content_to_save,
-                                metadata=msg_data.get("metadata"),
-                            )
-                            saved_assistant_messages_for_response.append(
-                                {"role": "assistant", "content": content_to_save}
-                            )
-                        except Exception as save_err:
-                            logger.error(
-                                f"Failed to save assistant message to history: {save_err}",
-                                exc_info=True,
-                            )
-                            # Add to response even if save failed, with an indicator
-                            saved_assistant_messages_for_response.append(
-                                {
-                                    "role": "assistant",
-                                    "content": f"[Save Error] {content_to_save}",
-                                }
-                            )
-            else:
-                logger.warning(
-                    f"AI process_chat_turn returned non-list assistant messages: {type(new_assistant_messages)}"
-                )
+            new_assistant_message = updated_state.get(
+                "new_assistant_message"
+            )  # Extract message
 
-            # 6. Save the updated state back to the database
+            # Remove the message from the state dict so it's not saved in the state blob itself
+            if "new_assistant_message" in updated_state:
+                del updated_state["new_assistant_message"]
+
+            if (
+                isinstance(new_assistant_message, dict)
+                and new_assistant_message.get("role") == "assistant"
+            ):
+                content_to_save = new_assistant_message.get("content", "")
+                metadata_to_save = new_assistant_message.get(
+                    "metadata"
+                )  # Get metadata if present
+                try:
+                    self.db_service.save_conversation_message(
+                        progress_id=progress_id,
+                        role="assistant",
+                        message_type="CHAT_ASSISTANT",  # Use appropriate type
+                        content=content_to_save,
+                        metadata=metadata_to_save,  # Pass metadata
+                    )
+                    # Add the successfully saved message to the list for the response payload
+                    saved_assistant_messages_for_response.append(
+                        {"role": "assistant", "content": content_to_save}
+                    )
+                except Exception as save_err:
+                    logger.error(
+                        f"Failed to save assistant message to history: {save_err}",
+                        exc_info=True,
+                    )
+                    # Optionally add an error indicator to the response if save fails
+                    saved_assistant_messages_for_response.append(
+                        {
+                            "role": "assistant",
+                            "content": f"[Save Error] {content_to_save}",
+                        }
+                    )
+            elif new_assistant_message:
+                # Log if the structure is unexpected but exists
+                logger.warning(
+                    f"Received unexpected structure for new_assistant_message: {type(new_assistant_message)}"
+                )
+            # If new_assistant_message is None, nothing is saved or added to response list
+
+            # (The rest of the function continues from here, saving the updated_state without the message)
+
+            # 6. Save the updated state back to the database (state no longer contains the message)
             try:
                 state_json = serialize_state_data(updated_state)
                 lesson_db_id = updated_state.get(
@@ -471,7 +521,7 @@ class LessonInteractionService:
             # 7. Prepare response for the router
             error_message_from_state = updated_state.get("error_message")
             response_payload: Dict[str, Any] = {
-                "responses": saved_assistant_messages_for_response
+                "responses": saved_assistant_messages_for_response  # Use the list built above
             }
             if error_message_from_state:
                 response_payload["error"] = error_message_from_state
@@ -480,6 +530,7 @@ class LessonInteractionService:
                     self.db_service.save_conversation_message(
                         progress_id=progress_id,
                         role="system",  # Use 'system' for state-level errors
+                        message_type="SYSTEM_ERROR",  # Added message_type
                         content=error_message_from_state,
                     )
                 except Exception as save_err:
@@ -498,14 +549,16 @@ class LessonInteractionService:
         except Exception as e:
             # Catch any other unexpected errors
             logger.error(f"Unexpected error during chat turn: {e}", exc_info=True)
+            # Add specific detail about the error type if helpful
+            error_detail = f"An internal server error occurred during chat processing: {type(e).__name__}"
             raise HTTPException(
                 status_code=500,
-                detail="An internal server error occurred during chat processing.",
+                detail=error_detail,
             ) from e
 
-    # Duplicate generate_exercise definition removed
+    # --- On-Demand Generation Handling ---
 
-# pylint: disable=too-many-branches, too-many-statements
+    # pylint: disable=too-many-branches, too-many-statements
     async def _handle_generation_request(
         self,
         user_id: str,
@@ -558,10 +611,13 @@ class LessonInteractionService:
                 )
 
             # 2. Call the specific generation node function
-            updated_state_dict, new_item_obj, assistant_message_dict = node_function(
+            # Node function now returns state_changes, generated_item, assistant_message_dict
+            state_changes, new_item_obj, assistant_message_dict = node_function(
                 cast(Dict[str, Any], current_state)
             )
-            updated_state = cast(LessonState, updated_state_dict)
+            # Merge state changes into the current state
+            # Be careful with potential overwrites if keys overlap unexpectedly
+            updated_state = {**current_state, **state_changes}
 
             # 3. Validate the generated item object
             validated_item: Optional[T] = None
@@ -572,7 +628,7 @@ class LessonInteractionService:
                 validated_item = validate_internal_model(
                     model_cls,
                     new_item_obj,
-                    context_message=f"Failed to validate {item_type_name} dict from node"
+                    context_message=f"Failed to validate {item_type_name} dict from node",
                 )
 
             # 4. Determine message content and type
@@ -587,7 +643,7 @@ class LessonInteractionService:
                 )
             else:
                 # Generation failed or returned invalid object
-                # Prefer message from node if available
+                # Prefer message from node if available (e.g., error message from node)
                 if isinstance(
                     assistant_message_dict, dict
                 ) and assistant_message_dict.get("content"):
@@ -610,8 +666,17 @@ class LessonInteractionService:
                             f"Sorry, I couldn't generate a {item_type_name} right now."
                         )
 
+            # Determine message type based on success/failure
+            message_type: str
+            if validated_item:
+                # e.g., "exercise" -> "EXERCISE_PROMPT"
+                # e.g., "assessment question" -> "ASSESSMENT_QUESTION_PROMPT"
+                message_type = f"{item_type_name.upper().replace(' ', '_')}_PROMPT"
+            else:
+                message_type = "GENERATION_FAILURE"
+
             # 5. Save the assistant message (item prompt or failure) to history
-            if assistant_message_content:
+            if assistant_message_content:  # Check if there's content to save
                 try:
                     metadata = None
                     if validated_item:
@@ -623,6 +688,7 @@ class LessonInteractionService:
                     self.db_service.save_conversation_message(
                         progress_id=progress_id,
                         role="assistant",
+                        message_type=message_type,  # Pass the determined message type
                         content=assistant_message_content,
                         metadata=metadata,
                     )
@@ -635,7 +701,8 @@ class LessonInteractionService:
 
             # 6. Save the updated state
             try:
-                state_json = serialize_state_data(updated_state)
+                # Cast updated_state before serialization
+                state_json = serialize_state_data(cast(LessonState, updated_state))
                 lesson_db_id = updated_state.get("lesson_db_id")
 
                 self.db_service.save_user_progress(
@@ -662,15 +729,15 @@ class LessonInteractionService:
             # 7. Return the result dictionary
             return {
                 item_type_name.split(" ")[0]: (
-                    validated_item.model_dump(mode="json")
-                    if validated_item
-                    else None
+                    validated_item.model_dump(mode="json") if validated_item else None
                 ),
                 "message": assistant_message_content,
             }
 
         except (ValueError, RuntimeError) as e:
-            logger.error(f"Error during {item_type_name} generation: {e}", exc_info=True)
+            logger.error(
+                f"Error during {item_type_name} generation: {e}", exc_info=True
+            )
             status_code = 404 if isinstance(e, ValueError) else 500
             raise HTTPException(status_code=status_code, detail=str(e)) from e
         except Exception as e:
@@ -682,8 +749,6 @@ class LessonInteractionService:
                 status_code=500,
                 detail=f"An internal server error occurred while generating the {item_type_name}.",
             ) from e
-
-    # --- End of _handle_generation_request ---
 
     # --- Start of generate_exercise ---
     async def generate_exercise(
@@ -710,6 +775,7 @@ class LessonInteractionService:
             metadata_key="exercise_id",
         )
 
+    # --- Start of generate_assessment_question ---
     async def generate_assessment_question(
         self,
         user_id: str,
@@ -720,22 +786,8 @@ class LessonInteractionService:
         """
         Handles the request to generate a new assessment question on demand.
 
-        Returns:
-            A dictionary containing the question object (if successful)
-            and the message content.
-            Example: {"question": {...}, "message": "..."}
-
-
-
-
-        Raises:
-            RuntimeError: If state/progress_id cannot be loaded/found or saving state fails.
-            HTTPException: For internal server errors or value errors during processing.
+        Delegates to _handle_generation_request.
         """
-        logger.info(
-            f"Generating assessment question for user {user_id}, lesson "
-            f"{syllabus_id}/{module_index}/{lesson_index}"
-        )
         return await self._handle_generation_request(
             user_id=user_id,
             syllabus_id=syllabus_id,
@@ -743,11 +795,12 @@ class LessonInteractionService:
             lesson_index=lesson_index,
             node_function=nodes.generate_new_assessment,
             model_cls=AssessmentQuestion,
-            format_function=format_assessment_question_for_chat_history,  # Use imported public function
+            format_function=format_assessment_question_for_chat_history,
             item_type_name="assessment question",
-            metadata_key="assessment_question_id",
+            metadata_key="question_id",
         )
 
+    # --- Start of update_lesson_progress ---
     async def update_lesson_progress(
         self,
         user_id: str,
@@ -757,57 +810,67 @@ class LessonInteractionService:
         status: str,
     ) -> Dict[str, Any]:
         """
-        Updates the progress status for a specific lesson for the user.
+        Updates the progress status for a specific lesson.
+
+        Args:
+            user_id: The ID of the user.
+            syllabus_id: The ID of the syllabus.
+            module_index: The index of the module.
+            lesson_index: The index of the lesson.
+            status: The new status ("not_started", "in_progress", "completed").
+
+        Returns:
+            A dictionary containing the updated progress details.
+
+        Raises:
+            ValueError: If the status is invalid or lesson cannot be found.
         """
         logger.info(
             f"Updating progress for user {user_id}, lesson "
             f"{syllabus_id}/{module_index}/{lesson_index} to status: {status}"
         )
+        # Validate status
         allowed_statuses = ["not_started", "in_progress", "completed"]
         if status not in allowed_statuses:
             raise ValueError(
-                f"Invalid progress status: {status}. Must be one of {allowed_statuses}"
+                f"Invalid status: {status}. Must be one of {allowed_statuses}"
             )
 
+        # Use save_user_progress which handles upsert logic
         try:
-            lesson_id_pk = self.db_service.get_lesson_id(
+            # We need the lesson_id (primary key) to save progress correctly.
+            # Fetch it first.
+            lesson_db_id = self.db_service.get_lesson_id(
                 syllabus_id, module_index, lesson_index
             )
-            if lesson_id_pk is None:
+            if lesson_db_id is None:
                 raise ValueError(
-                    "Cannot update progress: Lesson primary key not found."
+                    f"Lesson not found for {syllabus_id}/{module_index}/{lesson_index}"
                 )
 
-            # Call DB service to update progress, passing the lesson_id PK
-            # Also fetch the current state to preserve it if only status is changing
-            current_progress = self.db_service.get_lesson_progress(
-                user_id, syllabus_id, module_index, lesson_index
-            )
-            current_state_json = (
-                current_progress.get("lesson_state_json") if current_progress else None
-            )
-
+            # Save the progress (this will update if exists)
             progress_id = self.db_service.save_user_progress(
                 user_id=user_id,
                 syllabus_id=syllabus_id,
                 module_index=module_index,
                 lesson_index=lesson_index,
                 status=status,
-                lesson_id=lesson_id_pk,  # Pass the validated int PK
-                lesson_state_json=current_state_json,
+                lesson_id=lesson_db_id,
+                # We don't update lesson_state here, only status
             )
 
-            if progress_id is None:
-                raise ValueError("Failed to update progress record in database.")
-
-            logger.info(f"Progress updated successfully for user {user_id}.")
-            return {"status": "success", "progress_id": progress_id}
-
-        except ValueError as e:  # Specific exception first
-            logger.error(f"Value error updating progress: {e}", exc_info=True)
-            raise e
-        except Exception as e:  # Generic exception last
-            logger.error(f"Unexpected error updating progress: {e}", exc_info=True)
-            raise RuntimeError(
-                "Failed to update progress due to an internal error."
-            ) from e
+            # Return the updated progress details
+            # Fetch the updated record to be sure? Or construct from input?
+            # Constructing is simpler if save_user_progress doesn't return full record.
+            return {
+                "progress_id": progress_id,  # Assuming save_user_progress returns the ID
+                "user_id": user_id,
+                "syllabus_id": syllabus_id,
+                "module_index": module_index,
+                "lesson_index": lesson_index,
+                "status": status,
+            }
+        except Exception as e:
+            logger.error(f"Error updating progress: {e}", exc_info=True)
+            # Re-raise potentially as a different error type if needed
+            raise RuntimeError("Failed to update lesson progress in database.") from e

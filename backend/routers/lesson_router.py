@@ -268,17 +268,18 @@ async def generate_exercise(
         f"lesson: {lesson_index}, user: {current_user.user_id}"
     )
     try:
-        # Service now returns a tuple: (Optional[Exercise], Optional[str])
-        exercise_obj, message = await interaction_service.generate_exercise(
+        # Service returns a dictionary: {"exercise": Optional[ExerciseDict], "message": Optional[str]}
+        result_dict = await interaction_service.generate_exercise(
             user_id=current_user.user_id,
             syllabus_id=syllabus_id,
             module_index=module_index,
             lesson_index=lesson_index,
         )
-        # The service already returns the validated Exercise object or None
-        # The type ignore on assignment should handle mypy issues.
+        # Extract values from the dictionary
+        exercise_data = result_dict.get("exercise") # This is a dict or None
+        message = result_dict.get("message")
         return ExerciseResponse(
-            exercise=exercise_obj, # type: ignore[arg-type]
+            exercise=exercise_data, # Pass the dict/None directly for Pydantic validation
             message=message
         )
     except ValueError as e:

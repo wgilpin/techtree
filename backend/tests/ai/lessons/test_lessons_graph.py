@@ -162,12 +162,14 @@ class TestLessonAICore:
         # Provide a more complete mock output matching LessonState
         # This mock represents the *changes* returned by the graph,
         # so it shouldn't contain the full history.
-        # It might contain 'new_assistant_messages' if the node returns them.
+        # It should contain 'new_assistant_message' as returned by the node.
         mock_graph_output: Dict[str, Any] = {  # Changed type hint
             # "conversation_history": [...], # Removed
             # Let's assume the graph output includes the new message(s)
-            "new_assistant_messages": [{"role": "assistant", "content": "Hi there!"}],
-            "current_interaction_mode": "chatting",
+            "new_assistant_message": {"role": "assistant", "content": "Hi there!"}, # Node returns the message here
+            "current_interaction_mode": "chatting", # Other state changes from the node
+            "error_message": None,
+            # Include other keys expected in the state, even if not changed by this specific node
             "topic": "Test",
             "knowledge_level": "beginner",
             "syllabus": None,
@@ -186,7 +188,6 @@ class TestLessonAICore:
             "generated_assessment_questions": [],
             "generated_exercise_ids": [],
             "generated_assessment_question_ids": [],
-            "error_message": None,
             "active_exercise": None,
             "active_assessment": None,
             "potential_answer": None,
@@ -227,10 +228,11 @@ class TestLessonAICore:
         # Provide a dummy history list for the call signature
         dummy_history = [{"role": "user", "content": user_message}]
 
-        # process_chat_turn now returns (final_state, new_messages)
-        final_state, new_messages = lesson_ai.process_chat_turn(
+        # process_chat_turn now returns only the final_state dictionary
+        final_state_result = lesson_ai.process_chat_turn(
             initial_state, user_message, dummy_history
         )
+        final_state: LessonState = final_state_result # Add explicit type hint
 
         # The input state passed to invoke should contain history_context
         expected_input_state = {
@@ -251,4 +253,5 @@ class TestLessonAICore:
         # If so, the returned new_messages should match that.
         # If not, new_messages should be None.
         # Assert the actual returned messages directly based on the mock setup
-        assert new_messages == [{"role": "assistant", "content": "Hi there!"}]
+        # Assert the new message is within the final state
+        assert final_state.get("new_assistant_message") == {"role": "assistant", "content": "Hi there!"}

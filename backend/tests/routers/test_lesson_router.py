@@ -256,8 +256,11 @@ def test_generate_exercise_success(mock_interaction_service: MagicMock) -> None:
     mock_exercise_obj = Exercise(
         id="ex_gen_1", type="short_answer", instructions="Generated Q"
     )
-    # Mock should return a tuple (exercise_obj, message)
-    mock_interaction_service.generate_exercise.return_value = (mock_exercise_obj, None)
+    # Mock should return a dictionary {"exercise": obj_dict_or_none, "message": str_or_none}
+    mock_interaction_service.generate_exercise.return_value = {
+        "exercise": mock_exercise_obj.model_dump(mode="json"), # Service returns dict
+        "message": None
+    }
     response = client.post(
         f"/lesson/exercise/{syllabus_id}/{module_index}/{lesson_index}"
     )

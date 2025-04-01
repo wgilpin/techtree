@@ -143,12 +143,15 @@ document.addEventListener('DOMContentLoaded', function() {
         contentDiv.classList.add('message-content');
         // Render markdown for assistant messages, otherwise treat as text
         if (role === 'assistant') {
-            // Use marked.parse() and disable gfm breaks for standard list behavior
-            // Enable gfm for tables, strikethrough etc.
-            contentDiv.innerHTML = marked.parse(content, { gfm: true, breaks: false });
+            // Check if content is already formatted HTML from our helpers
+            if (content.trim().startsWith('<div class="generated-item')) {
+                 contentDiv.innerHTML = content; // Insert pre-formatted HTML directly
+            } else {
+                 // Otherwise, parse as Markdown (for regular chat responses)
+                 contentDiv.innerHTML = marked.parse(content, { gfm: true, breaks: false });
+            }
         } else {
              // For user messages, set textContent to prevent potential XSS from user input
-             // If user messages could legitimately contain HTML, sanitize first.
             contentDiv.textContent = content;
         }
         messageDiv.appendChild(contentDiv);
@@ -165,61 +168,9 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Helper to format exercise HTML for chat
-        function formatExerciseForChat(exercise) {
-            const questionText = exercise.instructions || exercise.question || 'N/A';
-            let contentHTML = `<div class="generated-item exercise-item">`; // Wrap in a div for potential styling
-            // Add repeat button here
-            contentHTML += `<button class="repeat-question-btn" data-question-text="${escapeHtml(questionText)}" title="Repeat Question">🔄</button>`;
-            contentHTML += `<h3>Exercise (${exercise.type.replace('_', ' ')})</h3>`;
-            contentHTML += `<p><strong>Instructions:</strong> ${questionText}</p>`; // Use variable
+        // Removed formatExerciseForChat function (lines 168-195)
 
-            if (exercise.type === 'multiple_choice' && exercise.options) {
-                contentHTML += '<ul>';
-                exercise.options.forEach(opt => {
-                    contentHTML += `<li><strong>${opt.id})</strong> ${opt.text}</li>`;
-                });
-                contentHTML += '</ul>';
-                contentHTML += '<p><small><em>Submit your answer (e.g., "A") in the chat.</em></small></p>';
-            } else if (exercise.type === 'ordering' && exercise.items) {
-                 contentHTML += '<p><strong>Items to order:</strong></p><ul>';
-                 exercise.items.forEach(item => {
-                     contentHTML += `<li>${item}</li>`;
-                 });
-                 contentHTML += '</ul>';
-                 contentHTML += '<p><small><em>Submit your ordered list (e.g., "Item B, Item A, Item C") in the chat.</em></small></p>';
-            } else {
-                 contentHTML += '<p><small><em>Submit your answer in the chat.</em></small></p>';
-            }
-            contentHTML += `</div>`; // Close wrapper div
-            return contentHTML;
-        }
-
-         // Helper to format assessment question HTML for chat
-        function formatAssessmentQuestionForChat(question) {
-            const questionText = question.question_text || 'N/A';
-            let contentHTML = `<div class="generated-item assessment-item">`; // Wrap in a div
-            // Add repeat button here, using escapeHtml for the data attribute
-            contentHTML += `<button class="repeat-question-btn" data-question-text="${escapeHtml(questionText)}" title="Repeat Question">🔄</button>`;
-            contentHTML += `<h3>Assessment Question (${question.type.replace('_', ' ')})</h3>`;
-            contentHTML += `<p>${questionText}</p>`; // Use variable
-
-            if ((question.type === 'multiple_choice' || question.type === 'true_false') && question.options) {
-                contentHTML += '<ul>';
-                question.options.forEach(opt => {
-                    contentHTML += `<li><strong>${opt.id})</strong> ${opt.text}</li>`;
-                });
-                contentHTML += '</ul>';
-                 if (question.type === 'multiple_choice') {
-                     contentHTML += '<p><small><em>Submit your answer (e.g., "A") in the chat.</em></small></p>';
-                 } else { // true_false
-                     contentHTML += '<p><small><em>Submit your answer ("True" or "False") in the chat.</em></small></p>';
-                 }
-            } else { // short_answer
-                 contentHTML += '<p><small><em>Submit your answer in the chat.</em></small></p>';
-            }
-            contentHTML += `</div>`; // Close wrapper div
-            return contentHTML;
-        }
+        // Removed formatAssessmentQuestionForChat function (lines 197-222)
 
 
         // --- Event Listener for Form Submission ---
@@ -349,16 +300,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const result = await response.json();
 
-            if (result.error) {
-                appendMessage('assistant', `Error generating item: ${result.error}`);
-            } else if (result.exercise) {
-                const formattedContent = formatFunction(result.exercise); // Use the passed formatFunction
-                appendMessage('assistant', formattedContent); // Append formatted HTML to chat
-            } else if (result.question) {
-                const formattedContent = formatFunction(result.question); // Use the passed formatFunction
-                appendMessage('assistant', formattedContent); // Append formatted HTML to chat
+            // Use the message field directly from the backend response
+            if (result.message) {
+                 appendMessage('assistant', result.message);
+            } else if (result.error) {
+                 // Fallback to error if message is missing
+                 appendMessage('assistant', `Error generating item: ${result.error}`);
             } else {
-                 appendMessage('assistant', 'Sorry, could not generate the item.');
+                 // Fallback if neither message nor error is present
+                 appendMessage('assistant', 'Sorry, could not generate the item or get a response message.');
             }
             // Removed redundant confirmation messages
 
@@ -432,15 +382,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
     if (generateExerciseBtn) {
         generateExerciseBtn.addEventListener('click', () => {
-            // Pass the correct formatting function
-            handleGenerateClick(generateExerciseBtn, '/exercise', formatExerciseForChat);
+            // No longer need to pass formatting function
+            handleGenerateClick(generateExerciseBtn, '/exercise');
         });
     }
 
     if (generateAssessmentBtn) {
         generateAssessmentBtn.addEventListener('click', () => {
-             // Pass the correct formatting function
-             handleGenerateClick(generateAssessmentBtn, '/assessment', formatAssessmentQuestionForChat);
+             // No longer need to pass formatting function
+             handleGenerateClick(generateAssessmentBtn, '/assessment');
         });
     }
 

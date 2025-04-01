@@ -183,7 +183,7 @@ def classify_intent(state: Dict[str, Any]) -> Dict[str, Any]:
 # Changed to synchronous
 def generate_chat_response(
     state: Dict[str, Any],
-) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+) -> Dict[str, Any]: # Return only state changes dictionary
     """
     Generates a chat response based on the conversation history and context.
 
@@ -203,8 +203,8 @@ def generate_chat_response(
             "Cannot generate chat response: "
             f"No user message found in history_context for user {user_id}."""
         )
-        # Return state and None for the message
-        return state, None
+        # Return only the state dictionary as no changes occurred
+        return state
 
     # Use the 'history' variable defined above
     last_user_message = history[-1].get("content", "")
@@ -271,9 +271,13 @@ def generate_chat_response(
     state["error_message"] = None  # Clear any previous error
 
     logger.info(f"Generated chat response content for user {user_id}.")
-    # Return only the state *changes* and the new message dictionary
-    state_changes = {"current_interaction_mode": "chatting", "error_message": None}
-    return state_changes, new_ai_message
+    # Add the new message to the state changes dictionary
+    state_changes = {
+        "current_interaction_mode": "chatting",
+        "error_message": None,
+        "new_assistant_message": new_ai_message # Include the generated message
+    }
+    return state_changes
 
 
 # Changed to synchronous

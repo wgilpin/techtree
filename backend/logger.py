@@ -26,7 +26,8 @@ handler_exists = any(
     for h in root_logger.handlers
 )
 
-if not handler_exists:
+# Add handler only if it doesn't exist AND we are not running tests
+if not handler_exists and os.environ.get("RUNNING_TESTS") != "true":
     # Create TimedRotatingFileHandler for daily rotation, keeping 7 backups
     file_handler = logging.handlers.TimedRotatingFileHandler(
         log_file_path,
