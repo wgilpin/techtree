@@ -11,15 +11,16 @@ from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-from pydantic import ValidationError
 
 # Import services and models
 # Corrected import: OnboardingAI -> TechTreeAI
-from backend.ai.app import LessonAI, TechTreeAI, SyllabusAI
+from backend.ai.app import LessonAI, SyllabusAI, TechTreeAI
+from backend.exceptions import validate_internal_model
 from backend.models import User
 from backend.services.auth_service import AuthService
 from backend.services.lesson_exposition_service import LessonExpositionService
-from backend.services.lesson_interaction_service import LessonInteractionService
+from backend.services.lesson_interaction_service import \
+    LessonInteractionService
 from backend.services.onboarding_service import OnboardingService
 from backend.services.sqlite_db import SQLiteDatabaseService
 from backend.services.syllabus_service import SyllabusService
@@ -112,12 +113,12 @@ async def get_current_user(
         logger.warning(f"User ID {user_id} from token not found in database.")
         raise credentials_exception
     # Convert dict to User model
-    try:
-        user = User(**user_dict)
-    except ValidationError as e:
-        logger.error(f"Failed to validate user data from DB for user {user_id}: {e}")
-        # Treat validation error as auth failure
-        raise credentials_exception from e
+    # Use helper to validate and raise specific internal error
+    user = validate_internal_model(
+        User,
+        user_dict,
+        context_message=f"Failed to validate user data from DB for user {user_id}"
+    )
     return user
 
 

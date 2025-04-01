@@ -6,7 +6,6 @@ Logs are written to 'techtree.log' in the project root directory.
 
 import logging
 import logging.handlers # Import handlers module
-import sys
 import os
 
 # Define log file path relative to this file's directory
@@ -55,8 +54,3 @@ logger = logging.getLogger(__name__)
 # Log configuration confirmation only if the handler was newly added
 if not handler_exists:
     logger.info(f"Logging configured with TimedRotatingFileHandler. Log file: {log_file_path}")
-else:
-    logger.debug("Logging handlers already configured.") # Use debug if already set up
-
-logger.debug(f"sys.prefix: {sys.prefix}")
-logger.debug(f"sys.real_prefix: {getattr(sys, 'real_prefix', 'Not present')}")

@@ -2,28 +2,21 @@
 # pylint: disable=broad-exception-caught,singleton-comparison
 """Langgraph graph for onboarding - evaluating the user on a topic"""
 
+import logging
 import os
+import random
 import re
 import time
-import random
-from collections import Counter
-from typing import (
-    Dict,
-    List,
-    TypedDict,
-    Optional,
-    cast,
-    Callable,
-    Any,
-)  # Added Callable, Any
-import logging
+from typing import Any, Callable, Dict, List, Optional, TypedDict, cast
 
-import requests
 import google.generativeai as genai
-from google.api_core.exceptions import ResourceExhausted
+import requests
 from dotenv import load_dotenv
+from google.api_core.exceptions import ResourceExhausted
 from langgraph.graph import END, StateGraph
 from tavily import TavilyClient  # type: ignore
+
+from backend.exceptions import log_and_raise_new
 
 # Add logger
 logger = logging.getLogger(__name__)
@@ -36,20 +29,26 @@ TAVILY_TIMEOUT = 5  # seconds
 
 # Configure Gemini API
 # Define type hint before assignment
-MODEL: Optional[genai.GenerativeModel] = None # type: ignore[name-defined]
+MODEL: Optional[genai.GenerativeModel] = None  # type: ignore[name-defined]
 try:
     gemini_api_key = os.environ.get("GEMINI_API_KEY")
     gemini_model_name = os.environ.get("GEMINI_MODEL")
     if not gemini_api_key:
-        logger.error("Missing environment variable: GEMINI_API_KEY")
-        raise KeyError("GEMINI_API_KEY")
+        log_and_raise_new(
+            exception_type=KeyError,
+            exception_message="GEMINI_API_KEY",
+            exc_info=False,
+        )
     if not gemini_model_name:
-        logger.error("Missing environment variable: GEMINI_MODEL")
-        raise KeyError("GEMINI_MODEL")
+        log_and_raise_new(
+            exception_type=KeyError,
+            exception_message="GEMINI_MODEL",
+            exc_info=False,
+        )
 
     # Configuration within the try block (8 spaces indent)
-    genai.configure(api_key=gemini_api_key) # type: ignore[attr-defined]
-    MODEL = genai.GenerativeModel(gemini_model_name) # type: ignore[attr-defined]
+    genai.configure(api_key=gemini_api_key)  # type: ignore[attr-defined]
+    MODEL = genai.GenerativeModel(gemini_model_name)  # type: ignore[attr-defined]
     logger.info(f"Onboarding Config: Gemini model '{gemini_model_name}' configured.")
 
 # Except block aligned with try (0 spaces indent)
@@ -70,7 +69,7 @@ TAVILY: Optional[TavilyClient] = None
 try:
     tavily_api_key = os.environ.get("TAVILY_API_KEY")
     if not tavily_api_key:
-        logger.warning(
+        logger.error(
             "Missing environment variable TAVILY_API_KEY. Tavily search disabled."
         )
     else:
@@ -170,7 +169,7 @@ HARD = 3
 class TechTreeAI:
     """Encapsulates the Tech Tree langgraph app"""
 
-    def __init__(self) -> None:  # Added return type hint
+    def __init__(self) -> None:
         """Initialize the TechTreeAI."""
         self.state: Optional[AgentState] = None
         self.workflow: StateGraph = self._create_workflow()  # Added type hint
@@ -232,14 +231,12 @@ class TechTreeAI:
         }
         return initial_state
 
-    # Added return type hint
     def _perform_internet_search(self, state: AgentState) -> Dict[str, Any]:
         """Performs internet search using Tavily API and stores results in state."""
         topic = state["topic"]
         self.search_status = (
             f"Searching the internet for information about '{topic}'..."
         )
-        logger.info(self.search_status)
 
         # Check if Tavily client is configured
         if TAVILY is None:
@@ -254,10 +251,6 @@ class TechTreeAI:
         try:
             # Search Wikipedia
             self.search_status = "Searching Wikipedia..."
-            logger.info(self.search_status)
-            tavily_key = os.environ.get("TAVILY_API_KEY")
-            key_preview = f"{tavily_key[:8]}..." if tavily_key else "Not Set"
-            logger.debug(f"DEBUG: TAVILY_API_KEY = {key_preview}")
 
             wiki_search = call_with_retry(
                 TAVILY.search,
@@ -271,11 +264,9 @@ class TechTreeAI:
                 if wiki_search.get("results")
                 else ""
             )
-            logger.debug(f"Wikipedia search result length: {len(wikipedia_content)}")
 
             # Search Google (excluding Wikipedia)
             self.search_status = "Searching Google..."
-            logger.info(self.search_status)
             google_search = call_with_retry(
                 TAVILY.search,
                 query=topic,
@@ -286,10 +277,8 @@ class TechTreeAI:
             google_results = [
                 result.get("content", "") for result in google_search.get("results", [])
             ]
-            logger.debug(f"Google search returned {len(google_results)} results.")
 
             self.search_status = "Search completed successfully."
-            logger.info(self.search_status)
             return {
                 "wikipedia_content": wikipedia_content,
                 "google_results": google_results,
@@ -304,7 +293,6 @@ class TechTreeAI:
                 "search_completed": True,
             }
 
-    # Added return type hint
     def _generate_question(self, state: AgentState) -> Dict[str, Any]:
         """Generates a question using the Gemini API and search results."""
         if MODEL is None:
@@ -322,9 +310,6 @@ class TechTreeAI:
             if target_difficulty == EASY
             else "medium" if target_difficulty == MEDIUM else "hard"
         )
-        logger.info(
-            f"Generating question for topic '{state['topic']}' at difficulty: {difficulty_name}"
-        )
 
         wikipedia_content = state["wikipedia_content"]
         google_results = state["google_results"]
@@ -333,7 +318,6 @@ class TechTreeAI:
         search_context += "Additional information from other sources:\n"
         for i, result in enumerate(google_results, 1):
             search_context += f"Source {i}:\n{result}\n\n"
-        logger.debug(f"Search context length: {len(search_context)}")
 
         prompt = f"""
         You are an expert tutor creating questions on the topic of {state['topic']} so
@@ -365,9 +349,6 @@ class TechTreeAI:
         try:
             response = call_with_retry(MODEL.generate_content, prompt)
             response_text = response.text
-            logger.debug(
-                f"LLM response for question generation: {response_text[:200]}..."
-            )
 
             difficulty = MEDIUM
             question = response_text
@@ -381,21 +362,12 @@ class TechTreeAI:
             if difficulty_match:
                 try:
                     difficulty = int(difficulty_match.group(1))
-                    logger.debug(f"Extracted difficulty: {difficulty}")
                 except ValueError:
-                    logger.warning(
-                        f"Could'nt parse extracted difficulty '{difficulty_match.group(1)}' as int."
-                    )
                     difficulty = target_difficulty
 
             question_match = question_pattern.search(response_text)
             if question_match:
                 question = question_match.group(1).strip()
-                logger.debug(f"Extracted question: {question[:100]}...")
-            else:
-                logger.warning(
-                    "Could not extract question using regex, using full response."
-                )
 
         except Exception as ex:
             logger.error(f"Error in _generate_question: {str(ex)}", exc_info=True)
@@ -409,16 +381,11 @@ class TechTreeAI:
             "question_difficulties": state["question_difficulties"] + [difficulty],
         }
 
-    # Added return type hint
     # pylint: disable=too-many-branches, too-many-statements
     def _evaluate_answer(self, state: AgentState, answer: str = "") -> Dict[str, Any]:
         """Evaluates the answer using the Gemini API."""
         if not answer:
             raise ValueError("Answer is required")
-        logger.info(
-            f"Evaluating answer for question: {state['current_question'][:100]}..."
-        )
-        logger.debug(f"User answer: {answer}")
 
         if MODEL is None:
             logger.error("Gemini model not configured. Cannot evaluate answer.")
@@ -475,7 +442,6 @@ class TechTreeAI:
         try:
             response = call_with_retry(MODEL.generate_content, prompt)
             evaluation = response.text
-            logger.debug(f"LLM evaluation response: {evaluation[:200]}...")
 
             parts = evaluation.split(":", 1)
             classification_str = parts[0].strip()
@@ -489,12 +455,7 @@ class TechTreeAI:
                     classification = 0.5
                 else:
                     classification = 0.0
-                logger.debug(f"Extracted classification: {classification}")
             except ValueError:
-                logger.warning(
-                    f"Could not parse classification '{classification_str}' "
-                    "as float. Defaulting to 0.0."
-                )
                 classification = 0.0
                 feedback = evaluation
 
@@ -503,257 +464,201 @@ class TechTreeAI:
             classification = 0.0
             feedback = f"Error evaluating answer: {str(ex)}"
 
-        current_difficulty = state["current_target_difficulty"]
+        # Update state based on evaluation
         consecutive_wrong = state["consecutive_wrong"]
-        consecutive_hard_correct_or_partial = state.get(
-            "consecutive_hard_correct_or_partial", 0
-        )
+        difficulty = state["current_target_difficulty"]
+        consecutive_hard_correct_or_partial = state[
+            "consecutive_hard_correct_or_partial"
+        ]
 
-        if classification == 0.0:
+        if classification < 0.5:  # Incorrect
             consecutive_wrong += 1
-            next_difficulty = current_difficulty
+            difficulty = max(EASY, difficulty - 1)
             consecutive_hard_correct_or_partial = 0
-            logger.debug(
-                f"Incorrect answer. Consecutive wrong: {consecutive_wrong}. "
-                f"Next difficulty: {next_difficulty}"
-            )
-        else:
+        else:  # Correct or partially correct
             consecutive_wrong = 0
-            if current_difficulty == EASY:
-                next_difficulty = MEDIUM
-            elif current_difficulty == MEDIUM:
-                next_difficulty = HARD
-            else:  # current_difficulty == HARD
-                next_difficulty = HARD
+            difficulty = min(HARD, difficulty + 1)
+            if state["current_target_difficulty"] == HARD:
                 if classification >= 0.5:
                     consecutive_hard_correct_or_partial += 1
-            logger.debug(
-                f"Correct/Partial answer. Consecutive wrong reset. Next difficulty: "
-                f"{next_difficulty}. Consecutive HARD correct/partial: "
-                f"{consecutive_hard_correct_or_partial}"
-            )
 
-        if current_difficulty != HARD:
+        # Reset consecutive hard counter if current difficulty is not HARD
+        if state["current_target_difficulty"] != HARD:
             consecutive_hard_correct_or_partial = 0
-            logger.debug(
-                "Reset consecutive HARD counter as current difficulty is not HARD."
-            )
 
         return {
             "answers": state["answers"] + [answer],
             "answer_evaluations": state["answer_evaluations"] + [classification],
             "consecutive_wrong": consecutive_wrong,
-            "current_target_difficulty": next_difficulty,
+            "current_target_difficulty": difficulty,
             "consecutive_hard_correct_or_partial": consecutive_hard_correct_or_partial,
             "feedback": feedback,
             "classification": classification,
         }
 
-    # Added return type hint
     def _end(self, state: AgentState) -> Dict[str, Any]:
-        """Provides a final assessment of the user's knowledge level."""
+        """Ends the quiz and calculates the final assessment."""
         self.is_quiz_complete = True
-        logger.info("Quiz ended. Calculating final assessment.")
 
-        total_score = 0.0
-        max_possible_score = 0
-
-        for i, evaluation in enumerate(state["answer_evaluations"]):
-            if i < len(state["question_difficulties"]):
-                difficulty = state["question_difficulties"][i]
-                total_score += evaluation * difficulty
-                max_possible_score += difficulty
-
-        weighted_percentage = (
-            (total_score / max_possible_score * 100) if max_possible_score > 0 else 0
-        )
-        logger.debug(
-            f"Total score: {total_score}, Max possible: {max_possible_score},"
-            f" Weighted %: {weighted_percentage:.2f}"
+        # Calculate final score and level
+        total_score = sum(state["answer_evaluations"])
+        max_possible_score = len(state["questions_asked"])
+        score_percentage = (
+            (total_score / max_possible_score) * 100 if max_possible_score > 0 else 0
         )
 
-        if weighted_percentage >= 85:
+        # Determine final level based on score percentage
+        if score_percentage >= 75:
             final_level = "advanced"
-        elif weighted_percentage >= 65:
-            final_level = "good knowledge"
-        elif weighted_percentage >= 35:
-            final_level = "early learner"
+        elif score_percentage >= 40:
+            final_level = "intermediate"
         else:
             final_level = "beginner"
-        logger.info(f"Final determined knowledge level: {final_level}")
-
-        counts = Counter(state["answer_evaluations"])
 
         self.final_assessment = {
-            "correct_answers": counts[1.0],
-            "partially_correct_answers": counts[0.5],
-            "incorrect_answers": counts[0.0],
-            "total_score": total_score,
-            "max_possible_score": max_possible_score,
-            "weighted_percentage": weighted_percentage,
+            "topic": state["topic"],
             "knowledge_level": final_level,
+            "score": score_percentage,
+            "questions": state["questions_asked"],
+            "responses": state["answers"],
+            "evaluations": state["answer_evaluations"],
         }
-        logger.debug(f"Final assessment details: {self.final_assessment}")
 
-        return {}  # Return empty dict as per convention for end nodes
+        return {"knowledge_level": final_level}
 
-    # Added return type hint
     def _should_continue(self, state: AgentState) -> str:
-        """Decides whether to continue or end the conversation."""
-        if state["consecutive_wrong"] >= 2:
-            logger.info("Ending quiz: 2 consecutive wrong answers.")
+        """Determines whether to continue the quiz or end."""
+        if state["consecutive_wrong"] >= 3:
+            return END
+        if state["consecutive_hard_correct_or_partial"] >= 3:
+            return END
+        if len(state["questions_asked"]) >= 10:
             return END
 
-        if state.get("consecutive_hard_correct_or_partial", 0) >= 3:
-            logger.info(
-                "Ending quiz: 3 consecutive correct/partial answers at HARD difficulty."
-            )
-            return END
-
-        logger.debug("Continuing quiz.")
         return "continue"
 
-    # Added return type hint
     def initialize(self, topic: str) -> Dict[str, Any]:
         """Initialize the agent with a topic."""
-        logger.debug(f"Initializing TechTreeAI with topic: {topic}")
         try:
             initial_state_dict = self._initialize(topic=topic)
             self.state = cast(AgentState, initial_state_dict)
-            logger.debug(f"Successfully initialized state for topic: {topic}")
             return {"status": "initialized", "topic": topic}
         except Exception as ex:
             logger.error(f"Error initializing TechTreeAI: {str(ex)}", exc_info=True)
             raise
 
-    # Added return type hint
     def perform_search(self) -> Dict[str, Any]:
-        """Perform internet search for the topic."""
+        """Perform the internet search."""
         if not self.state:
-            logger.error("Error - Agent not initialized for search")
-            raise ValueError("Agent not initialized")
-        logger.debug(f"Starting search for topic: {self.state['topic']}")
+            log_and_raise_new(
+                exception_type=ValueError,
+                exception_message="Agent not initialized",
+                exc_info=False,
+            )
 
         try:
             result = self._perform_internet_search(self.state)
-            logger.debug(f"Search completed with result keys: {list(result.keys())}")
             # Update state carefully
-            for key, value in result.items():
-                if key in AgentState.__annotations__:
-                    self.state[key] = value  # type: ignore
-                else:
-                    logger.warning(
-                        f"Ignoring unexpected key '{key}' from search node result."
-                    )
-            return {"status": "search_completed", "search_status": self.search_status}
+            self.state["wikipedia_content"] = result["wikipedia_content"]
+            self.state["google_results"] = result["google_results"]
+            self.state["search_completed"] = result["search_completed"]
+            return result
         except Exception as ex:
             logger.error(f"Error during search: {str(ex)}", exc_info=True)
             raise
 
-    # Added return type hint
     def generate_question(self) -> Dict[str, Any]:
-        """Generate a question based on the current state."""
+        """Generate the next question."""
         if not self.state:
-            logger.error("Error - Agent not initialized for question generation")
-            raise ValueError("Agent not initialized")
+            log_and_raise_new(
+                exception_type=ValueError,
+                exception_message="Agent not initialized",
+                exc_info=False,
+            )
+        if not self.state["search_completed"]:
+            raise ValueError("Search must be completed before generating a question")
 
         result = self._generate_question(self.state)
-        logger.debug(
-            f"Question generation completed with result keys: {list(result.keys())}"
-        )
-        # Update state carefully
-        for key, value in result.items():
-            if key in AgentState.__annotations__:
-                self.state[key] = value  # type: ignore
-            else:
-                logger.warning(
-                    f"Ignoring unexpected key '{key}' from generate_question node result."
-                )
-
-        difficulty = self.state["current_question_difficulty"]
-        difficulty_str = (
-            "EASY"
-            if difficulty == EASY
-            else "MEDIUM" if difficulty == MEDIUM else "HARD"
-        )
-
+        # Update state
+        self.state["current_question"] = result["current_question"]
+        self.state["current_question_difficulty"] = result[
+            "current_question_difficulty"
+        ]
+        self.state["questions_asked"] = result["questions_asked"]
+        self.state["question_difficulties"] = result["question_difficulties"]
         return {
-            "question": self.state["current_question"],
-            "difficulty": difficulty,
-            "difficulty_str": difficulty_str,
+            "question": result["current_question"],
+            "difficulty": result["current_question_difficulty"],
         }
 
-    # Added return type hint
     def evaluate_answer(self, answer: str) -> Dict[str, Any]:
         """Evaluate the user's answer."""
         if not self.state:
-            logger.error("Error - Agent not initialized for answer evaluation")
-            raise ValueError("Agent not initialized")
+            log_and_raise_new(
+                exception_type=ValueError,
+                exception_message="Agent not initialized",
+                exc_info=False,
+            )
+        if not self.state["current_question"]:
+            raise ValueError("No question has been generated yet")
 
         result = self._evaluate_answer(self.state, answer)
-        logger.debug(
-            f"Answer evaluation completed with result keys: {list(result.keys())}"
-        )
-        # Update state carefully
-        for key, value in result.items():
-            if key in AgentState.__annotations__:
-                self.state[key] = value  # type: ignore
-            else:
-                logger.warning(
-                    f"Ignoring unexpected key '{key}' from evaluate_answer node result."
-                )
+        # Update state
+        self.state["answers"] = result["answers"]
+        self.state["answer_evaluations"] = result["answer_evaluations"]
+        self.state["consecutive_wrong"] = result["consecutive_wrong"]
+        self.state["current_target_difficulty"] = result["current_target_difficulty"]
+        self.state["consecutive_hard_correct_or_partial"] = result[
+            "consecutive_hard_correct_or_partial"
+        ]
+        self.state["feedback"] = result["feedback"]
+        self.state["classification"] = result["classification"]
 
-        # Check if we should continue or end
-        continue_or_end = self._should_continue(self.state)
-        if continue_or_end == END:
-            self._end(self.state)
-
-        # Ensure classification is treated as float
-        classification_val = result.get("classification", 0.0)
-        if not isinstance(classification_val, float):
-            try:
-                classification_val = float(classification_val)
-            except (ValueError, TypeError):
-                classification_val = 0.0
+        # Check if the quiz should end
+        continue_status = self._should_continue(self.state)
+        if continue_status == END:
+            end_result = self._end(self.state)
+            self.state["knowledge_level"] = end_result["knowledge_level"]
 
         return {
-            "classification": classification_val,
-            "feedback": result.get("feedback", ""),
-            "is_correct": classification_val == 1.0,
-            "is_partially_correct": classification_val == 0.5,
-            "is_incorrect": classification_val == 0.0,
+            "feedback": result["feedback"],
+            "classification": result["classification"],
             "is_complete": self.is_quiz_complete,
+            "final_level": (
+                self.state.get("knowledge_level") if self.is_quiz_complete else None
+            ),
         }
 
-    # Added return type hint
     def get_final_assessment(self) -> Dict[str, Any]:
-        """Get the final assessment of the user's knowledge level."""
+        """Get the final assessment details after the quiz is complete."""
         if not self.is_quiz_complete:
-            logger.warning("Attempted to get final assessment before quiz completion.")
-            return {"status": "quiz_not_complete"}
-
+            raise ValueError("Quiz is not yet complete")
         return self.final_assessment
 
-    # Added return type hint
     def is_complete(self) -> bool:
         """Check if the quiz is complete."""
         return self.is_quiz_complete
 
-    # Added return type hint
     def get_search_status(self) -> str:
-        """Return the search status."""
+        """Get the current status of the internet search."""
         return self.search_status
 
-    # Added return type hint
     def process_response(self, answer: str) -> Dict[str, Any]:
-        """Process the user's response and return the result."""
+        """Process the user's response (answer) and return the evaluation."""
         if not self.state:
-            logger.error("Error - Agent not initialized for processing response")
-            raise ValueError("Agent not initialized")
+            log_and_raise_new(
+                exception_type=ValueError,
+                exception_message="Agent not initialized",
+                exc_info=False,
+            )
+        if self.is_quiz_complete:
+            raise ValueError("Quiz is already complete")
 
-        result = self.evaluate_answer(answer)
+        evaluation_result = self.evaluate_answer(answer)
 
-        return {
-            "completed": self.is_quiz_complete,
-            "feedback": result.get("feedback", ""),  # Use get for safety
-        }
+        if self.is_quiz_complete:
+            return evaluation_result  # Contains final level etc.
+        else:
+            # Generate the next question if not complete
+            next_question_result = self.generate_question()
+            return {**evaluation_result, **next_question_result}

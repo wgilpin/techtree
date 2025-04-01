@@ -12,8 +12,9 @@ from typing import Any, Callable, Dict, Optional, Type, TypeVar
 import google.generativeai as genai
 from dotenv import load_dotenv
 from google.api_core.exceptions import ResourceExhausted
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
+from backend.exceptions import log_and_raise_new, validate_internal_model
 from backend.logger import logger
 
 # Load environment variables
@@ -28,11 +29,17 @@ try:
     gemini_api_key = os.environ.get("GEMINI_API_KEY")
     gemini_model_name = os.environ.get("GEMINI_MODEL")
     if not gemini_api_key:
-        logger.error("Missing environment variable: GEMINI_API_KEY")
-        raise KeyError("GEMINI_API_KEY")
+        log_and_raise_new(
+            exception_type=KeyError,
+            exception_message="GEMINI_API_KEY",
+            exc_info=False # Original log didn't include stack trace
+        )
     if not gemini_model_name:
-        logger.error("Missing environment variable: GEMINI_MODEL")
-        raise KeyError("GEMINI_MODEL")
+        log_and_raise_new(
+            exception_type=KeyError,
+            exception_message="GEMINI_MODEL",
+            exc_info=False # Original log didn't include stack trace
+        )
 
     genai.configure(api_key=gemini_api_key)  # type: ignore[attr-defined]
     MODEL = genai.GenerativeModel(gemini_model_name)  # type: ignore[attr-defined]
@@ -126,7 +133,6 @@ def _extract_json_from_text(response_text: str) -> Optional[Dict[str, Any]]:
                 loaded_data = json.loads(json_str_cleaned)
                 if isinstance(loaded_data, dict):
                     parsed_json = loaded_data
-                    logger.debug(f"Successfully parsed JSON using pattern: {pattern}")
                     return parsed_json  # Return as soon as valid JSON dict is found
                 else:
                     logger.warning(
@@ -184,7 +190,6 @@ def call_llm_with_json_parsing(
             initial_delay=initial_delay,
         )
         response_text = response.text
-        logger.debug(f"Raw LLM response: {response_text[:500]}...")
 
     except ResourceExhausted:
         logger.error(
@@ -201,18 +206,13 @@ def call_llm_with_json_parsing(
     # Optional Pydantic validation
     # If parsed_json is None here, validation will fail and return None below
     if validation_model:
-        try:
-            validated_data = validation_model.model_validate(parsed_json)
-            logger.debug(
-                f"Successfully validated JSON against model: {validation_model.__name__}"
-            )
-            return validated_data # Returns type T
-        except ValidationError as val_e: # Renamed 'e' to 'val_e'
-            logger.error(
-                f"Pydantic validation failed for model {validation_model.__name__}:"
-                f" {val_e}. Parsed JSON: {parsed_json}" # Use renamed variable
-            )
-            return None
+        # Use helper to validate and raise specific internal error
+        validated_data = validate_internal_model(
+            validation_model,
+            parsed_json,
+            context_message=f"Pydantic validation failed for LLM output model {validation_model.__name__}"
+        )
+        return validated_data # Returns type T
     else:
         # Return the raw parsed dictionary if no validation model is provided
         return parsed_json  # Returns Dict[str, Any]
@@ -246,7 +246,6 @@ def call_llm_plain_text(
             initial_delay=initial_delay,
         )
         response_text = response.text
-        logger.debug(f"Raw LLM response (plain text): {response_text[:500]}...")
         # Ensure response_text is actually a string before returning
         return response_text if isinstance(response_text, str) else None
 

@@ -6,15 +6,12 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Type, TypeVar, cast
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
+from backend.exceptions import validate_internal_model
 # Assuming models are defined in backend.models
-from backend.models import (
-    AssessmentQuestion,
-    Exercise,
-    GeneratedLessonContent,
-    LessonState,
-)
+from backend.models import (AssessmentQuestion, Exercise,
+                            GeneratedLessonContent, LessonState)
 
 logger = logging.getLogger(__name__)
 
@@ -81,11 +78,12 @@ def _deserialize_model(
                 f"Expected dict for {field_name}, got {type(data)}. Skipping."
             )
         return None
-    try:
-        return model_cls.model_validate(data)
-    except ValidationError as e:
-        logger.error(f"Validation failed for {field_name}: {e}. Data: {data}")
-        return None
+    # Use helper to validate and raise specific internal error
+    return validate_internal_model(
+        model_cls,
+        data,
+        context_message=f"Validation failed for {field_name}"
+    )
 
 
 def _deserialize_model_list(
@@ -106,13 +104,14 @@ def _deserialize_model_list(
                 f"Expected dict for item {i} in {field_name}, got {type(item_data)}. Skipping item."
             )
             continue
-        try:
-            validated_items.append(model_cls.model_validate(item_data))
-        except ValidationError as e:
-            logger.error(
-                f"Validation failed for item {i} in {field_name}: {e}. Data: {item_data}"
-            )
-            # Skip invalid items
+        # Use helper to validate and raise specific internal error
+        # Note: This changes behavior from skipping item to failing the whole list deserialization
+        validated_item = validate_internal_model(
+            model_cls,
+            item_data,
+            context_message=f"Validation failed for item {i} in {field_name}"
+        )
+        validated_items.append(validated_item)
     return validated_items
 
 

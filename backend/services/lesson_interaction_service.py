@@ -11,16 +11,18 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional, Tuple, Type, TypeVar, Union, cast
 
 from fastapi import HTTPException
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
+from backend.exceptions import log_and_propagate
 from backend.ai.app import LessonAI
 from backend.ai.lessons import nodes
-from backend.models import (  # MultipleChoiceOption, # Removed unused import
+from backend.models import (
     AssessmentQuestion,
     Exercise,
     GeneratedLessonContent,
     LessonState,
 )
+from backend.exceptions import validate_internal_model
 from backend.services.lesson_exposition_service import LessonExpositionService
 from backend.services.sqlite_db import SQLiteDatabaseService
 
@@ -103,15 +105,13 @@ class LessonInteractionService:
                 )
             )
         except Exception as expo_err:
-            # Log specific error from exposition service
-            logger.error(
-                f"Failed to get or generate lesson exposition: {expo_err}",
-                exc_info=True,
+            # Use helper to log and propagate the error
+            log_and_propagate(
+                new_exception_type=ValueError,
+                new_exception_message="Failed to get or generate lesson exposition.",
+                original_exception=expo_err,
+                exc_info=True # Keep stack trace logging
             )
-            # Raise a clear ValueError for the caller
-            raise ValueError(
-                "Failed to get or generate lesson exposition."
-            ) from expo_err
 
         if not lesson_content:
             logger.error("Exposition service returned no content. Cannot proceed.")
@@ -375,7 +375,6 @@ class LessonInteractionService:
                 self.db_service.save_conversation_message(
                     progress_id=progress_id,
                     role="user",
-                    message_type="CHAT_USER",
                     content=user_message,
                 )
             except Exception as save_err:
@@ -388,7 +387,6 @@ class LessonInteractionService:
             history = self.db_service.get_conversation_history(progress_id)
 
             # 4. Invoke the LessonAI graph
-            # Assuming process_chat_turn returns Tuple[LessonState, List[Dict[str, Any]]]
             updated_state, new_assistant_messages = self.lesson_ai.process_chat_turn(
                 current_state=current_state,
                 user_message=user_message,
@@ -405,24 +403,11 @@ class LessonInteractionService:
                         isinstance(msg_data, dict)
                         and msg_data.get("role") == "assistant"
                     ):
-                        interaction_mode = updated_state.get(
-                            "current_interaction_mode", "chatting"
-                        )
-                        message_type = "CHAT_ASSISTANT"  # Default
-                        if interaction_mode == "awaiting_answer":
-                            if updated_state.get("active_exercise"):
-                                message_type = "EXERCISE_FEEDBACK"
-                            elif updated_state.get("active_assessment"):
-                                message_type = "ASSESSMENT_FEEDBACK"
-                        elif interaction_mode == "error":
-                            message_type = "ERROR"
-
                         content_to_save = msg_data.get("content", "")
                         try:
                             self.db_service.save_conversation_message(
                                 progress_id=progress_id,
                                 role="assistant",
-                                message_type=message_type,
                                 content=content_to_save,
                                 metadata=msg_data.get("metadata"),
                             )
@@ -484,7 +469,6 @@ class LessonInteractionService:
                     self.db_service.save_conversation_message(
                         progress_id=progress_id,
                         role="system",  # Use 'system' for state-level errors
-                        message_type="ERROR",
                         content=error_message_from_state,
                     )
                 except Exception as save_err:
@@ -528,7 +512,6 @@ class LessonInteractionService:
         model_cls: Type[T],
         format_function: Callable[[T], str],
         item_type_name: str,  # e.g., "exercise", "assessment question"
-        success_message_type: str,  # e.g., "EXERCISE_PROMPT"
         metadata_key: str,  # e.g., "exercise_id"
     ) -> Dict[str, Any]:
         """
@@ -574,20 +557,18 @@ class LessonInteractionService:
             if isinstance(new_item_obj, model_cls):
                 validated_item = new_item_obj
             elif isinstance(new_item_obj, dict):
-                try:
-                    validated_item = model_cls.model_validate(new_item_obj)
-                except ValidationError as val_err:
-                    logger.error(
-                        f"Failed to validate {item_type_name} dict from node: {val_err}"
-                    )
+                # Use helper to validate and raise specific internal error
+                validated_item = validate_internal_model(
+                    model_cls,
+                    new_item_obj,
+                    context_message=f"Failed to validate {item_type_name} dict from node"
+                )
 
             # 4. Determine message content and type
             assistant_message_content: Optional[str] = None
-            message_type: str = "SYSTEM_INFO"
 
             if validated_item:
                 assistant_message_content = format_function(validated_item)
-                message_type = success_message_type
                 # Assuming validated_item has an 'id' attribute
                 item_id = getattr(validated_item, "id", "UNKNOWN")
                 logger.info(
@@ -617,7 +598,6 @@ class LessonInteractionService:
                         assistant_message_content = (
                             f"Sorry, I couldn't generate a {item_type_name} right now."
                         )
-                message_type = "ERROR"
 
             # 5. Save the assistant message (item prompt or failure) to history
             if assistant_message_content:
@@ -632,7 +612,6 @@ class LessonInteractionService:
                     self.db_service.save_conversation_message(
                         progress_id=progress_id,
                         role="assistant",
-                        message_type=message_type,
                         content=assistant_message_content,
                         metadata=metadata,
                     )
@@ -717,7 +696,6 @@ class LessonInteractionService:
             model_cls=Exercise,
             format_function=format_exercise_for_chat_history,
             item_type_name="exercise",
-            success_message_type="EXERCISE_PROMPT",
             metadata_key="exercise_id",
         )
 
@@ -756,7 +734,6 @@ class LessonInteractionService:
             model_cls=AssessmentQuestion,
             format_function=format_assessment_question_for_chat_history,  # Use imported public function
             item_type_name="assessment question",
-            success_message_type="ASSESSMENT_PROMPT",
             metadata_key="assessment_question_id",
         )
 
@@ -798,7 +775,6 @@ class LessonInteractionService:
             current_state_json = (
                 current_progress.get("lesson_state_json") if current_progress else None
             )
-            current_score = current_progress.get("score") if current_progress else None
 
             progress_id = self.db_service.save_user_progress(
                 user_id=user_id,
@@ -807,7 +783,6 @@ class LessonInteractionService:
                 lesson_index=lesson_index,
                 status=status,
                 lesson_id=lesson_id_pk,  # Pass the validated int PK
-                score=current_score,
                 lesson_state_json=current_state_json,
             )
 

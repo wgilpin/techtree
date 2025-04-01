@@ -24,7 +24,6 @@ load_dotenv()
 def _route_message_logic(state: LessonState) -> str:
     """Determines the next node based on the current interaction mode."""
     mode = state.get("current_interaction_mode", "chatting")
-    logger.debug(f"Routing based on interaction mode: {mode}")
     if mode == "request_exercise":
         return "generate_new_exercise"
     if mode == "request_assessment":

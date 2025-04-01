@@ -7,6 +7,7 @@ to create, retrieve, and manage syllabus data.
 
 import logging
 from typing import Any, Dict, Optional, cast  # Added cast
+from backend.exceptions import log_and_raise_new
 
 from backend.ai.app import SyllabusAI
 from backend.services.sqlite_db import SQLiteDatabaseService
@@ -50,10 +51,6 @@ class SyllabusService:
             A dictionary representing the found or newly created syllabus,
             structured to match the SyllabusResponse model.
         """
-        logger.debug(
-            f"get_or_generate_syllabus called with topic='{topic}', "
-            f"level='{level}', user_id='{user_id}'"
-        )
         syllabus = self.db_service.get_syllabus(topic, level, user_id)
 
         if not syllabus:
@@ -108,8 +105,11 @@ class SyllabusService:
         syllabus_content = self.syllabus_ai.get_or_create_syllabus()
 
         if not syllabus_content or "modules" not in syllabus_content:
-            logger.error("Syllabus AI failed to generate content with modules.")
-            raise RuntimeError("Failed to generate syllabus content with modules.")
+            log_and_raise_new(
+                exception_type=RuntimeError,
+                exception_message="Failed to generate syllabus content with modules.",
+                exc_info=False # Original log didn't include stack trace
+            )
 
         syllabus_id = self.db_service.save_syllabus(
             topic=str(syllabus_content.get("topic", topic)),  # Ensure topic is str
@@ -160,7 +160,6 @@ class SyllabusService:
             A dictionary representing the syllabus structured for SyllabusResponse,
                 or None if not found.
         """
-        logger.debug(f"Getting syllabus by ID: {syllabus_id}")
         syllabus = self.db_service.get_syllabus_by_id(syllabus_id)
 
         if not syllabus:
@@ -197,10 +196,6 @@ class SyllabusService:
         Returns:
             A dictionary representing the found syllabus structured for SyllabusResponse, or None.
         """
-        logger.debug(
-            f"get_syllabus_by_topic_level called with topic='{topic}', "
-            f"level='{level}', user_id='{user_id}'"
-        )
         syllabus = self.db_service.get_syllabus(topic, level, user_id)
 
         if not syllabus:

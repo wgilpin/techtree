@@ -9,6 +9,7 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 from tavily import TavilyClient  # type: ignore
 
+from backend.exceptions import log_and_raise_new
 from backend.logger import logger  # Import logger
 
 # Load environment variables
@@ -23,11 +24,17 @@ try:
     gemini_api_key = os.environ.get("GEMINI_API_KEY")
     gemini_model_name = os.environ.get("GEMINI_MODEL")
     if not gemini_api_key:
-        logger.error("Missing environment variable: GEMINI_API_KEY")
-        raise KeyError("GEMINI_API_KEY")
+        log_and_raise_new(
+            exception_type=KeyError,
+            exception_message="GEMINI_API_KEY",
+            exc_info=False # Original log didn't include stack trace
+        )
     if not gemini_model_name:
-        logger.error("Missing environment variable: GEMINI_MODEL")
-        raise KeyError("GEMINI_MODEL")
+        log_and_raise_new(
+            exception_type=KeyError,
+            exception_message="GEMINI_MODEL",
+            exc_info=False # Original log didn't include stack trace
+        )
 
     genai.configure(api_key=gemini_api_key)  # type: ignore[attr-defined]
     MODEL = genai.GenerativeModel(gemini_model_name)  # type: ignore[attr-defined]

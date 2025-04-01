@@ -85,7 +85,7 @@ asyncio_default_fixture_loop_scope = "function"
 [tool.mypy]
 python_version = "3.12"
 strict = false
-warn_unused_ignores = true
+warn_unused_ignores = false
 
 # Ignore missing imports for libraries without readily available stubs
 [[tool.mypy.overrides]]

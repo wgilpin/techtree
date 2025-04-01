@@ -15,6 +15,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI
+from fastapi import Request
+from fastapi.responses import JSONResponse
+from pydantic import ValidationError
+from backend.exceptions import InternalDataValidationError
 # Remove direct import of SQLiteDatabaseService
 # Import the shared db_service instance from dependencies
 from backend.dependencies import db_service
@@ -55,6 +59,38 @@ app.add_middleware(
     allow_headers=["*"],  # Allow all headers
     max_age=3600,  # Cache preflight requests for 1 hour
 )
+
+
+
+# Custom Exception Handler for Pydantic ValidationErrors
+@app.exception_handler(ValidationError)
+async def validation_exception_handler(request: Request, exc: ValidationError):
+    """
+    Handles Pydantic ValidationErrors, logs the error, and returns a 400 response.
+    """
+    # Log the full validation error details
+    logger.error(f"Validation error for request {request.url.path}: {exc.errors()}")
+    return JSONResponse(
+        status_code=400,
+        content={"detail": exc.errors()},
+    )
+@app.exception_handler(InternalDataValidationError)
+async def internal_data_validation_exception_handler(request: Request, exc: InternalDataValidationError):
+    """
+    Handles InternalDataValidationErrors, logs the error, and returns a 500 response.
+    """
+    logger.error(
+        f"Internal data validation error for request {request.url.path}: {exc}",
+        exc_info=True # Include stack trace for internal errors
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An internal error occurred due to invalid data."},
+        # Avoid exposing detailed validation errors from internal sources to the client
+    )
+
+
+
 
 # Include routers for each component
 from backend.routers import auth_router

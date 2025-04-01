@@ -6,7 +6,7 @@ import os
 import uuid
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone # Added timezone
 from pathlib import Path
 from typing import (
     Optional,
@@ -506,105 +506,58 @@ class SQLiteDatabaseService:
                 now,
                 now,
             )
-            self.execute_query(
-                syllabus_query, syllabus_params
-            )  # Commit handled by _transaction
+            cursor = self.conn.cursor()
+            cursor.execute(syllabus_query, syllabus_params)
             logger.debug(f"Inserted syllabus record with ID: {syllabus_id}")
 
-            # Insert modules and lessons from the provided content structure
-            if "modules" in content and isinstance(content["modules"], list):
-                for module_index, module_data in enumerate(content["modules"]):
-                    # Ensure module_data has the expected keys
-                    module_title = module_data.get(
-                        "title", f"Module {module_index + 1}"
-                    )
-                    # Get summary directly from module_data
-                    module_summary = module_data.get("summary", "")
+            # Insert modules and lessons
+            modules_list = content.get("modules", [])
+            for module_index, module_data in enumerate(modules_list):
+                module_title = module_data.get("title", f"Module {module_index + 1}")
+                module_summary = module_data.get("summary", "")
 
-                    # Insert module record
-                    module_query = """
-                        INSERT INTO modules
-                        (syllabus_id, module_index, title, summary, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                module_query = """
+                    INSERT INTO modules (syllabus_id, module_index, title, summary)
+                    VALUES (?, ?, ?, ?)
+                """
+                module_params = (syllabus_id, module_index, module_title, module_summary)
+                cursor.execute(module_query, module_params)
+                module_id_result = cursor.execute(
+                    "SELECT last_insert_rowid()"
+                ).fetchone()
+                if not module_id_result:
+                    logger.error(
+                        f"Failed to retrieve last insert rowid for module {module_index}"
+                    )
+                    raise RuntimeError("Failed to get module ID after insert.")
+                module_id = module_id_result[0]
+                logger.debug(f"Retrieved module_id: {module_id}")
+
+                lessons_list = module_data.get("lessons", [])
+                for lesson_index, lesson_data in enumerate(lessons_list):
+                    lesson_title = lesson_data.get("title", f"Lesson {lesson_index + 1}")
+                    lesson_summary = lesson_data.get("summary", "")
+
+                    lesson_query = """
+                        INSERT INTO lessons (module_id, lesson_index, title, summary)
+                        VALUES (?, ?, ?, ?)
                     """
-                    module_params = (
-                        syllabus_id,
-                        module_index,
-                        module_title,
-                        module_summary,
-                        now,
-                        now,
+                    lesson_params = (
+                        module_id,
+                        lesson_index,
+                        lesson_title,
+                        lesson_summary,
                     )
-                    self.execute_query(
-                        module_query, module_params
-                    )  # Commit handled by _transaction
+                    cursor.execute(lesson_query, lesson_params)
                     logger.debug(
-                        f"Inserted module index {module_index} for syllabus {syllabus_id}"
+                        f"Inserted {len(lessons_list)} lessons for module {module_id}"
                     )
-
-                    # Get the auto-generated module_id (PK)
-                    module_id_query = "SELECT last_insert_rowid()"
-                    module_id_result = self.execute_query(
-                        module_id_query, fetch_one=True
-                    )
-                    if not module_id_result:
-                        logger.error(
-                            f"Failed to retrieve last insert rowid for module {module_index}"
-                        )
-                        raise RuntimeError("Failed to get module ID after insert.")
-                    module_id = module_id_result[0]
-                    logger.debug(f"Retrieved module_id: {module_id}")
-
-                    # Insert lessons (get lessons directly from module_data)
-                    lessons_list = module_data.get("lessons")
-                    if isinstance(lessons_list, list):
-                        for lesson_index, lesson_data in enumerate(lessons_list):
-                            lesson_title = lesson_data.get(
-                                "title", f"Lesson {lesson_index + 1}"
-                            )
-                            lesson_summary = lesson_data.get("summary", "")
-                            lesson_duration = lesson_data.get("duration", "")
-
-                            # Insert lesson record
-                            lesson_query = """
-                                INSERT INTO lessons
-                                (module_id, lesson_index, title, summary, duration,
-                                    created_at, updated_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?)
-                            """
-                            lesson_params = (
-                                module_id,
-                                lesson_index,
-                                lesson_title,
-                                lesson_summary,
-                                lesson_duration,
-                                now,
-                                now,
-                            )
-                            self.execute_query(
-                                lesson_query, lesson_params
-                            )  # Commit handled by _transaction
-                        logger.debug(
-                            f"Inserted {len(lessons_list)} lessons for module {module_id}"
-                        )
-                    else:
-                        logger.warning(
-                            "No 'lessons' list found in module_data for module index "
-                            f"{module_index}"
-                        )
-
-            else:
-                logger.warning(
-                    "No 'modules' list found in content for saving syllabus."
-                )
 
             return syllabus_id
 
-        # Execute the save operation within a transaction
         try:
-            # _transaction returns Any, but we know it's str here
-            result_id: str = self._transaction(_save_syllabus_transaction)
-            return result_id
+            # Execute the entire save operation within a transaction
+            return self._transaction(_save_syllabus_transaction)
         except Exception as e:
             logger.error(f"Error saving syllabus transaction: {e}", exc_info=True)
             raise  # Re-raise the exception after logging
@@ -614,8 +567,7 @@ class SQLiteDatabaseService:
         self, topic: str, level: str, user_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
-        Retrieves a syllabus based on topic, level, and optionally user ID.
-        Performs case-insensitive and whitespace-trimmed matching for topic and level.
+        Retrieves a syllabus by topic and level, prioritizing user-specific syllabi.
 
         Args:
             topic (str): The topic of the syllabus
@@ -623,33 +575,38 @@ class SQLiteDatabaseService:
             user_id (str, optional): The ID of the user
 
         Returns:
-            dict: The syllabus data structured by _build_syllabus_dict if found, otherwise None
+            dict: The syllabus data if found, otherwise None
         """
-        norm_topic = topic.lower().strip()
-        norm_level = level.lower().strip()
-        syllabus_row: Optional[sqlite3.Row] = None
+        # Normalize topic and level for case-insensitive comparison
+        norm_topic = topic.lower()
+        norm_level = level.lower()
 
         logger.debug(
             f"Attempting to get syllabus: topic='{norm_topic}', "
             f"level='{norm_level}', user_id='{user_id}'"
         )
 
+        syllabus_row: Optional[sqlite3.Row] = None
+
         if user_id:
+            # Prioritize user-specific syllabus
             query_user = """
                 SELECT * FROM syllabi
-                WHERE LOWER(TRIM(topic)) = ? AND LOWER(TRIM(level)) = ? AND user_id = ?
+                WHERE user_id = ? AND lower(topic) = ? AND lower(level) = ?
+                ORDER BY created_at DESC LIMIT 1
             """
             syllabus_row = self.execute_query(
-                query_user, (norm_topic, norm_level, user_id), fetch_one=True
+                query_user, (user_id, norm_topic, norm_level), fetch_one=True
             )
             if syllabus_row:
                 logger.debug("Found user-specific syllabus.")
             else:
                 logger.debug("User-specific syllabus not found, checking for general.")
                 query_general = """
-                     SELECT * FROM syllabi
-                     WHERE LOWER(TRIM(topic)) = ? AND LOWER(TRIM(level)) = ? AND user_id IS NULL
-                 """
+                    SELECT * FROM syllabi
+                    WHERE user_id IS NULL AND lower(topic) = ? AND lower(level) = ?
+                    ORDER BY created_at DESC LIMIT 1
+                """
                 syllabus_row = self.execute_query(
                     query_general, (norm_topic, norm_level), fetch_one=True
                 )
@@ -660,7 +617,8 @@ class SQLiteDatabaseService:
             logger.debug("No user_id provided, checking for general syllabus.")
             query_general = """
                 SELECT * FROM syllabi
-                WHERE LOWER(TRIM(topic)) = ? AND LOWER(TRIM(level)) = ? AND user_id IS NULL
+                WHERE user_id IS NULL AND lower(topic) = ? AND lower(level) = ?
+                ORDER BY created_at DESC LIMIT 1
             """
             syllabus_row = self.execute_query(
                 query_general, (norm_topic, norm_level), fetch_one=True
@@ -669,8 +627,8 @@ class SQLiteDatabaseService:
                 logger.debug("Found general syllabus.")
 
         if syllabus_row:
-            # _build_syllabus_dict returns Dict[str, Any]
-            return self._build_syllabus_dict(dict(syllabus_row))
+            syllabus_dict = dict(syllabus_row)
+            return self._build_syllabus_dict(syllabus_dict)
         else:
             logger.debug("Syllabus not found.")
             return None
@@ -678,13 +636,13 @@ class SQLiteDatabaseService:
     # Type hints for args and return
     def get_syllabus_by_id(self, syllabus_id: str) -> Optional[Dict[str, Any]]:
         """
-        Retrieves a syllabus by its ID.
+        Retrieves a syllabus by its unique ID.
 
         Args:
-            syllabus_id (str): The ID of the syllabus
+            syllabus_id (str): The unique ID of the syllabus
 
         Returns:
-            dict: The syllabus data structured by _build_syllabus_dict if found, otherwise None
+            dict: The syllabus data if found, otherwise None
         """
         logger.debug(f"Getting syllabus by ID: {syllabus_id}")
         query = "SELECT * FROM syllabi WHERE syllabus_id = ?"
@@ -693,49 +651,45 @@ class SQLiteDatabaseService:
         )  # Returns Row or None
 
         if syllabus_row:
-            # _build_syllabus_dict returns Dict[str, Any]
-            return self._build_syllabus_dict(dict(syllabus_row))
-        else:
-            logger.warning(f"Syllabus not found for ID: {syllabus_id}")
-            return None
+            syllabus_dict = dict(syllabus_row)
+            return self._build_syllabus_dict(syllabus_dict)
+
+        return None
 
     # Type hints for args and return
     def _build_syllabus_dict(self, syllabus_dict: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Builds a complete syllabus dictionary including modules and lessons,
-        structured to match the Pydantic models used in the service layer.
+        Helper function to build the full syllabus dictionary including modules and lessons.
 
         Args:
-            syllabus_dict (dict): The basic syllabus data from the 'syllabi' table.
+            syllabus_dict (dict): The base syllabus dictionary from the 'syllabi' table.
 
         Returns:
-            dict: The complete syllabus data with nested modules and lessons.
+            dict: The fully constructed syllabus dictionary.
         """
         syllabus_id = syllabus_dict["syllabus_id"]
         logger.debug(f"Building syllabus dict for syllabus_id: {syllabus_id}")
 
+        # Fetch modules
         modules_query = """
-            SELECT * FROM modules
-            WHERE syllabus_id = ?
-            ORDER BY module_index
+            SELECT * FROM modules WHERE syllabus_id = ? ORDER BY module_index ASC
         """
         modules_result = self.execute_read_query(
             modules_query, (syllabus_id,)
         )  # Use typed read query
         logger.debug(f"Found {len(modules_result)} modules for syllabus {syllabus_id}")
 
-        modules_list_for_content: List[Dict[str, Any]] = []
-        for module_row in modules_result:
-            module_data = dict(module_row)
+        top_level_content: Dict[str, Any] = {"modules": []}
+        for module_data in modules_result:
             module_pk = module_data["module_id"]
             logger.debug(
                 f"Processing module PK: {module_pk}, index: {module_data['module_index']}"
             )
+            module_dict = dict(module_data)
 
+            # Fetch lessons for the module
             lessons_query = """
-                SELECT * FROM lessons
-                WHERE module_id = ?
-                ORDER BY lesson_index
+                SELECT * FROM lessons WHERE module_id = ? ORDER BY lesson_index ASC
             """
             lessons_result = self.execute_read_query(
                 lessons_query, (module_pk,)
@@ -744,51 +698,16 @@ class SQLiteDatabaseService:
                 f"Found {len(lessons_result)} lessons for module PK {module_pk}"
             )
 
-            lessons_list_for_module_content: List[Dict[str, Any]] = []
-            for lesson_row in lessons_result:
-                lesson_data = dict(lesson_row)
-                lessons_list_for_module_content.append(
-                    {
-                        "title": lesson_data["title"],
-                        "summary": lesson_data["summary"],
-                        "duration": lesson_data["duration"],
-                    }
-                )
+            module_dict["lessons"] = [dict(lesson) for lesson in lessons_result]
+            top_level_content["modules"].append(module_dict)
 
-            module_content_dict = {
-                "summary": module_data["summary"],
-                "lessons": lessons_list_for_module_content,
-            }
-
-            module_id_str = f"mod_{module_pk}"
-
-            modules_list_for_content.append(
-                {
-                    "module_id": module_id_str,
-                    "title": module_data["title"],
-                    "content": module_content_dict,
-                }
-            )
-
-        top_level_content = {
-            "topic": syllabus_dict["topic"],
-            "level": syllabus_dict["level"],
-            "title": f"{syllabus_dict['topic']} - {syllabus_dict['level']}",
-            "description": f"Syllabus for {syllabus_dict['topic']} at {syllabus_dict['level']} level",
-            "duration": "4 weeks",
-            "learning_objectives": [
-                f"Understand the core concepts of {syllabus_dict['topic']}",
-                f"Apply {syllabus_dict['topic']} knowledge",
-            ],
-            "modules": modules_list_for_content,
-        }
-
+        # Add the fetched content under the 'content' key
         syllabus_dict["content"] = top_level_content
         logger.debug(f"Finished building syllabus dict for syllabus_id: {syllabus_id}")
 
         return syllabus_dict
 
-    # Lesson content methods
+    # Lesson methods
     # Type hints for args and return
     def save_lesson_content(
         self,
@@ -796,101 +715,84 @@ class SQLiteDatabaseService:
         module_index: int,
         lesson_index: int,
         content: Dict[str, Any],
-    ) -> int:  # Returns lesson_pk (int)
+    ) -> int:
         """
-        Saves lesson content to the database.
+        Saves the generated content for a specific lesson.
 
         Args:
-            syllabus_id (str): The ID of the syllabus the lesson belongs to
-            module_index (int): The index of the module within the syllabus
-            lesson_index (int): The index of the lesson within the module
-            content (dict): The content of the lesson
+            syllabus_id (str): The ID of the syllabus.
+            module_index (int): The index of the module.
+            lesson_index (int): The index of the lesson.
+            content (dict): The generated lesson content (e.g., exposition).
 
         Returns:
-            int: The primary key (lesson_id) of the lesson.
+            int: The primary key (lesson_id) of the lesson this content is associated with.
+
+        Raises:
+            ValueError: If the corresponding lesson cannot be found in the database.
+            RuntimeError: If saving fails unexpectedly.
         """
 
         def _save_lesson_content_transaction() -> int:  # Added return type hint
-            # Get the module_id (PK)
-            module_query = """
-                SELECT module_id FROM modules
-                WHERE syllabus_id = ? AND module_index = ?
+            # 1. Find the lesson's primary key (lesson_id)
+            lesson_pk_query = """
+                SELECT l.lesson_id FROM lessons l
+                JOIN modules m ON l.module_id = m.module_id
+                WHERE m.syllabus_id = ? AND m.module_index = ? AND l.lesson_index = ?
             """
-            module_row = self.execute_query(
-                module_query, (syllabus_id, module_index), fetch_one=True
+            lesson_pk_result = self.execute_query(
+                lesson_pk_query,
+                (syllabus_id, module_index, lesson_index),
+                fetch_one=True,
             )
 
-            if not module_row:
+            if not lesson_pk_result:
                 raise ValueError(
-                    f"Module not found for syllabus {syllabus_id}, index {module_index}"
+                    f"Lesson not found for syllabus {syllabus_id}, "
+                    f"module {module_index}, lesson {lesson_index}"
                 )
+            lesson_pk = lesson_pk_result[0]
 
-            module_pk = module_row["module_id"]
-
-            # Get the lesson_id (PK)
-            lesson_query = """
-                SELECT lesson_id FROM lessons
-                WHERE module_id = ? AND lesson_index = ?
+            # 2. Check if content already exists for this lesson_id
+            existing_content_query = """
+                SELECT content_id FROM lesson_content WHERE lesson_id = ?
             """
-            lesson_row = self.execute_query(
-                lesson_query, (module_pk, lesson_index), fetch_one=True
-            )
-
-            if not lesson_row:
-                raise ValueError(
-                    f"Lesson not found for module PK {module_pk}, index {lesson_index}"
-                )
-
-            lesson_pk = lesson_row["lesson_id"]
-            if not isinstance(lesson_pk, int):  # Ensure it's an int
-                raise TypeError(f"Expected integer lesson_id, got {type(lesson_pk)}")
-
-            # Check if content already exists for this lesson_pk
-            content_query = "SELECT content_id FROM lesson_content WHERE lesson_id = ?"
             existing_content_row = self.execute_query(
-                content_query, (lesson_pk,), fetch_one=True
+                existing_content_query, (lesson_pk,), fetch_one=True
             )
 
-            content_id = str(uuid.uuid4())
-            now = datetime.now().isoformat()
             content_json = json.dumps(content)
+            now = datetime.now().isoformat()
 
             if existing_content_row:
                 # Update existing content
-                update_query = """
-                    UPDATE lesson_content
-                    SET content = ?, updated_at = ?
-                    WHERE lesson_id = ?
-                """
-                self.execute_query(
-                    update_query, (content_json, now, lesson_pk), commit=True
-                )
                 content_id = existing_content_row["content_id"]
+                update_query = """
+                    UPDATE lesson_content SET content = ?, updated_at = ?
+                    WHERE content_id = ?
+                """
+                self.execute_query(update_query, (content_json, now, content_id))
                 logger.debug(f"Updated lesson content for lesson_pk {lesson_pk}")
             else:
                 # Insert new content
                 insert_query = """
-                    INSERT INTO lesson_content
-                    (content_id, lesson_id, content, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO lesson_content (lesson_id, content, created_at, updated_at)
+                    VALUES (?, ?, ?, ?)
                 """
-                self.execute_query(
-                    insert_query,
-                    (content_id, lesson_pk, content_json, now, now),
-                    commit=True,
-                )
+                self.execute_query(insert_query, (lesson_pk, content_json, now, now))
+                content_id_result = self.execute_query("SELECT last_insert_rowid()", fetch_one=True)
+                if not content_id_result:
+                    raise RuntimeError("Failed to get content_id after insert.")
+                content_id = content_id_result[0]
                 logger.debug(
                     f"Inserted new lesson content for lesson_pk {lesson_pk} "
                     f"with content_id {content_id}"
                 )
 
-            return lesson_pk
+            return lesson_pk  # Return the lesson's primary key
 
-        # Execute the transaction and return its result (the lesson_pk)
         try:
-            # _transaction returns Any, but we know it's int here
-            result_pk: int = self._transaction(_save_lesson_content_transaction)
-            return result_pk
+            return self._transaction(_save_lesson_content_transaction)
         except Exception as e:
             logger.error(f"Error saving lesson content transaction: {e}", exc_info=True)
             raise
@@ -900,150 +802,119 @@ class SQLiteDatabaseService:
         self, syllabus_id: str, module_index: int, lesson_index: int
     ) -> Optional[Dict[str, Any]]:
         """
-        Retrieves lesson content based on syllabus ID, module index, and lesson index.
+        Retrieves the saved content for a specific lesson using syllabus/module/lesson indices.
 
         Args:
-            syllabus_id (str): The ID of the syllabus
-            module_index (int): The index of the module
-            lesson_index (int): The index of the lesson
+            syllabus_id (str): The ID of the syllabus.
+            module_index (int): The index of the module.
+            lesson_index (int): The index of the lesson.
 
         Returns:
-            dict: The lesson content if found, otherwise None
+            dict: The lesson content dictionary, or None if not found or error occurs.
         """
-        # Get the module_id (PK)
-        module_query = """
-            SELECT module_id FROM modules
-            WHERE syllabus_id = ? AND module_index = ?
+        # Query to get content using joins
+        query = """
+            SELECT lc.content
+            FROM lesson_content lc
+            JOIN lessons l ON lc.lesson_id = l.lesson_id
+            JOIN modules m ON l.module_id = m.module_id
+            WHERE m.syllabus_id = ? AND m.module_index = ? AND l.lesson_index = ?
         """
-        module_row = self.execute_query(
-            module_query, (syllabus_id, module_index), fetch_one=True
-        )
+        params = (syllabus_id, module_index, lesson_index)
+        content_row = self.execute_query(query, params, fetch_one=True)
 
-        if not module_row:
-            logger.warning(
-                f"Module not found for syllabus {syllabus_id}, index {module_index}"
-            )
-            return None
+        if content_row:
+            content_str = content_row["content"]
+            if isinstance(content_str, str):
+                try:
+                    parsed_content = json.loads(content_str)
+                    return parsed_content if isinstance(parsed_content, dict) else None
+                except json.JSONDecodeError:
+                    logger.error(
+                        f"Failed to parse lesson content JSON for {syllabus_id}/"
+                        f"{module_index}/{lesson_index}",
+                        exc_info=True,
+                    )
+                    return None
+            else:
+                logger.error(
+                    f"Content fetched for {syllabus_id}/{module_index}/{lesson_index} "
+                    "is not a string."
+                )
+                return None
 
-        module_pk = module_row["module_id"]
-
-        # Get the lesson_id (PK)
-        lesson_query = """
-            SELECT lesson_id FROM lessons
-            WHERE module_id = ? AND lesson_index = ?
-        """
-        lesson_row = self.execute_query(
-            lesson_query, (module_pk, lesson_index), fetch_one=True
-        )
-
-        if not lesson_row:
-            logger.warning(
-                f"Lesson not found for module PK {module_pk}, index {lesson_index}"
-            )
-            return None
-
-        lesson_pk = lesson_row["lesson_id"]
-        if not isinstance(lesson_pk, int):
-            logger.error(f"Retrieved non-integer lesson_pk: {lesson_pk}")
-            return None
-
-        # Get the content using lesson_pk
-        return self.get_lesson_content_by_lesson_pk(lesson_pk)
+        return None
 
     # Type hints for args and return
     def get_lesson_content_by_lesson_pk(
         self, lesson_pk: int
     ) -> Optional[Dict[str, Any]]:
         """
-        Retrieves lesson content using the lesson's primary key.
+        Retrieves the saved content for a specific lesson using its primary key.
 
         Args:
-            lesson_pk (int): The primary key (lesson_id) from the lessons table.
+            lesson_pk (int): The primary key (lesson_id) of the lesson.
 
         Returns:
-            dict: The parsed lesson content if found, otherwise None.
+            dict: The lesson content dictionary, or None if not found or error occurs.
         """
         logger.debug(f"Getting lesson content by lesson_pk: {lesson_pk}")
         content_query = "SELECT content FROM lesson_content WHERE lesson_id = ?"
-        content_row = self.execute_query(
-            content_query, (lesson_pk,), fetch_one=True
-        )  # Returns Row or None
+        content_row = self.execute_query(content_query, (lesson_pk,), fetch_one=True)
 
         if content_row:
-            try:
-                # Directly return the parsed JSON content from the 'content' column
-                content_str = content_row["content"]
-                if not isinstance(content_str, str):
+            content_str = content_row["content"]
+            if isinstance(content_str, str):
+                try:
+                    parsed_content = json.loads(content_str)
+                    logger.debug(f"Found and parsed content for lesson_pk {lesson_pk}")
+                    # Ensure return is Dict or None
+                    return parsed_content if isinstance(parsed_content, dict) else None
+                except json.JSONDecodeError:
                     logger.error(
-                        f"Content fetched for lesson_pk {lesson_pk} is not a string."
+                        f"Failed to parse lesson content JSON for lesson_pk {lesson_pk}",
+                        exc_info=True,
                     )
                     return None
-                parsed_content = json.loads(content_str)
-                logger.debug(f"Found and parsed content for lesson_pk {lesson_pk}")
-                # Ensure return is Dict or None
-                return parsed_content if isinstance(parsed_content, dict) else None
-            except json.JSONDecodeError:
+            else:
                 logger.error(
-                    f"Failed to parse lesson content JSON for lesson_pk {lesson_pk}",
-                    exc_info=True,
+                    f"Content fetched for lesson_pk {lesson_pk} is not a string."
                 )
                 return None
-        else:
-            logger.warning(f"Lesson content not found for lesson_pk {lesson_pk}")
-            return None
+
+        return None
 
     # Type hints for args and return
     def get_lesson_id(
         self, syllabus_id: str, module_index: int, lesson_index: int
     ) -> Optional[int]:
         """
-        Retrieves the primary key (lesson_id) of a lesson based on its indices.
+        Retrieves the primary key (lesson_id) of a lesson using its indices.
 
         Args:
             syllabus_id (str): The ID of the syllabus.
-            module_index (int): The index of the module within the syllabus.
-            lesson_index (int): The index of the lesson within the module.
+            module_index (int): The index of the module.
+            lesson_index (int): The index of the lesson.
 
         Returns:
-            Optional[int]: The lesson_id (PK from lessons table) if found, otherwise None.
+            int: The lesson's primary key (lesson_id), or None if not found.
         """
+        query = """
+            SELECT l.lesson_id FROM lessons l
+            JOIN modules m ON l.module_id = m.module_id
+            WHERE m.syllabus_id = ? AND m.module_index = ? AND l.lesson_index = ?
+        """
+        params = (syllabus_id, module_index, lesson_index)
         try:
-            # Get the module_id (PK)
-            module_query = """
-                SELECT module_id FROM modules
-                WHERE syllabus_id = ? AND module_index = ?
-            """
-            module_result = self.execute_query(
-                module_query, (syllabus_id, module_index), fetch_one=True
-            )
-
-            if not module_result:
-                logger.warning(
-                    f"Module not found for syllabus {syllabus_id}, index {module_index}"
-                )
-                return None
-
-            module_pk = module_result["module_id"]
-
-            # Get the lesson_id (PK)
-            lesson_query = """
-                SELECT lesson_id FROM lessons
-                WHERE module_id = ? AND lesson_index = ?
-            """
-            lesson_result = self.execute_query(
-                lesson_query, (module_pk, lesson_index), fetch_one=True
-            )
-
-            if not lesson_result:
-                logger.warning(
-                    f"Lesson not found for module PK {module_pk}, index {lesson_index}"
-                )
-                return None
-
-            lesson_pk = lesson_result["lesson_id"]
-            # lesson_id from the table is likely an integer PK
-            return int(lesson_pk) if lesson_pk is not None else None
-
+            result_row = self.execute_query(query, params, fetch_one=True)
+            if result_row:
+                lesson_pk = result_row["lesson_id"]
+                if isinstance(lesson_pk, int):
+                    return lesson_pk
+                else:
+                    logger.error(f"Retrieved non-integer lesson_pk: {lesson_pk}")
+                    return None
+            return None
         except Exception as e:
             logger.error(f"Error retrieving lesson ID (PK): {str(e)}", exc_info=True)
             raise
@@ -1051,69 +922,41 @@ class SQLiteDatabaseService:
     # Type hints for args and return
     def get_lesson_by_id(self, lesson_content_id: str) -> Optional[Dict[str, Any]]:
         """
-        Retrieves lesson details (including content) using the lesson_content_id.
+        Retrieves lesson details (title, summary, indices) using the lesson_content_id.
 
         Args:
-            lesson_content_id (str): The UUID from the lesson_content table.
+            lesson_content_id (str): The ID from the lesson_content table.
 
         Returns:
-            dict: A dictionary containing syllabus_id, module_index, lesson_index,
-                  and parsed content if found, otherwise None.
+            dict: Lesson details including title, summary, module_index, lesson_index,
+                  or None if not found.
         """
         logger.debug(f"Getting lesson by content_id: {lesson_content_id}")
         # Query joining lesson_content, lessons, and modules tables
         query = """
-            SELECT
-                lc.content,
-                l.lesson_index,
-                m.module_index,
-                m.syllabus_id
+            SELECT l.title, l.summary, l.lesson_index, m.module_index, m.syllabus_id
             FROM lesson_content lc
             JOIN lessons l ON lc.lesson_id = l.lesson_id
             JOIN modules m ON l.module_id = m.module_id
             WHERE lc.content_id = ?
         """
-        result_row = self.execute_query(
-            query, (lesson_content_id,), fetch_one=True
-        )  # Returns Row or None
+        params = (lesson_content_id,)
+        result_row = self.execute_query(query, params, fetch_one=True)
 
         if result_row:
-            result = dict(result_row)
-            parsed_content: Optional[Dict[str, Any]] = None
-            try:
-                content_str = result.get("content")
-                if isinstance(content_str, str):
-                    parsed_content = json.loads(content_str)
-                    if not isinstance(
-                        parsed_content, dict
-                    ):  # Ensure it's a dict after parsing
-                        parsed_content = None
-                        logger.warning("Parsed lesson_state_json is not a dictionary.")
-                else:
-                    logger.error(
-                        f"Content fetched for content_id {lesson_content_id} is not a string."
-                    )
-            except json.JSONDecodeError:
-                logger.error(
-                    f"Failed to parse lesson content JSON for content_id {lesson_content_id}",
-                    exc_info=True,
-                )
-                parsed_content = None
-
-            lesson_details: Dict[str, Any] = {
-                "lesson_id": lesson_content_id,
-                "syllabus_id": result["syllabus_id"],
-                "module_index": result["module_index"],
-                "lesson_index": result["lesson_index"],
-                "content": parsed_content,
+            lesson_details = {
+                "title": result_row["title"],
+                "summary": result_row["summary"],
+                "lesson_index": result_row["lesson_index"],
+                "module_index": result_row["module_index"],
+                "syllabus_id": result_row["syllabus_id"],
             }
             logger.debug(f"Found lesson details: {lesson_details}")
             return lesson_details
-        else:
-            logger.warning(f"Lesson not found for content_id: {lesson_content_id}")
-            return None
 
-    # User progress methods
+        return None
+
+    # Progress methods
     # Type hints for args and return
     def save_user_progress(
         self,
@@ -1122,21 +965,19 @@ class SQLiteDatabaseService:
         module_index: int,
         lesson_index: int,
         status: str,
-        lesson_id: Optional[int] = None,
-        score: Optional[float] = None,
+        lesson_id: Optional[int] = None,  # Allow passing lesson_id PK directly
         lesson_state_json: Optional[str] = None,
     ) -> str:
         """
-        Saves or updates user progress for a specific lesson, including conversational state.
+        Saves or updates the progress for a specific lesson for a user.
 
         Args:
-            user_id (str): The ID of the user
-            syllabus_id (str): The ID of the syllabus
-            module_index (int): The index of the module
-            lesson_index (int): The index of the lesson
-            status (str): The status of the lesson ("not_started", "in_progress", "completed")
-            lesson_id (int, optional): The actual primary key of the lesson from the lessons table.
-            score (float, optional): The user's score for the lesson
+            user_id (str): The ID of the user.
+            syllabus_id (str): The ID of the syllabus.
+            module_index (int): The index of the module.
+            lesson_index (int): The index of the lesson.
+            status (str): The progress status (e.g., 'not_started', 'in_progress', 'completed').
+            lesson_id (int, optional): The primary key of the lesson. If None, it will be looked up.
             lesson_state_json (str, optional): JSON string representing the conversational state.
 
         Returns:
@@ -1154,83 +995,56 @@ class SQLiteDatabaseService:
                 syllabus_id, module_index, lesson_index
             )
             if retrieved_lesson_id is None:
-                logger.error(
-                    "Could not find lesson_id PK for syllabus "
-                    f"{syllabus_id}, mod {module_index}, lesson {lesson_index} to save progress."
+                raise ValueError(
+                    f"Could not find lesson_id PK for syllabus {syllabus_id}, "
+                    f"mod {module_index}, lesson {lesson_index} to save progress."
                 )
-                raise ValueError("Cannot save progress: Lesson primary key not found.")
             lesson_id = retrieved_lesson_id
             logger.debug(f"Retrieved lesson_id PK: {lesson_id}")
 
-        # Check if progress entry already exists using user_id and lesson_id PK
-        query = """
-            SELECT progress_id FROM user_progress
-            WHERE user_id = ? AND lesson_id = ?
-        """
-        params = (user_id, lesson_id)
-        existing_row = self.execute_query(
-            query, params, fetch_one=True
-        )  # Returns Row or None
+        # Check if progress entry already exists for this user and lesson
+        check_query = "SELECT progress_id FROM user_progress WHERE user_id = ? AND lesson_id = ?"
+        existing_progress = self.execute_query(
+            check_query, (user_id, lesson_id), fetch_one=True
+        )
 
-        if existing_row:
-            # Update existing entry
-            progress_id = existing_row[
-                "progress_id"
-            ]  # progress_id is likely TEXT (UUID)
+        if existing_progress:
+            progress_id = existing_progress["progress_id"]
             logger.debug(f"Updating existing progress entry: {progress_id}")
             update_query = """
                 UPDATE user_progress
-                SET status = ?, score = ?, lesson_state_json = ?, updated_at = ?,
-                    syllabus_id = ?, module_index = ?, lesson_index = ?
+                SET status = ?, updated_at = ?, lesson_state_json = ?
                 WHERE progress_id = ?
             """
-            update_params = (
-                status,
-                score,
-                lesson_state_json,
-                now,
-                syllabus_id,
-                module_index,
-                lesson_index,
-                progress_id,
-            )
+            update_params = (status, now, lesson_state_json, progress_id)
             self.execute_query(update_query, update_params, commit=True)
-            # Cast progress_id to str to satisfy return type hint
-            return str(progress_id)
         else:
-            # Create new entry
             progress_id = str(uuid.uuid4())
             logger.debug(f"Creating new progress entry: {progress_id}")
             insert_query = """
                 INSERT INTO user_progress
-                (progress_id, user_id, syllabus_id, module_index, lesson_index, lesson_id,
-                    status, score, lesson_state_json, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (progress_id, user_id, lesson_id, status, created_at, updated_at, lesson_state_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             """
             insert_params = (
                 progress_id,
                 user_id,
-                syllabus_id,
-                module_index,
-                lesson_index,
                 lesson_id,
                 status,
-                score,
+                now,
+                now,
                 lesson_state_json,
-                now,
-                now,
             )
             self.execute_query(insert_query, insert_params, commit=True)
-            # Explicitly cast to str for mypy clarity, although it's already a string
-            return str(progress_id)
+
+        return progress_id
 
     # Type hints for args and return
     def get_lesson_progress(
         self, user_id: str, syllabus_id: str, module_index: int, lesson_index: int
     ) -> Optional[Dict[str, Any]]:
         """
-        Retrieves a specific progress entry for a user and lesson, including parsed state.
-        Uses indices to find the lesson_id PK first.
+        Retrieves the progress entry for a specific lesson for a user, including parsed state.
 
         Args:
             user_id (str): The ID of the user.
@@ -1251,10 +1065,7 @@ class SQLiteDatabaseService:
             logger.warning("Could not find lesson_id PK to retrieve progress.")
             return None
 
-        query = """
-            SELECT * FROM user_progress
-            WHERE user_id = ? AND lesson_id = ?
-        """
+        query = "SELECT * FROM user_progress WHERE user_id = ? AND lesson_id = ?"
         params = (user_id, lesson_id_pk)
         logger.debug(f"Executing get_lesson_progress query with params: {params}")
         entry_row = self.execute_query(
@@ -1267,20 +1078,18 @@ class SQLiteDatabaseService:
             logger.debug(f"Converted entry_dict: {entry_dict}")
 
             # Parse lesson_state_json if it exists
-            raw_json_string = entry_dict.get("lesson_state_json")
+            state_json = entry_dict.get("lesson_state_json")
             parsed_state: Optional[Dict[str, Any]] = None
-            if isinstance(raw_json_string, str):
+            if isinstance(state_json, str):
                 log_json_str = (
-                    (raw_json_string[:200] + "...")
-                    if len(raw_json_string) > 200
-                    else raw_json_string
+                    state_json[:100] + "..." if len(state_json) > 100 else state_json
                 )
                 logger.debug(f"Attempting to parse lesson_state_json: {log_json_str}")
                 try:
-                    parsed_state = json.loads(raw_json_string)
-                    if not isinstance(parsed_state, dict):  # Ensure it's a dict
-                        parsed_state = None
+                    parsed_state = json.loads(state_json)
+                    if not isinstance(parsed_state, dict):
                         logger.warning("Parsed lesson_state_json is not a dictionary.")
+                        parsed_state = None  # Treat non-dict JSON as invalid state
                     else:
                         logger.debug("Successfully parsed lesson_state_json.")
                 except json.JSONDecodeError as json_err:
@@ -1294,8 +1103,7 @@ class SQLiteDatabaseService:
                 logger.debug("lesson_state_json is null or not a string.")
                 parsed_state = None
 
-            entry_dict["lesson_state"] = parsed_state  # Assign parsed dict or None
-
+            entry_dict["lesson_state"] = parsed_state  # Add parsed state to dict
             logger.debug(f"Returning entry_dict from get_lesson_progress: {entry_dict}")
             return entry_dict
 
@@ -1307,143 +1115,79 @@ class SQLiteDatabaseService:
         self, user_id: str, syllabus_id: str
     ) -> List[Dict[str, Any]]:
         """
-        Retrieves all progress entries for a user within a specific syllabus.
+        Retrieves all progress entries for a specific syllabus for a user.
 
         Args:
-            user_id (str): The ID of the user
-            syllabus_id (str): The ID of the syllabus
+            user_id (str): The ID of the user.
+            syllabus_id (str): The ID of the syllabus.
 
         Returns:
-            list: A list of progress entries, each including parsed 'lesson_state'.
+            list: A list of progress entry dictionaries.
         """
         logger.debug(f"Getting all progress for user {user_id}, syllabus {syllabus_id}")
         query = """
-            SELECT * FROM user_progress
-            WHERE user_id = ? AND syllabus_id = ?
+            SELECT up.*, l.lesson_index, m.module_index
+            FROM user_progress up
+            JOIN lessons l ON up.lesson_id = l.lesson_id
+            JOIN modules m ON l.module_id = m.module_id
+            WHERE up.user_id = ? AND m.syllabus_id = ?
+            ORDER BY m.module_index, l.lesson_index
         """
-        progress_entries = self.execute_read_query(
-            query, (user_id, syllabus_id)
-        )  # Use typed read query
+        params = (user_id, syllabus_id)
+        result_rows = self.execute_read_query(query, params)
 
-        result: List[Dict[str, Any]] = []
-        for entry_row in progress_entries:
-            entry_dict = dict(entry_row)
-            # Parse lesson_state_json if it exists
-            raw_json_string = entry_dict.get("lesson_state_json")
-            parsed_state: Optional[Dict[str, Any]] = None
-            if isinstance(raw_json_string, str):
-                try:
-                    parsed_state = json.loads(raw_json_string)
-                    if not isinstance(parsed_state, dict):
-                        parsed_state = None
-                        logger.warning(
-                            "Parsed lesson_state_json is not a dictionary for progress_id "
-                            f"{entry_dict.get('progress_id')}."
-                        )
-                except json.JSONDecodeError as json_err:
-                    logger.warning(
-                        "Failed to parse lesson_state_json for progress_id "
-                        f"{entry_dict.get('progress_id')}: {json_err}"
-                    )
-                    parsed_state = None
-            else:
-                parsed_state = None
-            entry_dict["lesson_state"] = parsed_state
-            result.append(entry_dict)
-
+        result = [dict(row) for row in result_rows]
         logger.debug(f"Found {len(result)} progress entries.")
         return result
-    # Insert this helper method before get_user_in_progress_courses
+
+    # Type hints for args and return
     def _calculate_total_lessons(self, syllabus: Dict[str, Any] | None, syllabus_id: str) -> int:
-        """
-        Calculates the total number of lessons from a syllabus dictionary.
-
-        Args:
-            syllabus: The syllabus dictionary (potentially nested).
-            syllabus_id: The ID of the syllabus for logging context.
-
-        Returns:
-            The total count of lessons, or 0 if the structure is invalid or an error occurs.
-        """
-        if not syllabus:
-            logger.warning(f"Syllabus data is None for syllabus_id {syllabus_id}.")
-            return 0
-
-        total_lessons = 0
-        try:
-            # Use .get() with defaults to safely access nested keys
-            modules_in_content = syllabus.get("content", {}).get("modules", [])
-
-            # Ensure modules_in_content is a list before iterating
-            if not isinstance(modules_in_content, list):
-                logger.warning(
-                    f"Expected 'modules' to be a list for syllabus {syllabus_id}, "
-                    f"but got {type(modules_in_content)}. Syllabus content: {syllabus.get('content')}"
-                )
-                return 0
-
-            for module in modules_in_content:
-                # Ensure module is a dict before accessing its content
-                if not isinstance(module, dict):
-                    logger.warning(
-                        f"Expected module to be a dict in syllabus {syllabus_id}, "
-                        f"but got {type(module)}. Module data: {module}"
-                    )
-                    continue  # Skip this module
-
-                lessons_in_module = module.get("content", {}).get("lessons", [])
-
-                # Ensure lessons_in_module is a list before getting its length
-                if isinstance(lessons_in_module, list):
-                    total_lessons += len(lessons_in_module)
-                else:
-                    logger.warning(
-                        f"Expected 'lessons' to be a list in module within syllabus {syllabus_id}, "
-                        f"but got {type(lessons_in_module)}. Module content: {module.get('content')}"
-                    )
-
+        """Helper to calculate total lessons, preferring passed syllabus dict."""
+        if syllabus and "content" in syllabus and "modules" in syllabus["content"]:
+            return sum(
+                len(module.get("lessons", []))
+                for module in syllabus["content"]["modules"]
+            )
+        else:
+            # Fallback to DB query if syllabus dict is incomplete/missing
+            query = """
+                SELECT COUNT(l.lesson_id)
+                FROM lessons l
+                JOIN modules m ON l.module_id = m.module_id
+                WHERE m.syllabus_id = ?
+            """
+            result = self.execute_query(query, (syllabus_id,), fetch_one=True)
+            total_lessons = result[0] if result else 0
             logger.debug(f"Calculated {total_lessons} total lessons for syllabus {syllabus_id}")
             return total_lessons
-
-        except Exception as e:
-            logger.error(
-                f"Error calculating total lessons for syllabus {syllabus_id}: {e}", exc_info=True
-            )
-            return 0  # Return 0 on error
-
-
 
     # Type hints for args and return
     def get_user_in_progress_courses(self, user_id: str) -> List[Dict[str, Any]]:
         """
-        Retrieves courses the user has progress entries for, along with progress details.
-        Includes the last accessed timestamp for each course.
-
-        Args:
-            user_id (str): The ID of the user
+        Retrieves a summary of syllabi the user has made progress on.
 
         Returns:
-            list: A list of dicts, each containing syllabus details and progress information.
+            list: A list of dictionaries, each containing syllabus details and progress summary.
         """
         logger.debug(f"Getting in-progress courses for user: {user_id}")
         # Get unique syllabus_ids & the latest updated_at for each syllabus the user has progress on
-
-        progress_query = """
-            SELECT syllabus_id, MAX(updated_at) as last_accessed
-            FROM user_progress
-            WHERE user_id = ?
-            GROUP BY syllabus_id
+        syllabi_query = """
+            SELECT m.syllabus_id, MAX(up.updated_at) as last_accessed
+            FROM user_progress up
+            JOIN lessons l ON up.lesson_id = l.lesson_id
+            JOIN modules m ON l.module_id = m.module_id
+            WHERE up.user_id = ?
+            GROUP BY m.syllabus_id
             ORDER BY last_accessed DESC
         """
         syllabi_progress = self.execute_read_query(
-            progress_query, (user_id,)
+            syllabi_query, (user_id,)
         )  # Use typed read query
         logger.debug(
             f"Found {len(syllabi_progress)} syllabi with progress for user {user_id}"
         )
 
         in_progress_courses: List[Dict[str, Any]] = []
-
         for syllabus_row in syllabi_progress:
             syllabus_id = syllabus_row["syllabus_id"]
             last_accessed = syllabus_row["last_accessed"]
@@ -1451,110 +1195,90 @@ class SQLiteDatabaseService:
                 f"Processing syllabus {syllabus_id}, last accessed {last_accessed}"
             )
 
-            # Get syllabus details using the method that returns the nested structure
-            syllabus = self.get_syllabus_by_id(syllabus_id)  # Returns Dict or None
+            # Get syllabus details (topic, level)
+            syllabus_details = self.get_syllabus_by_id(syllabus_id)
+            if not syllabus_details:
+                logger.warning(f"Could not retrieve details for syllabus {syllabus_id}")
+                continue
 
-            # Guard clause: Skip if syllabus not found
-            if not syllabus:
-                logger.warning(
-                    f"Syllabus details not found for syllabus_id {syllabus_id} listed in progress."
-                )
-                continue # Skip to the next syllabus_row
-
-            # Calculate total lessons using the helper method
-            total_lessons = self._calculate_total_lessons(syllabus, syllabus_id)
-            # Note: The helper now returns 0 on error/invalid structure,
-            # so no need for separate try/except here for calculation.
-
-            # Get completed lessons count
-            progress_entries = self.get_user_syllabus_progress(user_id, syllabus_id)
-            # Use .get() for safer access to dictionary keys
-            completed_lessons = sum(
-                1 for entry in progress_entries if entry.get("status") == "completed"
+            # Calculate progress percentage
+            completed_lessons_query = """
+                SELECT COUNT(up.progress_id)
+                FROM user_progress up
+                JOIN lessons l ON up.lesson_id = l.lesson_id
+                JOIN modules m ON l.module_id = m.module_id
+                WHERE up.user_id = ? AND m.syllabus_id = ? AND up.status = 'completed'
+            """
+            completed_result = self.execute_query(
+                completed_lessons_query, (user_id, syllabus_id), fetch_one=True
             )
+            completed_lessons = completed_result[0] if completed_result else 0
             logger.debug(
                 f"Found {completed_lessons} completed lessons for syllabus {syllabus_id}"
             )
 
+            total_lessons = self._calculate_total_lessons(syllabus_details, syllabus_id)
             progress_percentage = (
-                round((completed_lessons / total_lessons * 100))
-                if total_lessons > 0
-                else 0
+                (completed_lessons / total_lessons * 100) if total_lessons > 0 else 0
             )
 
-            # Append course details (using .get() for safety)
-            in_progress_courses.append(
-                {
-                    "syllabus_id": syllabus_id,
-                    "topic": syllabus.get("topic", "Unknown Topic"), # Safer access
-                    "level": syllabus.get("level", "Unknown Level"), # Safer access
-                    "progress_percentage": progress_percentage,
-                    "completed_lessons": completed_lessons,
-                    "total_lessons": total_lessons,
-                    "last_accessed": last_accessed,
-                    # Add image_url if it exists in your syllabus structure and is needed
-                    # "image_url": syllabus.get("image_url"),
-                }
-            )
+            course_summary = {
+                "syllabus_id": syllabus_id,
+                "topic": syllabus_details.get("topic", "Unknown Topic"),
+                "level": syllabus_details.get("level", "Unknown Level"),
+                "progress_percentage": round(progress_percentage),
+                "last_accessed": last_accessed,
+                "total_lessons": total_lessons,
+                "completed_lessons": completed_lessons,
+            }
+            in_progress_courses.append(course_summary)
 
         logger.debug(f"Returning {len(in_progress_courses)} in-progress courses.")
         return in_progress_courses
 
     # Conversation History methods
-    # Type hints for args and return
+    # Type hints for args
     def save_conversation_message(
         self,
         progress_id: str,
         role: str,
-        message_type: str,
         content: str,
+        timestamp: Optional[datetime] = None,
         metadata: Optional[Dict[str, Any]] = None,
-    ) -> str:
+    ) -> None:
         """
-        Saves a single message to the conversation history table.
+        Saves a single message from a conversation turn to the history.
 
         Args:
             progress_id (str): The ID of the user progress entry this message belongs to.
-            role (str): The role of the message sender ('user', 'assistant', 'system').
-            message_type (str): The type category of the message
-                (e.g., 'CHAT_USER', 'EXERCISE_PROMPT').
+            role (str): 'user' or 'assistant'.
             content (str): The text content of the message.
-            metadata (dict, optional): Additional JSON-serializable metadata.
-
-        Returns:
-            str: The newly created message's ID.
+            timestamp (datetime, optional): When the message occurred. Defaults to now.
+            metadata (dict, optional): Additional structured data related to the message.
         """
         message_id = str(uuid.uuid4())
-        timestamp = datetime.now().isoformat()
+        ts = timestamp or datetime.now(timezone.utc)
+        ts_iso = ts.isoformat()
         metadata_json = json.dumps(metadata) if metadata else None
 
         query = """
             INSERT INTO conversation_history
-            (message_id, progress_id, timestamp, role, message_type, content, metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            (message_id, progress_id, role, content, timestamp, metadata)
+            VALUES (?, ?, ?, ?, ?, ?)
         """
-        params = (
-            message_id,
-            progress_id,
-            timestamp,
-            role,
-            message_type,
-            content,
-            metadata_json,
-        )
+        params = (message_id, progress_id, role, content, ts_iso, metadata_json)
 
         try:
             self.execute_query(query, params, commit=True)
             logger.debug(
                 f"Saved conversation message {message_id} for progress {progress_id}"
             )
-            return message_id
         except Exception as e:
             logger.error(
                 f"Error saving conversation message for progress {progress_id}: {e}",
                 exc_info=True,
             )
-            raise
+            # Decide if we should raise here or just log
 
     # Type hints for args and return
     def get_conversation_history(self, progress_id: str) -> List[Dict[str, Any]]:

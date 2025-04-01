@@ -1,17 +1,19 @@
 """
 Service responsible for generating and retrieving static lesson exposition content.
 """
+
 # pylint: disable=broad-exception-caught
 
 import json
-from typing import Dict, Optional, Tuple, Any # Added Any
+from typing import Any, Dict, Optional, Tuple
 
 from google.api_core.exceptions import ResourceExhausted
-from pydantic import ValidationError
 
 from backend.ai.llm_utils import MODEL as llm_model
 from backend.ai.llm_utils import call_with_retry
 from backend.ai.prompt_loader import load_prompt
+from backend.exceptions import (log_and_propagate, log_and_raise_new,
+                                validate_internal_model)
 from backend.logger import logger
 from backend.models import GeneratedLessonContent, Metadata
 from backend.services.sqlite_db import SQLiteDatabaseService
@@ -30,7 +32,7 @@ class LessonExpositionService:
 
     def __init__(
         self, db_service: SQLiteDatabaseService, syllabus_service: SyllabusService
-    ) -> None: # Added return type hint
+    ) -> None:  # Added return type hint
         """
         Initializes the service with database and syllabus access.
 
@@ -43,7 +45,7 @@ class LessonExpositionService:
 
     async def _generate_and_save_exposition(
         self,
-        syllabus: Dict[str, Any], # Added type parameters
+        syllabus: Dict[str, Any],  # Added type parameters
         lesson_title: str,
         knowledge_level: str,
         syllabus_id: str,
@@ -73,38 +75,39 @@ class LessonExpositionService:
         )
 
         # Previous performance is not relevant for static exposition generation
-        previous_performance: Dict[str, Any] = {} # Added type parameters
+        previous_performance: Dict[str, Any] = {}  # Added type parameters
 
         response_text: str
         try:
             prompt = load_prompt(
                 "generate_lesson_content",
                 topic=syllabus.get("topic", "Unknown Topic"),
-                syllabus_json=json.dumps({"modules": syllabus.get("modules", [])}, indent=2),
+                syllabus_json=json.dumps(
+                    {"modules": syllabus.get("modules", [])}, indent=2
+                ),
                 lesson_name=lesson_title,
                 user_level=knowledge_level,
                 previous_performance_json=json.dumps(previous_performance, indent=2),
                 time_constraint="5 minutes",
             )
             if llm_model is None:
-                raise RuntimeError("LLM model not configured for exposition generation.")
+                raise RuntimeError(
+                    "LLM model not configured for exposition generation."
+                )
             response = call_with_retry(llm_model.generate_content, prompt)
             response_text = response.text
         except ResourceExhausted:
-            logger.error(
-                "LLM call failed after multiple retries due to resource "
-                "exhaustion in exposition generation."
+            log_and_raise_new(
+                exception_type=RuntimeError,
+                exception_message="LLM exposition generation failed due to resource limits.",
+                break_chain=True,  # Explicitly break chain as original did 'from None'
+                exc_info=False,  # Original didn't log stack trace for this specific case
             )
-            raise RuntimeError(
-                "LLM exposition generation failed due to resource limits."
-            ) from None
-        except Exception as e:
-            logger.error(
-                f"LLM call failed during exposition generation: {e}", exc_info=True
+        except Exception as e:  # Keep general Exception catch
+            log_and_propagate(
+                RuntimeError, "LLM call failed during exposition generation", e
             )
-            raise RuntimeError("LLM exposition generation failed") from e
 
-        logger.info("Constructing GeneratedLessonContent from plain text LLM response.")
         try:
             lesson_metadata = Metadata(title=lesson_title)
 
@@ -114,41 +117,37 @@ class LessonExpositionService:
                 exposition_content=response_text.strip(),
                 metadata=lesson_metadata,
             )
-            logger.info("Successfully constructed GeneratedLessonContent object.")
 
         except Exception as construct_err:
-            logger.error(
-                f"Failed to construct GeneratedLessonContent object: {construct_err}",
-                exc_info=True,
+            # Log the response text as an extra detail
+            log_and_propagate(
+                new_exception_type=RuntimeError,
+                new_exception_message="Failed to construct lesson content object from LLM response.",
+                original_exception=construct_err,
+                llm_response_snippet=response_text[:500],  # Add extra context to log
             )
-            logger.error(f"LLM response text was: {response_text[:500]}...")
-            raise RuntimeError(
-                "Failed to construct lesson content object from LLM response."
-            ) from construct_err
 
         try:
             lesson_db_id_int = self.db_service.save_lesson_content(
                 syllabus_id=syllabus_id,
                 module_index=module_index,
                 lesson_index=lesson_index,
-                content=generated_content_object.model_dump(
-                    mode="json"
-                ),
+                content=generated_content_object.model_dump(mode="json"),
             )
             if not lesson_db_id_int:
-                logger.error(
-                    "save_lesson_content did not return a valid integer lesson_id."
+                # Use log_and_raise_new as there's no specific prior exception to chain
+                log_and_raise_new(
+                    exception_type=RuntimeError,
+                    exception_message="Failed to save lesson exposition or retrieve lesson ID.",
+                    exc_info=False,  # No stack trace needed for this logic error
                 )
-                raise RuntimeError(
-                    "Failed to save lesson exposition or retrieve lesson ID."
-                )
-            logger.info(
-                f"Saved new lesson exposition, associated lesson_id: {lesson_db_id_int}"
-            )
             return generated_content_object, lesson_db_id_int
         except Exception as save_err:
-            logger.error(f"Failed to save lesson exposition: {save_err}", exc_info=True)
-            raise RuntimeError("Database error saving lesson exposition") from save_err
+            log_and_propagate(
+                new_exception_type=RuntimeError,
+                new_exception_message="Database error saving lesson exposition",
+                original_exception=save_err,
+            )
 
     # pylint: disable=too-many-branches
     async def get_or_generate_exposition(
@@ -166,11 +165,6 @@ class LessonExpositionService:
             A tuple containing the validated content object (or None if not found/generated)
             and the lesson's database ID (or None).
         """
-        logger.info(
-            f"Getting/Generating exposition: syllabus={syllabus_id}, mod={module_index},"
-            f" lesson={lesson_index}"
-        )
-
         existing_content_obj: Optional[GeneratedLessonContent] = None
         lesson_db_id: Optional[int] = None
 
@@ -179,45 +173,31 @@ class LessonExpositionService:
         )
 
         if content_data_dict:
+            # Use helper to validate and raise specific internal error
+            existing_content_obj = validate_internal_model(
+                GeneratedLessonContent,
+                content_data_dict,
+                context_message="Failed to validate existing lesson exposition from DB",
+            )
+            # Nested try for lesson_id lookup remains
             try:
-                existing_content_obj = GeneratedLessonContent.model_validate(
-                    content_data_dict
+                retrieved_id = self.db_service.get_lesson_id(
+                    syllabus_id, module_index, lesson_index
                 )
-                logger.info(
-                    "Found and validated existing lesson exposition for"
-                    f" {syllabus_id}/{module_index}/{lesson_index}"
-                )
-                try:
-                    retrieved_id = self.db_service.get_lesson_id(
-                        syllabus_id, module_index, lesson_index
-                    )
-                    if isinstance(retrieved_id, int):
-                        lesson_db_id = retrieved_id
-                        logger.debug(
-                            f"Looked up lesson_id {lesson_db_id} via indices for existing content."
-                        )
-                    else:
-                        logger.error(
-                            "Content found, but failed to look up valid "
-                            f"lesson_id via indices. Retrieved: {retrieved_id}"
-                        )
-                except Exception as e:
-                    logger.error(
-                        f"Content found, but error looking up lesson_id via indices: {e}",
-                        exc_info=True
-                    )
-
-            except ValidationError as ve:
+                if isinstance(retrieved_id, int):
+                    lesson_db_id = retrieved_id
+            except Exception as e:
                 logger.error(
-                    f"Failed to validate existing lesson exposition from DB: {ve}",
+                    f"Content found, but error looking up lesson_id via indices: {e}",
                     exc_info=True,
                 )
-                existing_content_obj = None
 
         if existing_content_obj and lesson_db_id is not None:
             if not existing_content_obj.topic or not existing_content_obj.level:
                 try:
-                    syllabus = await self.syllabus_service.get_syllabus_by_id(syllabus_id)
+                    syllabus = await self.syllabus_service.get_syllabus_by_id(
+                        syllabus_id
+                    )
                     if syllabus:
                         if not existing_content_obj.topic:
                             existing_content_obj.topic = syllabus.get(
@@ -240,8 +220,10 @@ class LessonExpositionService:
         try:
             syllabus = await self.syllabus_service.get_syllabus_by_id(syllabus_id)
             if not syllabus:
-                logger.error(f"Syllabus not found for generation: {syllabus_id}")
-                raise ValueError(f"Syllabus {syllabus_id} not found.")
+                log_and_raise_new(
+                    exception_type=ValueError,
+                    exception_message=f"Syllabus not found for generation: {syllabus_id}",
+                )
 
             lesson_details = await self.syllabus_service.get_lesson_details(
                 syllabus_id, module_index, lesson_index
@@ -250,13 +232,17 @@ class LessonExpositionService:
             knowledge_level = syllabus.get("level", "beginner")
 
         except ValueError as e:
-            logger.error(f"Failed to get syllabus/lesson details for generation: {e}")
-            raise ValueError(
-                f"Could not find details for syllabus {syllabus_id},"
-                f" mod {module_index}, lesson {lesson_index}"
-            ) from e
+            log_and_propagate(
+                new_exception_type=ValueError,  # Re-raise
+                new_exception_message=(
+                    f"Could not find details for syllabus {syllabus_id},"
+                    f" mod {module_index}, lesson {lesson_index}"
+                ),
+                original_exception=e,
+            )
 
         try:
+            assert syllabus is not None  # Tell mypy syllabus cannot be None here
             generated_content_obj, new_lesson_db_id = (
                 await self._generate_and_save_exposition(
                     syllabus=syllabus,
@@ -286,25 +272,20 @@ class LessonExpositionService:
         Returns:
             The validated GeneratedLessonContent object or None if not found/invalid.
         """
-        logger.debug(f"Attempting to fetch lesson content for lesson_id: {lesson_id}")
-        content_data_dict = self.db_service.get_lesson_content_by_lesson_pk(
-            lesson_id
-        )
+        content_data_dict = self.db_service.get_lesson_content_by_lesson_pk(lesson_id)
 
         if not content_data_dict:
-            logger.warning(f"No lesson content found for lesson_id: {lesson_id}")
             return None
 
         try:
-            content_obj = GeneratedLessonContent.model_validate(content_data_dict)
-            logger.debug(f"Successfully validated content for lesson_id: {lesson_id}")
-            return content_obj
-        except ValidationError as ve:
-            logger.error(
-                f"Failed to validate lesson content from DB for lesson_id {lesson_id}: {ve}",
-                exc_info=True,
+            # Use helper to validate and raise specific internal error
+            # Note: Changes behavior from returning None to raising an error
+            content_obj = validate_internal_model(
+                GeneratedLessonContent,
+                content_data_dict,
+                context_message=f"Failed to validate lesson content from DB for lesson_id {lesson_id}",
             )
-            return None
+            return content_obj
         except Exception as e:
             logger.error(
                 f"Unexpected error validating content for lesson_id {lesson_id}: {e}",

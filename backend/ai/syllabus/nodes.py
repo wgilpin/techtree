@@ -154,14 +154,12 @@ def _parse_llm_json_response(
         match = re.search(r"```(?:json)?\s*({.*?})\s*```", response_text, re.DOTALL)
         if match:
             json_str = match.group(1)
-            logger.debug("Extracted JSON from markdown block.")
         else:
             json_str = response_text.strip()
             if not (json_str.startswith("{") and json_str.endswith("}")):
                 logger.warning("Response does not appear to be JSON or markdown block.")
                 return None
 
-            logger.debug("Assuming entire response is JSON.")
 
         json_str = re.sub(r"\\n", "", json_str)
         json_str = re.sub(r"\\(?![\"\\/bfnrtu])", "", json_str)
@@ -170,15 +168,12 @@ def _parse_llm_json_response(
         if not isinstance(parsed_json, dict):
             logger.warning(f"Parsed JSON is not a dictionary: {type(parsed_json)}")
             return None
-        logger.debug("Successfully parsed JSON.")
         return parsed_json  # Returns Dict[str, Any]
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse JSON from response: {e}")
-        logger.debug(f"Response text was: {response_text[:500]}...")
         return None
     except Exception as e:
         logger.error(f"Unexpected error during JSON parsing: {e}", exc_info=True)
-        logger.debug(f"Response text was: {response_text[:500]}...")
         return None
 
 
@@ -256,7 +251,6 @@ def generate_syllabus(
         search_context = (
             "No specific search results found. Generate based on general knowledge."
         )
-    logger.debug(f"Context length for LLM: {len(search_context)} chars")
 
     prompt = GENERATION_PROMPT_TEMPLATE.format(
         topic=topic, knowledge_level=knowledge_level, search_context=search_context
