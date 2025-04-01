@@ -18,6 +18,8 @@ from tavily import TavilyClient  # type: ignore
 
 from backend.exceptions import log_and_raise_new
 
+from .prompts import EVALUATE_ANSWER_PROMPT, GENERATE_QUESTION_PROMPT
+
 # Add logger
 logger = logging.getLogger(__name__)
 
@@ -319,32 +321,16 @@ class TechTreeAI:
         for i, result in enumerate(google_results, 1):
             search_context += f"Source {i}:\n{result}\n\n"
 
-        prompt = f"""
-        You are an expert tutor creating questions on the topic of {state['topic']} so
-        you can assess their level of understanding of the topic to decide what help
-        they will need to master it.
-        Assume the user is UK based, and currency is in GBP.
+        questions_asked_str = ", ".join(state["questions_asked"]) or "None"
 
-        The student is at a {state['knowledge_level']} knowledge level.
-        Ask a question on the topic, avoiding questions already asked.
-        Avoid questions if the answer is the name of the topic.
-        Questions should only require short answers, not detailed responses.
-        Never mention the sources, or the provided information,  as the user has no
-        access to the source documents and does not know they exist.
-
-        The question should be at {difficulty_name} difficulty level ({target_difficulty}).
-
-        Use the following information from internet searches to create an accurate and
-        up-to-date question:
-
-        {search_context}
-
-        Format your response as follows:
-        Difficulty: {target_difficulty}
-        Question: [your question here]
-
-        Questions already asked: {', '.join(state['questions_asked']) or 'None'}
-        """
+        prompt = GENERATE_QUESTION_PROMPT.format(
+            topic=state["topic"],
+            knowledge_level=state["knowledge_level"],
+            difficulty_name=difficulty_name,
+            target_difficulty=target_difficulty,
+            search_context=search_context,
+            questions_asked_str=questions_asked_str,
+        )
 
         try:
             response = call_with_retry(MODEL.generate_content, prompt)
@@ -407,37 +393,12 @@ class TechTreeAI:
         for i, result in enumerate(google_results, 1):
             search_context += f"Source {i}:\n{result}\n\n"
 
-        prompt = f"""
-        You are an expert tutor in {state['topic']}.
-        Here is a question that was asked:
-
-        Question: {state['current_question']}
-
-        Here is the student's answer:
-
-        Answer: {answer}
-
-        Use the following information from internet searches to evaluate the answer accurately:
-
-        {search_context}
-
-        Evaluate the answer for correctness and completeness, allowing that only short
-        answers were requested.
-        Provide feedback on the answer, but never mention the sources, or provided information,
-        as the user has no access to the source documents or other information and does not know
-        they exist.
-
-        Important: If the student responds with "I don't know" or similar, the answer is incorrect
-        and this does not need explaining: classify the answer as incorrect return the correct
-        answer as feedback.
-
-        Classify the answer as one of: correct=1, partially correct=0.5, or incorrect=0.
-        Make sure to include the classification explicitly as a number in your response.
-        Respond with the classification: the feedback. For example:
-        1:Correct answer because that is the correct name
-        or
-        0:That is the wrong answer because swans can't live in space
-        """
+        prompt = EVALUATE_ANSWER_PROMPT.format(
+            topic=state["topic"],
+            current_question=state["current_question"],
+            answer=answer,
+            search_context=search_context,
+        )
 
         try:
             response = call_with_retry(MODEL.generate_content, prompt)
