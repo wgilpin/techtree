@@ -1,0 +1,29 @@
+<.header>
+  Syllabus {@syllabus.id}
+  <:subtitle>This is a syllabus record from your database.</:subtitle>
+  <:actions>
+    <.link patch={~p"/syllabi/#{@syllabus}/show/edit"} phx-click={JS.push_focus()}>
+      <.button>Edit syllabus</.button>
+    </.link>
+  </:actions>
+</.header>
+
+<.list>
+  <:item title="Topic">{@syllabus.topic}</:item>
+  <:item title="Level">{@syllabus.level}</:item>
+  <:item title="Duration">{@syllabus.duration}</:item>
+  <:item title="Learning objectives">{@syllabus.learning_objectives}</:item>
+</.list>
+
+<.back navigate={~p"/syllabi"}>Back to syllabi</.back>
+
+<.modal :if={@live_action == :edit} id="syllabus-modal" show on_cancel={JS.patch(~p"/syllabi/#{@syllabus}")}>
+  <.live_component
+    module={TechTreeWeb.SyllabusLive.FormComponent}
+    id={@syllabus.id}
+    title={@page_title}
+    action={@live_action}
+    syllabus={@syllabus}
+    patch={~p"/syllabi/#{@syllabus}"}
+  />
+</.modal>

@@ -1,0 +1,42 @@
+<.header>
+  Listing Course Modules
+  <:actions>
+    <.link patch={~p"/course_modules/new"}>
+      <.button>New Course Module</.button>
+    </.link>
+  </:actions>
+</.header>
+
+<.table
+  id="course_modules"
+  rows={@streams.course_modules}
+  row_click={fn {_id, course_module} -> JS.navigate(~p"/course_modules/#{course_module}") end}
+>
+  <:col :let={{_id, course_module}} label="Title">{course_module.title}</:col>
+  <:col :let={{_id, course_module}} label="Syllabus ID">{course_module.syllabus_id}</:col>
+  <:action :let={{_id, course_module}}>
+    <div class="sr-only">
+      <.link navigate={~p"/course_modules/#{course_module}"}>Show</.link>
+    </div>
+    <.link patch={~p"/course_modules/#{course_module}/edit"}>Edit</.link>
+  </:action>
+  <:action :let={{id, course_module}}>
+    <.link
+      phx-click={JS.push("delete", value: %{id: course_module.id}) |> hide("##{id}")}
+      data-confirm="Are you sure?"
+    >
+      Delete
+    </.link>
+  </:action>
+</.table>
+
+<.modal :if={@live_action in [:new, :edit]} id="course-module-modal" show on_cancel={JS.patch(~p"/course_modules")}>
+  <.live_component
+    module={TechTreeWeb.CourseModuleLive.FormComponent}
+    id={@current_module.id || :new}
+    title={@page_title}
+    action={@live_action}
+    course_module={@current_module}
+    patch={~p"/course_modules"}
+  />
+</.modal>

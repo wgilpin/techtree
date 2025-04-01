@@ -1,0 +1,27 @@
+<.header>
+  Course Module {@current_module.id}
+  <:subtitle>This is a course module record from your database.</:subtitle>
+  <:actions>
+    <.link patch={~p"/course_modules/#{@current_module}/show/edit"} phx-click={JS.push_focus()}>
+      <.button>Edit Course Module</.button>
+    </.link>
+  </:actions>
+</.header>
+
+<.list>
+  <:item title="Title">{@current_module.title}</:item>
+  <:item title="Syllabus ID">{@current_module.syllabus_id}</:item>
+</.list>
+
+<.back navigate={~p"/course_modules"}>Back to course modules</.back>
+
+<.modal :if={@live_action == :edit} id="course-module-modal" show on_cancel={JS.patch(~p"/course_modules/#{@current_module}")}>
+  <.live_component
+    module={TechTreeWeb.CourseModuleLive.FormComponent}
+    id={@current_module.id}
+    title={@page_title}
+    action={@live_action}
+    course_module={@current_module}
+    patch={~p"/course_modules/#{@current_module}"}
+  />
+</.modal>

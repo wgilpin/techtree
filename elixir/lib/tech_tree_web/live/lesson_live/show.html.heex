@@ -1,0 +1,27 @@
+<.header>
+  Lesson {@lesson.id}
+  <:subtitle>This is a lesson record from your database.</:subtitle>
+  <:actions>
+    <.link patch={~p"/lessons/#{@lesson}/show/edit"} phx-click={JS.push_focus()}>
+      <.button>Edit lesson</.button>
+    </.link>
+  </:actions>
+</.header>
+
+<.list>
+  <:item title="Title">{@lesson.title}</:item>
+  <:item title="Course Module ID">{@lesson.course_module_id}</:item>
+</.list>
+
+<.back navigate={~p"/lessons"}>Back to lessons</.back>
+
+<.modal :if={@live_action == :edit} id="lesson-modal" show on_cancel={JS.patch(~p"/lessons/#{@lesson}")}>
+  <.live_component
+    module={TechTreeWeb.LessonLive.FormComponent}
+    id={@lesson.id}
+    title={@page_title}
+    action={@live_action}
+    lesson={@lesson}
+    patch={~p"/lessons/#{@lesson}"}
+  />
+</.modal>

@@ -1,0 +1,44 @@
+<.header>
+  Listing Syllabi
+  <:actions>
+    <.link patch={~p"/syllabi/new"}>
+      <.button>New Syllabus</.button>
+    </.link>
+  </:actions>
+</.header>
+
+<.table
+  id="syllabi"
+  rows={@streams.syllabi}
+  row_click={fn {_id, syllabus} -> JS.navigate(~p"/syllabi/#{syllabus}") end}
+>
+  <:col :let={{_id, syllabus}} label="Topic">{syllabus.topic}</:col>
+  <:col :let={{_id, syllabus}} label="Level">{syllabus.level}</:col>
+  <:col :let={{_id, syllabus}} label="Duration">{syllabus.duration}</:col>
+  <:col :let={{_id, syllabus}} label="Learning objectives">{syllabus.learning_objectives}</:col>
+  <:action :let={{_id, syllabus}}>
+    <div class="sr-only">
+      <.link navigate={~p"/syllabi/#{syllabus}"}>Show</.link>
+    </div>
+    <.link patch={~p"/syllabi/#{syllabus}/edit"}>Edit</.link>
+  </:action>
+  <:action :let={{id, syllabus}}>
+    <.link
+      phx-click={JS.push("delete", value: %{id: syllabus.id}) |> hide("##{id}")}
+      data-confirm="Are you sure?"
+    >
+      Delete
+    </.link>
+  </:action>
+</.table>
+
+<.modal :if={@live_action in [:new, :edit]} id="syllabus-modal" show on_cancel={JS.patch(~p"/syllabi")}>
+  <.live_component
+    module={TechTreeWeb.SyllabusLive.FormComponent}
+    id={@syllabus.id || :new}
+    title={@page_title}
+    action={@live_action}
+    syllabus={@syllabus}
+    patch={~p"/syllabi"}
+  />
+</.modal>
