@@ -50,3 +50,14 @@ repos:
           - --rcfile=pyproject.toml # Assuming pylint config is in pyproject.toml
         files: ^(backend/|frontend/) # Adjust pattern as needed
         # exclude: # Add excludes if necessary
+
+-   repo: local
+    hooks:
+    -   id: pytest
+        name: pytest
+        entry: pytest
+        language: system
+        types: [python]
+        pass_filenames: false
+        # Optionally add stages if you only want it to run on commit, not push, etc.
+        # stages: [commit]
