@@ -48,6 +48,7 @@ repos:
     -   id: pylint
         args:
           - --rcfile=pyproject.toml # Assuming pylint config is in pyproject.toml
+          - --disable=W0511 # Disable fixme warnings
         files: ^(backend/|frontend/) # Adjust pattern as needed
         # exclude: # Add excludes if necessary
 
