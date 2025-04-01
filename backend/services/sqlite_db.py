@@ -517,10 +517,10 @@ class SQLiteDatabaseService:
                 module_summary = module_data.get("summary", "")
 
                 module_query = """
-                    INSERT INTO modules (syllabus_id, module_index, title, summary)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO modules (syllabus_id, module_index, title, summary, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
                 """
-                module_params = (syllabus_id, module_index, module_title, module_summary)
+                module_params = (syllabus_id, module_index, module_title, module_summary, now, now)
                 cursor.execute(module_query, module_params)
                 module_id_result = cursor.execute(
                     "SELECT last_insert_rowid()"
@@ -539,14 +539,16 @@ class SQLiteDatabaseService:
                     lesson_summary = lesson_data.get("summary", "")
 
                     lesson_query = """
-                        INSERT INTO lessons (module_id, lesson_index, title, summary)
-                        VALUES (?, ?, ?, ?)
+                        INSERT INTO lessons (module_id, lesson_index, title, summary, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?)
                     """
                     lesson_params = (
                         module_id,
                         lesson_index,
                         lesson_title,
                         lesson_summary,
+                        now,
+                        now,
                     )
                     cursor.execute(lesson_query, lesson_params)
                     logger.debug(
@@ -1023,12 +1025,15 @@ class SQLiteDatabaseService:
             logger.debug(f"Creating new progress entry: {progress_id}")
             insert_query = """
                 INSERT INTO user_progress
-                (progress_id, user_id, lesson_id, status, created_at, updated_at, lesson_state_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (progress_id, user_id, syllabus_id, module_index, lesson_index, lesson_id, status, created_at, updated_at, lesson_state_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             insert_params = (
                 progress_id,
                 user_id,
+                syllabus_id,  # Added
+                module_index, # Added
+                lesson_index, # Added
                 lesson_id,
                 status,
                 now,
