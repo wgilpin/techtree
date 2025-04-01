@@ -166,10 +166,10 @@ document.addEventListener('DOMContentLoaded', function() {
         chatHistory.appendChild(messageDiv);
     }
 
-    function scrollChatToBottom() {
-        // Only scroll if the user isn't scrolled up significantly
-        // (Avoids annoying scroll jumps if user is reading history)
-        if (chatHistory.scrollHeight - chatHistory.scrollTop - chatHistory.clientHeight < 100) {
+    function scrollChatToBottom(force = false) {
+        // Scroll if forced OR if the user isn't scrolled up significantly
+        // (Avoids annoying scroll jumps if user is reading history, unless forced)
+        if (force || (chatHistory.scrollHeight - chatHistory.scrollTop - chatHistory.clientHeight < 100)) {
              chatHistory.scrollTop = chatHistory.scrollHeight;
         }
     }
@@ -193,7 +193,7 @@ document.addEventListener('DOMContentLoaded', function() {
             // Display user message immediately
             appendMessage('user', userMessage);
             messageInput.value = ''; // Clear input field
-            scrollChatToBottom();
+            scrollChatToBottom(true); // Force scroll after user message
 
             // Show thinking indicator and disable input/button
             thinkingIndicator.style.display = 'inline-block';
@@ -266,7 +266,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 messageInput.disabled = false;
                 chatForm.querySelector('button[type="submit"]').disabled = false;
                 messageInput.focus(); // Set focus back to input
-                scrollChatToBottom(); // Scroll again after adding AI response
+                scrollChatToBottom(true); // Force scroll after adding AI response
             }
         });
     }
@@ -326,7 +326,7 @@ document.addEventListener('DOMContentLoaded', function() {
         } finally {
             button.disabled = false;
             onDemandThinkingIndicator.remove(); // Remove indicator
-            scrollChatToBottom(); // Scroll chat in case error messages were added
+            scrollChatToBottom(true); // Force scroll after on-demand item/error
         }
     }
 
@@ -375,13 +375,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
                         // Success: Now append visually
                         appendMessage('assistant', originalContent);
-                        scrollChatToBottom();
+                        scrollChatToBottom(true); // Force scroll after re-run append
 
                     } catch (error) {
                         console.error('Error saving re-run message:', error);
                         // Optionally inform the user via an alert or a temporary message in the chat
                         appendMessage('system', `Error: Could not save the re-run message. ${error.message}`);
-                        scrollChatToBottom();
+                        scrollChatToBottom(true); // Force scroll after re-run error append
                     } finally {
                         // Re-enable button after a short delay, regardless of success/failure
                         setTimeout(() => { button.disabled = false; }, 500);
@@ -445,7 +445,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Initial scroll to bottom if there's history
-    scrollChatToBottom();
+    scrollChatToBottom(true); // Force scroll on initial load
 });
 </script>
 <style>
