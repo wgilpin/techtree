@@ -21,6 +21,10 @@ Generate ONE new knowledge assessment question relevant to the key concepts in t
 - **Clarity:** The question must be clear, unambiguous, and directly assess knowledge.
 - **Appropriateness:** Difficulty should align with the `user_level`.
 
+
+## Formatting Instructions
+${latex_formatting_instructions}
+
 ## Output Format
 Return a SINGLE JSON object representing the assessment question, following this structure:
 ```json

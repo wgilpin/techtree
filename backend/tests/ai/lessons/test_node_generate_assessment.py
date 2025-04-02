@@ -13,6 +13,8 @@ from backend.models import (
     GeneratedLessonContent,
     LessonState,
 )
+from backend.ai.prompt_formatting import LATEX_FORMATTING_INSTRUCTIONS
+
 
 
 class TestGenerateAssessmentNode:
@@ -93,6 +95,7 @@ class TestGenerateAssessmentNode:
             user_level="intermediate",
             exposition_summary="Lesson content here.",
             existing_question_descriptions_json="[]",
+            latex_formatting_instructions=LATEX_FORMATTING_INSTRUCTIONS,
         )
         mock_call_llm.assert_called_once_with(
             "mocked_gen_q_prompt", validation_model=AssessmentQuestion, max_retries=2

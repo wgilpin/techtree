@@ -15,6 +15,8 @@ from backend.models import (
     LessonState,
     Option,
 )
+from backend.ai.prompt_formatting import LATEX_FORMATTING_INSTRUCTIONS
+
 
 
 class TestEvaluateAnswerNode:
@@ -108,6 +110,7 @@ class TestEvaluateAnswerNode:
             task_details=ANY,
             correct_answer_details="Correct Answer/Criteria: 4",
             user_answer="4",
+            latex_formatting_instructions=LATEX_FORMATTING_INSTRUCTIONS,
         )
         mock_call_llm.assert_called_once_with("mocked_eval_prompt", max_retries=2)
 
@@ -167,6 +170,7 @@ class TestEvaluateAnswerNode:
             task_details=ANY,
             correct_answer_details="Correct Answer: Language", # Match actual call
             user_answer="A",
+            latex_formatting_instructions=LATEX_FORMATTING_INSTRUCTIONS,
         )
         mock_call_llm.assert_called_once_with("mocked_eval_prompt", max_retries=2)
 

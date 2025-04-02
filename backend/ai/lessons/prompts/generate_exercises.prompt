@@ -21,6 +21,10 @@ Generate ONE new active learning exercise relevant to the lesson content (${less
 - **Clarity:** Instructions must be clear and unambiguous.
 - **Appropriateness:** Difficulty should align with the `user_level`.
 
+
+## Formatting Instructions
+${latex_formatting_instructions}
+
 ## Output Format
 Return a SINGLE JSON object representing the exercise, following this structure:
 ```json

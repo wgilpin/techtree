@@ -18,6 +18,8 @@ from backend.logger import logger
 from backend.models import GeneratedLessonContent, Metadata
 from backend.services.sqlite_db import SQLiteDatabaseService
 from backend.services.syllabus_service import SyllabusService
+from backend.ai.prompt_formatting import LATEX_FORMATTING_INSTRUCTIONS
+
 
 
 class LessonExpositionService:
@@ -89,6 +91,7 @@ class LessonExpositionService:
                 user_level=knowledge_level,
                 previous_performance_json=json.dumps(previous_performance, indent=2),
                 time_constraint="5 minutes",
+                latex_formatting_instructions=LATEX_FORMATTING_INSTRUCTIONS,
             )
             if llm_model is None:
                 raise RuntimeError(

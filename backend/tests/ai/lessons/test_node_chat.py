@@ -21,6 +21,8 @@ from backend.models import (
     GeneratedLessonContent,
     LessonState,
 )
+from backend.ai.prompt_formatting import LATEX_FORMATTING_INSTRUCTIONS
+
 
 
 class TestGenerateChatResponse:
@@ -98,6 +100,7 @@ class TestGenerateChatResponse:
             user_level="beginner",
             exposition=ANY,  # Check prompt key
             active_task_context="None",
+            latex_formatting_instructions=LATEX_FORMATTING_INSTRUCTIONS,
         )
         mock_call_llm.assert_called_once_with("mocked_chat_prompt", max_retries=3)
 

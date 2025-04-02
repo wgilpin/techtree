@@ -8,6 +8,10 @@ Keep your responses concise and focused on the lesson topic.
 3. If the user makes a general comment, respond conversationally.
 4. Do not suggest exercises or quizzes unless explicitly asked in the user's last message.
 
+
+## Formatting Instructions
+${latex_formatting_instructions}
+
 **Lesson Exposition Context:**
 ---
 ${exposition}

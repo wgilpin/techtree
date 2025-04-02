@@ -14,6 +14,8 @@ from backend.models import (
     GeneratedLessonContent,
     LessonState,
 )
+from backend.ai.prompt_formatting import LATEX_FORMATTING_INSTRUCTIONS
+
 
 
 class TestGenerateExerciseNode:
@@ -94,6 +96,7 @@ class TestGenerateExerciseNode:
             exposition_summary="Lesson content here.",
             syllabus_context="Module: Module Gen, Lesson: Gen Ex Lesson",
             existing_exercise_descriptions_json="[]",
+            latex_formatting_instructions=LATEX_FORMATTING_INSTRUCTIONS,
         )
         mock_call_llm.assert_called_once_with(
             "mocked_gen_ex_prompt", validation_model=Exercise, max_retries=2

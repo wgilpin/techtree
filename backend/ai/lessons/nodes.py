@@ -17,6 +17,8 @@ from backend.models import (
     GeneratedLessonContent,
     IntentClassificationResult,
 )
+from backend.ai.prompt_formatting import LATEX_FORMATTING_INSTRUCTIONS
+
 
 logger = logging.getLogger(__name__)
 
@@ -248,6 +250,7 @@ def generate_chat_response(
             user_level=user_level,
             exposition=exposition_summary,
             active_task_context=active_task_context,
+            latex_formatting_instructions=LATEX_FORMATTING_INSTRUCTIONS,
         )
         ai_response_content = call_llm_plain_text(prompt, max_retries=3)
 
@@ -386,6 +389,7 @@ def evaluate_answer(
             task_details=task_details,
             correct_answer_details=correct_answer_details,
             user_answer=user_answer,
+            latex_formatting_instructions=LATEX_FORMATTING_INSTRUCTIONS,
         )
         evaluation_feedback_content = call_llm_plain_text(prompt, max_retries=2)
         if evaluation_feedback_content is None:
@@ -485,6 +489,7 @@ def generate_new_exercise(
             exposition_summary=exposition_summary,
             syllabus_context=syllabus_context,
             existing_exercise_descriptions_json=json.dumps(existing_exercise_ids),
+            latex_formatting_instructions=LATEX_FORMATTING_INSTRUCTIONS,
         )
         new_exercise_result = call_llm_with_json_parsing(
             prompt, validation_model=Exercise, max_retries=2
@@ -626,6 +631,7 @@ def generate_new_assessment(
             user_level=user_level,
             exposition_summary=exposition_summary,
             existing_question_descriptions_json=json.dumps(existing_assessment_ids),
+            latex_formatting_instructions=LATEX_FORMATTING_INSTRUCTIONS,
         )
         new_assessment_result = call_llm_with_json_parsing(
             prompt, validation_model=AssessmentQuestion, max_retries=2
